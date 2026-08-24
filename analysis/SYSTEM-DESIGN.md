@@ -423,6 +423,119 @@ correlate at **1.000 with zero phase difference** and zero broadband lag. The mu
 inaudible; it performs routing and nothing else. An emulation needs slot *routing* and slot
 *accumulation*, but no slot *timing*.
 
+### 5.3 Selecting a patch, and what MIDI program change really does `[C]`
+
+`[C]` **MIDI program change does not select a patch.** It selects a **part's TONE** — the 99
+internal tones (`0 = A. Piano 1` … `98 = Drums`, listed in `reference/U-110.ins`, taken from
+OM p.86). Sending one leaves the display on the same patch name with a **`TEMP:`** prefix,
+because the patch has become an edited temporary copy with one part's tone replaced. Patches
+are **panel-only**: `[INC]` / `[DEC]` from the play screen.
+
+Three facts an automated run has to respect:
+
+- The current patch number is in **battery-backed RAM**, saved by MAME on exit. Successive
+  runs therefore start wherever the previous one finished.
+- `[INC]`/`[DEC]` **wrap modulo 64**, so no number of presses can home the selection —
+  70 × `[DEC]` from P-04 lands on P-62, not P-01. A known starting patch is the only way to
+  address one absolutely.
+- Start from a scratch NVRAM directory (`-nvram_directory`) to get a deterministic P-01.
+
+`tools/select_patch.lua` does this (`U110_PATCH=4 mame u110 -nvram_directory /tmp/nv
+-autoboot_script tools/select_patch.lua`). Two MAME Lua traps it documents: the handle from
+`add_machine_frame_notifier` **must be kept alive** or the callback is silently unsubscribed
+with no error, and the key state must be **re-asserted every frame** — releasing once and
+returning early leaves the firmware seeing a held key, which auto-repeats.
+
+`[C]` **This confirmed the routing chain end-to-end.** Selecting P-04 Wide Piano makes the
+firmware write `10 20 01 01 02 02 04 08` to `0x1F00`-`0x1F07` — exactly preset **19**, which
+is what that patch's header byte `+0x0E` predicts. Patch byte -> preset table at `0xA8B6` ->
+slot registers, verified in emulation rather than by reading code. Wide Piano also brings all
+six parts live on one MIDI channel (`.1.1.1.1.1.1`), key-split into six zones at notes 36, 48,
+60, 72 and 84, each with a distinct `+0x0B` value (`00, 80, 40, 60, A0, 20`) — the per-part
+pan that gives the patch its name.
+
+### 5.4 Output assignment — **solved from the Owner's Manual** `[C]` `[S]`
+
+`[S]` OM p.5 "Patch Setting Chart (Factory Preset)" gives, for every factory patch, each
+part's **Tone Name / Output Assign / MIDI Channel / Key Range**, plus an **Output Mode**
+column. For P-04 Wide Piano: six parts, all A.PIANO 2, key ranges `C-1..B1`, `C2..B2`,
+`C3..B3`, `C4..B4`, `C5..B5`, `C6..G9`, and Output Assigns **1, 5, 3, 4, 6, 2**.
+
+`[C]` **Two patch fields decoded against that chart:**
+
+| field | meaning | check |
+|---|---|---|
+| part byte `+0x0B` **>> 5** | **Output Assign**, 0-5 → outputs 1-6 | Wide Piano `00 80 40 60 A0 20` >> 5 = `0 4 2 3 5 1` → **1, 5, 3, 4, 6, 2** — matches the chart exactly |
+| patch byte `+0x0E` **+ 1** | **Output Mode** | Ac.Piano 21→**22**, Wide Piano 19→**20**, Double A.P 7→**8**, all matching the chart |
+
+So the assignment is **per part, fixed, and readable straight from the patch data**. Ordered by
+ascending key range, Wide Piano's outputs run 1, 5, 3, 4, 6, 2 — a deliberate spread, which is
+what the patch is named for.
+
+#### Correction: an earlier reading here was wrong `[C]`
+
+This section previously concluded that a note's output followed from whichever voice the
+allocator happened to pick, so the same key would pan differently on successive presses.
+**That is wrong** — a U-110 owner confirms the panning is fixed and does not move at all, and
+the chart above shows why: the assignment is a property of the part, not of the voice.
+
+The error came from a test that could not have detected the truth. I compared registers across
+three plays of the *same note* on different voices, found them byte-identical, and read that as
+"no output field exists". But an assignment that is **per part** is identical across plays of
+the same note *by definition*, so that comparison excludes nothing. Testing across *parts* was
+the discriminating experiment, and it was the one I had already run and set aside.
+
+#### The mechanism: Output Modes are **voice groups** `[S]` `[C]`
+
+`[S]` OM p.35 "Output Modes" lists **50 modes** — exactly the size of the preset table at
+`0xA8B6`, with **mode = table index + 1**. Each row gives six "Voice Group" columns holding
+**voice counts**, summing to 31:
+
+| mode | group sizes | |
+|---|---|---|
+| 1 | 31 | one group, everything to output 1 |
+| 20 | 7, 8, 4, 4, 4, 4 | **Wide Piano** |
+| 21 | `<L31> <R31>` | |
+| 22 | `M31` | **Ac.Piano** and most single-part patches |
+| 50 | `M8`, 7, 8, 4, 4 | |
+
+So a mode **partitions the 31 voices into contiguous blocks**, and **Output Assign N selects
+group N**. The firmware allocates a note a free voice *from that group*.
+
+`[C]` **Verified against measurement.** Mode 20 gives groups `1-7 | 8-15 | 16-19 | 20-23 |
+24-27 | 28-31`. Every one of Wide Piano's six parts landed in the group its Output Assign
+names:
+
+| part | assign | group | observed voices |
+|---|---|---|---|
+| 1 | 1 | 1-7 | 1, 2 |
+| 6 | 2 | 8-15 | 8, 9 |
+| 3 | 3 | 16-19 | 16, 17 |
+| 4 | 4 | 20-23 | 20, 21 |
+| 2 | 5 | 24-27 | 24, 25 |
+| 5 | 6 | 28-31 | 28, 29 |
+
+Voices are numbered **1-31**; voice 0 was never allocated in any run.
+
+`[C]` This also explains the earlier confusion. Replaying one note took voices 1,2 → 3,4 →
+5,6 → 1,7 — **all inside group 1**. Allocation is round-robin *within the group*, so the
+output never changes and the pan is fixed, exactly as a U-110 owner reports. Ac.Piano is
+mode 22 = `M31`: a single group of all 31 voices, mono and centred, which is why it draws
+voices 1-6 freely and why its chart row shows only part 1.
+
+`[I]` The footnote to the table: *"In the Output modes 21 to 50, Multi Outputs 1 and 2 are
+regarded as the same Voice Group, and effect can be turned on or off. The one without effect
+(M) is set to the center position of the sound imaging, and the one with effect is stereo
+output (L and R)."* So `M` groups are centred and dry, `L`/`R` groups are the wet stereo pair —
+which is where IC17's effect RAM enters, still unmodelled.
+
+`[I]` How the eight bytes at `0x1F00`-`0x1F07` encode a group partition is only partly worked
+out. For mode 20 they read as eight voice-quartets with the slot for voice *v* at register
+`((v >> 2) + 2) mod 8`, which reproduces the group → output mapping for all 31 voices. Mode 22
+does not fit that rule (its single non-zero byte would leave the voices it actually uses
+unrouted), so the effect modes evidently route differently. **Not needed for emulation:** the
+mode table plus Output Assign gives the part → output mapping directly.
+
 ### 5.2 The anti-aliasing filter `[S]`
 
 Fig. 4 gives IC30-35 (uPC4570) as two active sections plus an output RC:

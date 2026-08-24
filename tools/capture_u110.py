@@ -22,8 +22,10 @@ Notes
   does NOT send any Roland DT1 SysEx: the U-110's SysEx address map is not established
   here, and a wrong address would write to your unit's patch memory.  (For the record,
   the firmware expects F0 41 <dev> 23 ... -- manufacturer 0x41, model ID 0x23.)
-* Nothing is written to the U-110.  Patch selection is by Program Change only, which is
-  not persistent.
+* Program Change on a part's channel selects that part's **TONE** (0-98, the names in
+  reference/U-110.ins), NOT a patch.  The U-110's patches are panel-only; sending a
+  program change leaves the display on the same patch name with a "TEMP:" prefix.
+  The numbers below are therefore tone numbers.
 """
 
 import argparse, sys, time, threading, queue, wave
@@ -38,17 +40,17 @@ OUT_LOG = 'u110_capture.txt'
 # Kept deliberately sparse: single notes with silence between them, so each can be
 # analysed in isolation for pitch, envelope and noise floor.
 SEQUENCE = [
-    (0,  'P-01 Ac.Piano',  [(36, 100, 3.0, 1.0), (48, 100, 3.0, 1.0),
+    (0,  'A. Piano 1',    [(36, 100, 3.0, 1.0), (48, 100, 3.0, 1.0),
                             (60, 100, 3.0, 1.0), (72, 100, 3.0, 1.0),
                             (84, 100, 3.0, 1.5)]),
-    (0,  'P-01 Ac.Piano',  [(60,  40, 3.0, 1.0), (60, 127, 3.0, 1.5)]),   # velocity pair
-    (45, 'P-46 Flute',     [(69, 100, 4.0, 1.0),                          # A4 = tuning ref
+    (0,  'A. Piano 1',    [(60,  40, 3.0, 1.0), (60, 127, 3.0, 1.5)]),   # velocity pair
+    (94, 'Flute 1',     [(69, 100, 4.0, 1.0),                          # A4 = tuning ref
                             (60, 100, 3.0, 1.0), (72, 100, 3.0, 1.5)]),
-    (30, 'P-31 Strings',   [(48, 100, 4.0, 1.0), (60, 100, 4.0, 1.5)]),
-    (19, 'P-20 Slap Bass', [(36, 110, 3.0, 1.0), (43, 110, 3.0, 1.0),
+    (58, 'Strings 1',     [(48, 100, 4.0, 1.0), (60, 100, 4.0, 1.5)]),
+    (32, 'Slap 1',      [(36, 110, 3.0, 1.0), (43, 110, 3.0, 1.0),
                             (48, 110, 3.0, 1.5)]),
-    (10, 'P-11 Vibraphone',[(60, 100, 4.0, 1.5)]),
-    (48, 'P-49 Drums',     [(36, 110, 1.5, 0.5), (38, 110, 1.5, 0.5),
+    (15, 'Vib 1',      [(60, 100, 4.0, 1.5)]),
+    (98, 'Drums',           [(36, 110, 1.5, 0.5), (38, 110, 1.5, 0.5),
                             (42, 110, 1.5, 1.5)]),
 ]
 
