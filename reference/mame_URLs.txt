@@ -1,0 +1,5 @@
+CM-32P
+https://github.com/mamedev/mame/blob/master/src/mame/roland/roland_cm32p.cpp
+
+https://github.com/denjhang/MAmidiMEmo
+
