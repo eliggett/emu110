@@ -1,0 +1,113 @@
+U-110 capture
+sample rate 48000, channels 2, duration 369.31 s
+MIDI port: UA-25:UA-25 MIDI 1 20:0
+part channel 1, control channel 16
+peak -10.9 dBFS, 0 clipped samples
+lead silence 3.0 s (noise-floor reference)
+NOTE: times below are when this script SENT each message; the U-110 acts
+      on it about 0.2 s later.  Measure onsets from the audio.
+
+segments
+  01_piano_scale.wav           3.002 ..   27.320
+  02_piano_velocity.wav       27.323 ..   39.633
+  03_flute.wav                39.635 ..   56.950
+  04_strings1.wav             56.952 ..   71.264
+  05_slap.wav                 71.266 ..   87.580
+  06_vibes.wav                87.581 ..   96.888
+  07_drums.wav                96.890 ..  107.698
+  08_choir3_pingpong.wav     107.700 ..  140.525
+  09_strings3_pingpong.wav   140.528 ..  173.357
+  10_choir3_sustain.wav      173.360 ..  211.695
+  11_fing_bass.wav           211.698 ..  231.568
+  12_fless_bass.wav          231.570 ..  251.439
+  13_shakuhachi.wav          251.441 ..  272.510
+  14_fantasy.wav             272.513 ..  305.995
+  15_wide_piano_zones.wav    305.997 ..  330.020
+  16_wide_piano_chord.wav    330.023 ..  341.532
+  17_wide_piano_jazz.wav     341.534 ..  367.651
+
+time      event
+   3.002  -- patch P-01 on ch 16 --
+   3.002  -- tone 0 on ch 1 --
+   4.303  A. Piano 1               note  36 vel 100 hold 3.0s
+   8.308  A. Piano 1               note  48 vel 100 hold 3.0s
+  12.312  A. Piano 1               note  60 vel 100 hold 3.0s
+  16.316  A. Piano 1               note  72 vel 100 hold 3.0s
+  20.318  A. Piano 1               note  84 vel 100 hold 3.0s
+  27.323  -- patch P-01 on ch 16 --
+  27.323  -- tone 0 on ch 1 --
+  28.624  A. Piano 1               note  60 vel  40 hold 3.0s
+  32.628  A. Piano 1               note  60 vel 127 hold 3.0s
+  39.635  -- patch P-01 on ch 16 --
+  39.635  -- tone 94 on ch 1 --
+  40.936  Flute 1                  note  69 vel 100 hold 4.0s
+  45.941  Flute 1                  note  60 vel 100 hold 3.0s
+  49.945  Flute 1                  note  72 vel 100 hold 3.0s
+  56.952  -- patch P-01 on ch 16 --
+  56.952  -- tone 58 on ch 1 --
+  58.254  Strings 1 (ping-pong loop) note  48 vel 100 hold 4.0s
+  63.258  Strings 1 (ping-pong loop) note  60 vel 100 hold 4.0s
+  71.266  -- patch P-01 on ch 16 --
+  71.266  -- tone 32 on ch 1 --
+  72.567  Slap 1                   note  36 vel 110 hold 3.0s
+  76.572  Slap 1                   note  43 vel 110 hold 3.0s
+  80.575  Slap 1                   note  48 vel 110 hold 3.0s
+  87.581  -- patch P-01 on ch 16 --
+  87.581  -- tone 15 on ch 1 --
+  88.882  Vib 1                    note  60 vel 100 hold 4.0s
+  96.890  -- patch P-01 on ch 16 --
+  96.890  -- tone 98 on ch 1 --
+  98.191  Drums                    note  36 vel 110 hold 1.5s
+ 100.193  Drums                    note  38 vel 110 hold 1.5s
+ 102.196  Drums                    note  42 vel 110 hold 1.5s
+ 107.700  -- patch P-01 on ch 16 --
+ 107.700  -- tone 56 on ch 1 --
+ 109.002  Choir 3 (ping-pong loop) note  48 vel 100 hold 8.0s
+ 118.511  Choir 3 (ping-pong loop) note  60 vel 100 hold 8.0s
+ 128.018  Choir 3 (ping-pong loop) note  72 vel 100 hold 8.0s
+ 140.528  -- patch P-01 on ch 16 --
+ 140.528  -- tone 60 on ch 1 --
+ 141.829  Strings 3 (ping-pong loop) note  48 vel 100 hold 8.0s
+ 151.338  Strings 3 (ping-pong loop) note  60 vel 100 hold 8.0s
+ 160.847  Strings 3 (ping-pong loop) note  72 vel 100 hold 8.0s
+ 173.360  -- patch P-01 on ch 16 --
+ 173.360  -- tone 56 on ch 1 --
+ 174.661  Choir 3 (long hold)      note  55 vel 100 hold 15.0s
+ 191.678  Choir 3 (long hold)      note  67 vel 100 hold 15.0s
+ 211.698  -- patch P-23 on ch 16 --
+ 212.699  P-23 Fing Bass           note  28 vel 100 hold 0.3s
+ 213.500  P-23 Fing Bass           note  33 vel 100 hold 0.3s
+ 214.301  P-23 Fing Bass           note  38 vel 100 hold 0.3s
+ 215.103  P-23 Fing Bass           note  43 vel 100 hold 0.3s
+ 216.354  P-23 Fing Bass           note  28 vel 100 hold 5.0s
+ 222.561  P-23 Fing Bass           note  40 vel 100 hold 5.0s
+ 231.570  -- patch P-25 on ch 16 --
+ 232.572  P-25 Fless Bass          note  28 vel 100 hold 0.3s
+ 233.373  P-25 Fless Bass          note  33 vel 100 hold 0.3s
+ 234.174  P-25 Fless Bass          note  38 vel 100 hold 0.3s
+ 234.975  P-25 Fless Bass          note  43 vel 100 hold 0.3s
+ 236.226  P-25 Fless Bass          note  28 vel 100 hold 5.0s
+ 242.432  P-25 Fless Bass          note  40 vel 100 hold 5.0s
+ 251.441  -- patch P-48 on ch 16 --
+ 252.442  P-48 Shakuhachi          note  62 vel 100 hold 0.3s
+ 253.243  P-48 Shakuhachi          note  67 vel 100 hold 0.3s
+ 254.044  P-48 Shakuhachi          note  74 vel 100 hold 0.3s
+ 255.296  P-48 Shakuhachi          note  62 vel 100 hold 6.0s
+ 262.503  P-48 Shakuhachi          note  74 vel 100 hold 6.0s
+ 272.513  -- patch P-52 on ch 16 --
+ 273.514  P-52 Fantasy             note  48 vel 100 hold 0.3s
+ 274.315  P-52 Fantasy             note  60 vel 100 hold 0.3s
+ 275.567  P-52 Fantasy             note  48 vel 100 hold 8.0s
+ 284.776  P-52 Fantasy             note  60 vel 100 hold 8.0s
+ 293.985  P-52 Fantasy             note  72 vel 100 hold 8.0s
+ 305.997  -- patch P-04 on ch 16 --
+ 306.998  Wide Piano (P-04)        note  30 vel 100 hold 2.5s
+ 310.302  Wide Piano (P-04)        note  40 vel 100 hold 2.5s
+ 313.605  Wide Piano (P-04)        note  52 vel 100 hold 2.5s
+ 316.908  Wide Piano (P-04)        note  64 vel 100 hold 2.5s
+ 320.212  Wide Piano (P-04)        note  76 vel 100 hold 2.5s
+ 323.516  Wide Piano (P-04)        note  90 vel 100 hold 2.5s
+ 330.023  -- patch P-04 on ch 16 --
+ 331.023  Wide Piano (P-04)        score, 12 events, 6.0s
+ 341.534  -- patch P-04 on ch 16 --
+ 342.535  Wide Piano (P-04)        score, 104 events, 20.6s

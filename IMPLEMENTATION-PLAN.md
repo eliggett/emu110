@@ -55,11 +55,14 @@ The `±0x7FF` clamp is a band-aid over an accumulator that drifts, and `cm32p` s
 `MACHINE_IMPERFECT_SOUND` because of it. Reclassify from **Solved** to
 **implemented-but-known-wrong**; it is §4's single real work item.
 
-### 0.3 The stale 32 kHz line
+### 0.3 The stale 32 kHz line — **inverted; the "stale" line was the correct one** `[C]`
 
-`EMULATOR-PLAN.md:119` still asserts *"Engine sample rate: 32,000 Hz — confirmed …
-34,816,000 / 1088"*. Corrections entry #13 retired that reasoning; §1 of the same file says
-34,000 Hz. Line 119 is a leftover and contradicts its own document.
+> This item read: *"`EMULATOR-PLAN.md:119` still asserts 32,000 Hz from `34,816,000 / 1088`.
+> Corrections entry #13 retired that reasoning; §1 of the same file says 34,000 Hz. Line 119
+> is a leftover."* **Backwards.** Real hardware settled it at **32,000 Hz**: with MAME's
+> `/1024` the emulator ran +104 cents sharp and `1200 * log2(34000/32000) = +104.96`. Line 119
+> was not a leftover, it was right, and #13 had discarded a correct derivation because an
+> implementation disagreed with it. Both files now say 32 kHz. See correction #22.
 
 `EMULATOR-PLAN.md` §4 as a whole is stale — it is written as "the research phase" with work
 items 1 and 2 being the two things §0 of that file declares solved.
@@ -92,8 +95,9 @@ Verified running, with **no ROM patches**:
    real enable and `check_irq()` already honours it, so the gate was redundant as well as
    wrong. **This is very likely the same wall the CM-32P driver papers over with a ROM patch
    in `machine_start()`**, and it is the most plausible upstream contribution here.
-2. **`34.816 MHz` added to `emu/xtal.cpp`.** The running device now reports
-   `Clock 17408000, Rate 34000`, confirming §4.2's arithmetic if not yet its tuning.
+2. **`34.816 MHz` added to `emu/xtal.cpp`.** The running device reported
+   `Clock 17408000, Rate 34000` at this stage. `[C]` The rate was later corrected to
+   **32,000 Hz** via `set_rate_divider(1088)` — see §0.3 and correction #22.
 3. **The CPU's wave-ROM read port must wrap at 18 bits before the bank is OR'd in.** The
    firmware asks for logical address 0 by parking at `0 - 2`, which sign-extends through its
    `SHRAL` to `phase = 0xFFFF8000`; without the wrap, `(phase >> 14) + 2` lands a bank away
@@ -393,11 +397,12 @@ Not research, but not free either. One genuinely open item, now with a numerical
 
 ### 4.1 Wire it up (mechanical)
 
-`MB87419_MB87420` at `34.816_MHz_XTAL` → 34,000 Hz by the device's own
-`clock() / 2 / 512`. `int_callback` → `EXTINT_LINE` (§3.3). `pcm` region per §2.3.
+`MB87419_MB87420` at `34.816_MHz_XTAL`. `[C]` The device's own `clock() / 2 / 512` gives
+34,000 Hz, which is **wrong for the U-110**; the driver overrides it with
+`set_rate_divider(1088)` for 32,000 Hz (§0.3). `int_callback` → `EXTINT_LINE` (§3.3). `pcm` region per §2.3.
 Register adapter per §2.2. Nothing here is invention.
 
-### 4.2 Resolve the 34 kHz / 32 kHz tuning question `[I]` — do this first
+### 4.2 Resolve the 34 kHz / 32 kHz tuning question ~~`[I]`~~ — **CLOSED: 32,000 Hz** `[C]`
 
 The device derives 34,000 Hz from the U-110's 34.816 MHz crystal, but MAME documents the
 sample table's reference-note field as *"when played back at 32000 Hz"* — and that field
@@ -413,6 +418,12 @@ reference note and measure. Settle it before touching the decoder, or every deco
 experiment inherits an unknown pitch offset.
 
 ### 4.3 Fix the differential decoder ← the real work
+
+> `[C]` **SUPERSEDED — solved.** The format is an 8-bit float (sign + 3-bit exponent +
+> 4-bit mantissa on the magnitude), and it was settled not by the scoring harness below but
+> by the U-110's own Sound Check tone, whose correct output is a known pure sine — so the
+> transfer curve could be read off directly. See §3 of `ROM-ANALYSIS.md` and correction #30.
+> The plan below is kept as a record of the approach that did **not** settle it.
 
 Method, following directly from §1.2:
 
@@ -441,12 +452,17 @@ explicitly rather than discovering it at the 32nd note.
 
 ### 4.5 Output stage
 
-`BU3905` for `0x1F00-0x1F08`, eight routing registers from the table at `0xA8B6`. Six
-individual outputs plus stereo mix. The `[I]` field meaning of the eight routing bytes
-(`SYSTEM-DESIGN.md` §7 question 5) is now trivially answerable: step patch header byte
-`+0x0E` and watch which of the six outputs carry signal.
+> `[C]` **SUPERSEDED — solved**, see §4.6. Routing is per **part**, from patch byte
+> `+0x0B >> 5` (Output Assign), with `+0x0E + 1` giving the Owner's Manual Output Mode that
+> partitions the 31 voices into groups. The prediction below — that stepping `+0x0E` would
+> answer it — was right in spirit, but the field that mattered was `+0x0B`.
+>
+> The line "the six analog LPFs are low value; skip until it sounds right digitally" was
+> **wrong**: without the reconstruction filter the emulator runs **24-30 dB hot above 2 kHz**
+> against hardware. It is the single largest spectral error remaining.
 
-The six analog LPFs are low value; skip until it sounds right digitally.
+`BU3905` for `0x1F00-0x1F08`, eight routing registers from the table at `0xA8B6`. Six
+individual outputs plus stereo mix.
 
 ---
 
@@ -464,8 +480,9 @@ questions that months of metric-fitting had not.
 | **Engine rate** | **32,000 Hz** = `34,816,000 / 1088`. MAME's `/1024` made the emulator +104 cents sharp. The original derivation was right and correction #13 was wrong. |
 | **Sample format** | **8-bit float: sign + 3-bit exponent + 4-bit mantissa**, applied to the magnitude of the two's complement byte; full scale ±1984. MAME's `decode_sample()` was already correct — only its `+=` (delta) was wrong. Sample 212 decodes to a sine at 0.99975 with h3 at −66.7 dB, against −15.3 dB read linearly. See `ROM-ANALYSIS.md` §3 and correction #30. |
 | Absolute tuning | **A = 440 Hz** (±2.5 cents across five octaves, patches without chorus). Not A442. |
+| Voice numbering | Playing voices are **1-31**. **Voice 0 is the CPU's wave-ROM read port** — the CPU sets an address in regs `08`-`0B` and reads the byte back from reg `01`; it is never allocated to a note. |
 | Voice enable | 16-bit writes at `0x1422`/`0x142A` cover voices 0-15 and 16-31; high halves routed to device regs `0x13`/`0x17`. 12 notes now start 12 voices. |
-| Output level | `sample * 16`. `* 64` clipped a single voice at -1 dBFS. |
+| Output level | `[I]` **Stale.** `sample * 16` was tuned for the linear reading. The float decode has full scale ±1984 already, and applies no scaling; absolute level is uncalibrated and the renders normalise on output. |
 | MIDI in | Bit-level UART in the driver; `-min file.mid` works. |
 | Bank decode | Bit 10 is wave address bit 18; the phase accumulator supplies bits 0-17. |
 | Panel | Six switches on IC8 `READ0`-`READ5`; IC5 latches D0/D1 for the PART and EDIT lamps. |
@@ -517,6 +534,29 @@ P-04 Wide Piano renders as a monotonic left-to-right sweep with rising pitch,
 - **In-emulator stereo.** `render_stereo.py` works part-by-part offline. Doing it inside the
   driver needs the device to carry six output buses, which needs the mechanism above.
 
+### Effects — **hardware, in IC15**; not modelled `[C]`
+
+`[C]` The CPU performs **no modulation of any kind**. On P-52 Fantasy (maximum tremolo depth
+`0F`) with a 10 s sustained note, **no register of any playing voice changes value**: the
+frequency word holds `0x3BFE` and is merely rewritten, volume is written 4 times. There is no
+software LFO and no software envelope, so chorus, tremolo and the amplitude envelope are all
+generated inside the gate arrays.
+
+They belong to **IC15**, not IC16. IC17 (CXK5814, **2K x 8** — about **64 ms** at 32 kHz, a
+chorus delay line) hangs off IC15's address bus, is written and read only by IC15, and is never
+visible to the CPU. IC16 only carries wave data to the DAC.
+
+Parameters are patch header bytes **`+0x0F`..`+0x12`** = **CHORUS RATE, CHORUS DEPTH, TREMO.
+RATE, TREMO. DEPTH** (the firmware's own strings at `0x09813`-`0x0987D`), written once at patch
+load. Eleven distinct combinations across the 64 factory patches; 14 patches share
+`07 07 07 07`.
+
+**To model:** an LFO plus a ~64 ms delay line in the device, driven by those four bytes.
+`[I]` Where they land in IC15's register window is unresolved — `19` and `1B` are constant
+across patches (`00`, `21`), `1D` varies (Fantasy `20`, Wide Piano `60`, Ac.Piano `00`) but does
+not map obviously onto the four values. Until then every chorus/tremolo patch renders dry.
+See `SYSTEM-DESIGN.md` §4.5.
+
 ### Method note
 
 Two of the three decisive facts here came from hardware, and both **contradicted**
@@ -526,6 +566,152 @@ one owner recording did. Where ground truth is obtainable at moderate cost, get 
 `tools/capture_u110.py` exists for exactly this and is cheap to re-run.
 
 ---
+
+## 4.7 Running it — the tools `[C]`
+
+```
+tools/u110run.sh [-p PATCH] [-t SECONDS] [-m MIDI] [-w WAV] [extra mame args]
+```
+
+Headless, one scratch NVRAM directory per run, patch selected from the panel.
+
+| tool | what it does |
+|---|---|
+| `u110run.sh` | Headless runner. **`SDL_VIDEODRIVER=dummy` is the part that suppresses the window** — MAME's `-video none` still asks SDL for one and pops a black rectangle onto the desktop. |
+| `select_patch.lua` | Taps `[INC]` from P-01. Needs a scratch NVRAM dir: the patch number is battery-backed and `[INC]`/`[DEC]` wrap mod 64, so a known start is the only way to address a patch absolutely. |
+| `render_stereo.py` | Renders a patch in stereo from its per-part Output Assign. |
+| `u110_output_filter.py` | The Fig. 4 reconstruction filter (6740 Hz Q1.74, 11708 Hz Q1.21, 7234 Hz RC). Post-processing only — **not yet in the driver**, so raw renders run 24-30 dB hot above 2 kHz. |
+| `plot_sample212.py` | Plots the Sound Check waveform to PDF. |
+| `render_sample.py` / `render_note.py` | Decode and render a wave-ROM sample directly, no emulator. |
+| `trace_voices.py` | Voice-allocation tracing. |
+| `capture_u110.py` | Drives real hardware over MIDI and records it. **Its program numbers are TONES, not patches** — see §5.3 of `SYSTEM-DESIGN.md`; earlier revisions mislabelled them and the `listen/1` capture's log names are wrong. |
+| `capture_u110_test.py` | Service-test capture with per-step marks. |
+
+`[I]` **MIDI timing.** `-min` events reach the machine about **10 s** after their file
+timestamp — the U-110 ignores MIDI until it has booted. Put notes at least that far in, and
+allow for it when aligning renders against hardware captures.
+
+## 4.7b Getting the filter and stereo into the driver `[C]`
+
+The renders so far are **not** what the emulator produces. MAME's device allocates two streams
+and writes **identical** data to both, and the filter is applied afterwards in Python;
+`tools/render_stereo.py` gets its stereo by running the emulator **six times**, once per part.
+
+**Filter — DONE** `[C]`. Two `FILTER_BIQUAD` (MAME's `opamp_sk_lowpass_setup`, fed the
+schematic's component values so it derives fc and Q itself) plus a `FILTER_RC`, chained
+`pcm -> bq1 -> bq2 -> rc -> speaker` in `roland_u110.cpp`. Verified against
+`tools/u110_output_filter.py`: identical through the audible range (8 kHz: -38 dB both).
+Above ~12 kHz the driver rolls off less steeply because its filters run at the device's
+**32 kHz** stream rate, where Nyquist is 16 kHz, while the Python reference filtered an
+already-48 kHz signal — a resampling artefact at -55 dB, not a filter error.
+
+`[C]` **It does not fix the spectral gap, and my earlier claim that it would was wrong.**
+The plan said the emulator ran "24-30 dB hot above 2 kHz" and named the filter as the fix.
+Measured against hardware on note 60:
+
+| band | 2520 | 3175 | 4000 | 5040 | 6350 | 8000 | 12699 | 16000 |
+|---|---|---|---|---|---|---|---|---|
+| emu raw − hw | +24 | +22 | +24 | +28 | +30 | +28 | +30 | +30 |
+| emu +LPF − hw | +24 | +22 | +26 | +31 | +33 | +24 | **+11** | **+13** |
+
+The filter does its job above ~8 kHz and does **nothing** at 2.5-6.3 kHz — where it is flat by
+design, as service test 8 independently confirmed on hardware. Mean excess above 4 kHz falls
+only from +31.5 to +23.2 dB. The dominant error was never the filter.
+
+`[I]` **What it actually is — two measurements.** On a sustained note 60 the hardware decays
+**44 dB over 2.4 s** while the emulator falls to -13 dB by 0.8 s and then **flattens**; and the
+emulator holds **15-20 dB more relative energy in 2-8 kHz at every instant**, not just late in
+the note. So the emulator's piano is both too bright and too sustained. Candidates: the
+chip-generated amplitude envelope that MAME does not model at all (the firmware writes volume
+once, §4.6), and MAME's loop handling, which its own source calls "probably incorrect".
+
+**Stereo — DONE** `[C]`. The device gained `set_output_count()` (the CM-32P keeps its
+historical 2-channel behaviour) and a per-voice **output mask**, bit k enabling Multi Output
+k+1 — the same semantics as the BU3905's own slot registers. The driver turns the current
+Output Mode into that mask:
+
+1. `out_ctrl_w` reads the mode index from **RAM `0x280E`** — the byte the firmware itself uses
+   at `0xB721` to pick its eight routing bytes. Reading the index is version-independent;
+   matching the eight written bytes against a table in program ROM would not be, since that
+   table sits at `0xA8B6` in v2.03 but `0xA7D6` in v2.00.
+2. The mode's group sizes (the 50-row table from OM p.27, generated from the validated
+   `tools/output_modes.py` rather than re-typed) partition voices **1-31** into contiguous
+   groups; group N gets mask `1 << (N-1)`. In modes 21-50 the first group takes outputs 1+2
+   together (mask `0x03`) and later groups start at output 3.
+3. The six device outputs are summed to the MIX pair at the measured pan gains, then filtered.
+
+**Verified against the Owner's Manual chart**, rendering straight from the emulator:
+
+| patch | mode | result |
+|---|---|---|
+| P-04 Wide Piano | 20 (`7,8,4,4,4,4`) | all six assigns land on their output; the four graded pans measure **exactly** their targets (0.0 dB error), hard pans fully hard |
+| P-01 Ac.Piano | 22 (`M31`) | every voice masked `0x03` — centred, L/R correlation 1.000 |
+| P-05 Double A.P | 8 (`15,16`) | parts split hard L / hard R, correlation **0.27** — a genuine wide double |
+
+`[I]` **Filtering placement.** The hardware has six filter chains, one per Multi Output. They
+are identical and the filter is linear, so the driver sums to L/R first and filters the two mix
+buses — equivalent, and two chains instead of eighteen. It stops being equivalent only if the
+six chains are ever given different characteristics.
+
+`[I]` Modes 21-50 put outputs 1 and 2 on one voice group with the effect switchable. `M`
+(centred, dry) is handled; the `L/R` wet pair is treated the same, since a voice's output
+cannot be told from its number when two outputs share one pool — and no factory patch uses an
+L/R mode, so nothing exercises it yet.
+
+## 4.7c Note-off release `[C]`
+
+**Release — DONE** `[C]`. The device gained a per-voice envelope: `set_env_release_db_per_s()`
+starts an exponential fade when the enable bit clears, and holds the voice alive until it drops
+below -84 dB instead of cutting it on the same sample. The CM-32P is untouched — the rate
+defaults to 0, which leaves the old behaviour bit for bit.
+
+Measured, not guessed. `tools/envelope_measure.py` divides the hardware capture by a **dry
+render of the same wave-ROM data**, so the sample's own decay, the multisample choice, the two
+partials' mix and the output filter all cancel and only the chip's contribution is left. The
+dry render was validated against MAME's own output first: they agree to **0.2 dB** across every
+note. Results are in `listen/2/ENVELOPE.md` with the raw values in `envelope_data.csv`.
+
+| | hardware | emulator now |
+|---|---|---|
+| release rate | 94-166 dB/s, mean 127 | 130 dB/s |
+| curve | exponential, dB-linear R2 **0.92-1.00** | exponential |
+| duration | 124-252 ms for a 14-30 dB drop | matches |
+
+`[I]` **Held-note decay is deliberately left at zero.** The same measurement shows hardware
+fading a further **3.7-7.8 dB/s** during a held note that the sample data does not account for,
+but no register the CPU writes differs between notes that decay at different rates, and the
+U-110's sysex exposes only **ENV ATTACK RATE** and **ENV RELEASE RATE** per part
+(`0x001n0A`/`0x001n0B`, -7..+7) — there is no decay parameter at all. A fixed rate in the driver
+would hide the error rather than fix it. `set_env_decay_db_per_s()` exists for when the source
+is found; the tone table is the place to look next.
+
+`[I]` The rate is not constant: it rises with pitch (-5.2 dB/s at note 36, -7.8 at note 84) and
+with velocity (-3.7 at v40, -7.6 at v127 on the same note). Envelope rates scaled by note and
+velocity are ordinary synth practice, so this is expected rather than anomalous.
+
+`[C]` **Two traps fixed while doing this.** MAME persists CONFIG ports to `cfg/u110.cfg`, so one
+run with a service test enabled silently left *every* later run booting into the test menu with
+no MIDI notes at all. `tools/u110run.sh` now uses a scratch `-cfg_directory`, both it and the
+driver announce the boot mode on every run, and the script warns if the persistent config still
+has a test enabled. Separately: note-on lands **0.18-0.28 s after the times in the capture
+logs**, which record when the script sent the message, not when the U-110 acted on it.
+
+## 4.8 Where playback stands `[C]`
+
+| | state |
+|---|---|
+| Boot, panel, LCD, MIDI in, NVRAM, cards | working |
+| **Sample format** | **solved** — 8-bit float (§3 of `ROM-ANALYSIS.md`) |
+| **Engine rate / pitch** | 32 kHz, A440, ±2.5 cents over five octaves |
+| **Voice volume / velocity** | **solved** — 20.1 dB span against hardware's 21.3 |
+| **Patch selection** | `tools/select_patch.lua` |
+| **Output assign → stereo** | **solved** — offline via `tools/render_stereo.py` |
+| **Reconstruction filter** | **in the driver** — two Sallen-Key sections + output RC per mix bus |
+| **Stereo in the driver** | **done** — six output buses, panned by Output Assign |
+| **Note-off release** | **in the driver** — exponential, 127 dB/s, measured (§4.7c) |
+| **Held-note decay** | **not modelled** — real (3.7-7.8 dB/s) but not yet sourced to a register |
+| **Effects (chorus/tremolo)** | **not modelled** — every effect patch renders dry |
+| Absolute level | uncalibrated; renders normalise on output |
 
 ## 5. Phase 3 — LV2
 

@@ -243,6 +243,113 @@ Every other access to `0xE000-0xFFFF` therefore runs with the bank line low and 
 > like I/O accesses but are not — they are packed arguments to the string-print routine
 > at `0xD3A0`, encoding cursor position 0 and 16 of the 16x2 display.
 
+## 3a. The byte is a DELTA, and how the ping-pong loop welds `[C]`
+
+`[C]` **The format from §3 is right; what it means is not.** Sign, 3-bit exponent, 4-bit
+mantissa, the 1-3-4 rule, full scale +/-1984 -- all correct. But the decoded number is a
+**first difference**, and the chip integrates it.
+
+`[C]` **Why §3 could not have caught it.** §3 rests on wave-ROM sample 212, the Sound
+Check tone, which decodes to a clean sine. The derivative of a sine is a sine, so that one
+signal cannot distinguish a waveform from its derivative. The test had no discriminating
+power, which is also why the result sounded convincing.
+
+`[C]` **The evidence.** Dividing a hardware capture by a dry render of the same ROM data
+gives a clean **-5.46 dB/octave from 120 Hz to 12 kHz**, twelve tones agreeing, against
+-6.02 for an ideal integrator (`tools/derive_deemphasis.py`, `analysis/deemphasis.pdf`).
+The integration *is* the de-emphasis; no separate filter is needed.
+
+`[C]` **The loop points are zero crossings of the integral.** This is the fact that unlocked
+the ping-pong, and it only makes sense under the delta reading:
+
+| | at `loop` | at `end` | waveform swing |
+|---|---|---|---|
+| sample 121 (Strings 1, ref 65) | **-1** | **-1** | +/-800 |
+| sample 122 (Strings 1, ref 78) | **-15** | **-15** | +/-800 |
+
+Roland placed both turning points where the integrated waveform crosses zero. At a zero
+crossing an *inverted* reflection is continuous -- the waveform carries straight on through
+zero instead of bouncing off it.
+
+`[C]` **The welding rules**, each one established by measurement:
+
+1. **Delta sign follows direction.** Forward, add the delta at the byte arrived at;
+   backward, subtract the delta at the byte being left. The accumulator then retraces
+   exactly, so the loop is a true loop and the amplitude never jumps.
+2. **`end` is inclusive.** The zero crossing at the top is at `end`, not `end - 1`. Turning
+   one byte early lands on +151 instead of -1 and the join jumps by 402.
+3. **The endpoint is played once**, not repeated. Repeating it inserts a zero-difference
+   step in the middle of a steep slope -- itself an audible corner, and the source of a
+   512-unit "curvature" that was misattributed to the data for a long time.
+4. **The reverse pass is inverted, reflected about the accumulator's value AT THE TURN**,
+   not about zero. With `out = s*acc + o`, continuity at a turn where `acc = c` requires
+   `o_new = o_old + 2*s_old*c`, `s_new = -s_old`. The loop regions integrate to exactly
+   zero but the attack does not (it leaves -1 and -15), so `c` is not zero: reflecting
+   about zero leaves a kink of `2c` at every join and makes the DC alternate at the
+   traverse rate.
+5. **No leak.** Drift per full cycle is exactly **+0.0** -- a ping-pong path traverses every
+   delta once forward and once backward, so the sum is identically zero whatever the data.
+   Sweeping a leak makes things worse: the turn value goes from +15 at 0 Hz to +62 at
+   20 Hz and the kink from 30 to 126.
+
+`[C]` With all five, curvature at the pivot is **0** (both turns, both samples) against
+5.2-7.8x the typical curvature before. `tools/stitch_pingpong.py` demonstrates the whole
+scheme offline, with no emulator involved.
+
+`[C]` **One off-by-one in the port.** The device fetched the sample *before* testing for the
+turn, which took the address one byte past the turning point -- outside the sample -- and
+applied that byte's delta, so the value reflected about was wrong. Small per turn, but it
+accumulates: measured against the offline reference the residual went 0.30 before the first
+turn, 0.69 after it, 0.94 by the third. Folding before the fetch cuts the whole-note
+residual from 0.58 to 0.21 (sample 121) and 0.73 to 0.37 (sample 122).
+
+`[C]` **The second off-by-one: the reflection was done in the wrong space.** After the fix
+above the emulator still tracked the offline reference without matching it, and the error
+still stepped up at every turn. The cause is that `sample_interpolate(a, b, f)` computes
+`a*(1-f) + b*f`, and after a fetch at byte `b` the *other* tap is whichever byte was fetched
+before it -- `w[b-1]` running forward, `w[b+1]` running backward. So the output position is
+`addr - 1` forward but `addr` backward:
+
+| direction | smpl_cur | smpl_nxt | expression | output position |
+|---|---|---|---|---|
+| forward  | `w[b-1]` | `w[b]` | `interp(cur, nxt, f)` | **addr - 1** |
+| backward | `w[b+1]` | `w[b]` | `interp(nxt, cur, f)` | **addr** |
+
+A constant one-byte lag is inaudible in a forward loop. At a ping-pong turn it *changes
+sign*. Reflecting the address about the pivot, `addr' = 2*p - addr`, therefore reflects the
+OUTPUT about `p - 0.5`; and at the `lo` turn the output position does not even reverse --
+with step 0.7 it runs `lo+0.4, lo-0.7, lo+0.0, lo+0.7`, descending through the pivot before
+climbing again. Reflecting the output position instead, `q' = 2*p - q`, is
+
+    addr' = 2*p + 0x4000 - addr
+
+at both turns. Against an ideal continuous-path integrator, a bit-exact transcription of the
+device loop goes from **-13.1 dB** (sample 121) and **-6.2 dB** (122) to **exactly zero
+residual**, over four full ping-pong cycles at the quantised step the firmware actually
+writes. The built emulator then matches that transcription to **-48.2 dB** and **-43.7 dB**,
+the floor being the analog filter chain and the fixed-point rounding.
+
+`[C]` **Every byte on the path has to be integrated, including bytes never output.** The
+device fetched at most one byte per output sample. For ordinary PCM a skipped byte is just
+aliasing; for delta data the skipped delta is never applied, the loop stops summing to zero
+and the accumulator ramps. Measured on Choir 3 at note 67 (step `0x42CF` = 1.044
+bytes/sample) the DC walked to -6468 over a 15 s hold while the hardware held +/-1. The
+forward-loop wrap had the same fault, in a way that hid it: `reachedEnd` wraps *after* the
+read, and below one byte per sample the byte index lands exactly on `end`, where
+`W[end] == W[loop]` makes the wrap seamless -- only above one byte per sample does it
+overshoot and apply a delta from beyond the loop. 8 of 228 voices in the reference capture
+exceed one byte per sample, the worst at 1.880. Both now walk byte by byte and fold before
+the read; ping-pong output below one byte per sample is bit-identical to before.
+
+`[C]` **Every real loop is DC-balanced.** Over one loop traversal the deltas sum to exactly
+zero for all 226 wave ROM samples -- 30 ping-pong, 26 one-shot, 170 forward. This is what
+makes a leak-free integrator safe, and it is strong independent confirmation of the delta
+reading. The 12 table entries that appear to violate it are the ones with
+`looplen > length`, which is impossible for a real loop: entries 214-221 are 127 bytes of
+`0x80` padding, and 222-225 are **demo song data**, whose bytes read as ASCII -- "T-Jazz #1",
+"Swing High", "Cloud 9", "NoOne Home". The sample table's tail points at the demo sequences,
+not at audio.
+
 ## 3. Driving the tone generator
 
 **No PCM sample data lives in this ROM**, and the CPU has no bus to the wave ROMs. It

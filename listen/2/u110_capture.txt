@@ -1,0 +1,26 @@
+U-110 capture
+sample rate 48000, channels 2, duration 87.08 s
+MIDI port: UA-25:UA-25 MIDI 1 20:0   channel 1
+peak -2.0 dBFS
+lead silence 3.0 s (noise-floor reference)
+
+time      patch             event
+   3.404  P-01 Ac.Piano    note  36 vel 100 hold 3.0s
+   7.407  P-01 Ac.Piano    note  48 vel 100 hold 3.0s
+  11.412  P-01 Ac.Piano    note  60 vel 100 hold 3.0s
+  15.416  P-01 Ac.Piano    note  72 vel 100 hold 3.0s
+  19.420  P-01 Ac.Piano    note  84 vel 100 hold 3.0s
+  24.325  P-01 Ac.Piano    note  60 vel  40 hold 3.0s
+  28.330  P-01 Ac.Piano    note  60 vel 127 hold 3.0s
+  33.235  P-46 Flute       note  69 vel 100 hold 4.0s
+  38.239  P-46 Flute       note  60 vel 100 hold 3.0s
+  42.242  P-46 Flute       note  72 vel 100 hold 3.0s
+  47.148  P-31 Strings     note  48 vel 100 hold 4.0s
+  52.153  P-31 Strings     note  60 vel 100 hold 4.0s
+  58.058  P-20 Slap Bass   note  36 vel 110 hold 3.0s
+  62.061  P-20 Slap Bass   note  43 vel 110 hold 3.0s
+  66.065  P-20 Slap Bass   note  48 vel 110 hold 3.0s
+  70.970  P-11 Vibraphone  note  60 vel 100 hold 4.0s
+  76.877  P-49 Drums       note  36 vel 110 hold 1.5s
+  78.879  P-49 Drums       note  38 vel 110 hold 1.5s
+  80.881  P-49 Drums       note  42 vel 110 hold 1.5s

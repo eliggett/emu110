@@ -277,11 +277,43 @@ reads the ID header from both card and internal ROM successfully, the addressing
 functionally identical, so this is almost certainly connector pin **numbering** running
 opposite to signal order rather than a signal reversal.
 
-### 4.5 Effect RAM
+### 4.5 Effect RAM — the effects are **hardware**, in IC15 `[S]` `[C]`
 
-IC17 (CXK5814) hangs off the same wave address bus, taking a low slice of it. It is
+IC17 (CXK5814, **2K x 8**) hangs off the same wave address bus, taking a low slice of it. It is
 written and read only by IC15 and is never visible to the CPU — which is why no firmware
-access to it exists anywhere in the image.
+access to it exists anywhere in the image. At the 32 kHz engine rate 2048 bytes is about
+**64 ms**, which is a chorus delay line.
+
+`[C]` **The CPU does no modulation.** Measured on P-52 Fantasy (the maximum tremolo depth,
+`0F`) with a 10 s sustained note: **no register of any playing voice changes value** for the
+whole note. The frequency word sits at `0x3BFE` and is merely rewritten ~325 times; volume is
+written 4 times. There is no software LFO and no software envelope, so chorus, tremolo and the
+amplitude envelope must all be generated inside the gate arrays — IC15 with IC17 as its RAM,
+not IC16, which only carries wave data to the DAC.
+
+`[C]` **Voice 0 is not a voice** — confirming what `EMULATOR-PLAN.md` §1 already recorded from
+the ROM analysis ("voice 0 reserved for ROM reads"). The only registers that move during a note
+belong to voice 0 (`09`/`0A`/`0B`, ~3000 writes, address stepping `0x37..0x9F`): it is the CPU's
+**wave-ROM read port** — set an address, read the byte back from register `01`. Playing voices
+are numbered **1-31**, and voice 0 was never allocated in any run.
+
+`[C]` **Effect parameters live in the patch header.** Bytes `+0x0F`..`+0x12` hold the four
+values named by the firmware's own strings at `0x09813`-`0x0987D`: **CHORUS RATE, CHORUS DEPTH,
+TREMO. RATE, TREMO. DEPTH**. Eleven distinct combinations across the 64 factory patches, e.g.
+Ac.Piano `07 07 07 07`, Wide Piano `07 03 00 00` (tremolo off), Fantasy `03 01 04 0F`. They are
+written once when the patch loads.
+
+`[I]` Where they land in IC15's register window is not settled. Registers `19` and `1B` are
+constant across patches (`00`, `21`); `1D` varies (Fantasy `20`, Wide Piano `60`, Ac.Piano
+`00`) but does not map obviously onto the four parameter bytes.
+
+`[C]` **Implemented.** `roland_lp.cpp` gained a per-voice output mask and a selectable
+output count; `roland_u110.cpp` derives the mask from the Output Mode at RAM `0x280E` and sums
+the six buses to the MIX pair at the measured pan gains. See `IMPLEMENTATION-PLAN.md` §4.7b.
+
+`[I]` **Emulation gap.** MAME's device has no effect section at all, so chorus and tremolo
+patches render dry. Modelling them means adding an LFO plus a ~64 ms delay line to the device,
+driven by these four parameters.
 
 ---
 
@@ -402,9 +434,10 @@ Entry 30 is the clearest statement of the architecture: six slots to six distinc
 
 #### Two consequences for emulation `[C]`
 
-- **Routing is per-slot, not per-voice.** A voice reaches an output only via the slot its
-  voice number belongs to. There is no per-voice output-assignment register in IC16, and
-  searching for one is searching for something that does not exist.
+- **Routing is per-slot, not per-voice** — but a part still reaches a *fixed* output, because
+  the Output Mode partitions the voices into **groups** and the firmware allocates a note a
+  voice from the group its part's Output Assign names (§5.4). There is no per-voice
+  output-assignment register; the constraint lives in the allocator.
 - **An output can be fed by several slots.** N=12 sends slots 2, 3 and 4 all to output 1, and
   N=49 sends slots 0 and 1 both to outputs 1+2. So an output **accumulates** its slots; a
   model that lets the last slot overwrite the output is wrong.
@@ -422,6 +455,43 @@ This is the deglitcher arrangement the PCM54 datasheet recommends in its own Fig
 correlate at **1.000 with zero phase difference** and zero broadband lag. The multiplexing is
 inaudible; it performs routing and nothing else. An emulation needs slot *routing* and slot
 *accumulation*, but no slot *timing*.
+
+### 5.2 The anti-aliasing filter `[S]`
+
+Fig. 4 gives IC30-35 (uPC4570) as two active sections plus an output RC:
+
+| Section | Components | Corner | Q |
+|---|---|---|---|
+| 1 | R39/R40 10k, C53 8200p, C52 680p | ~6.7 kHz | 1.74 |
+| 2 | R41/R42 10k, C55 3300p, C54 560p | ~11.7 kHz | 1.21 |
+| output | R78 10k, C56 2200p | ~7.2 kHz | 1 pole |
+
+Fifth order overall. The service notes' own simulation plot gives `max: 2.17 dB`,
+`min: -48.57 dB` -- flat with a slight peak, then a cliff.
+
+`[C]` **Implemented in the driver** as two `FILTER_BIQUAD` sections plus a `FILTER_RC`, given
+the schematic's component values directly. It removes 17-19 dB above 12 kHz — but it is flat
+at 2.5-6.3 kHz, where the emulator is still 22-33 dB hot against hardware, so the filter was
+never the cause of that gap. See `IMPLEMENTATION-PLAN.md` §4.7b.
+
+`[C]` **Verified on hardware.** Service test 8 injects a square wave at the analog switches
+(the CPU toggles `0x1F08`), and its harmonics come out on the ideal 1/h law to within 0.5 dB
+up to 1437 Hz, with even harmonics absent at -52 dB. The output stage is flat well past
+1.4 kHz, so it cannot account for harmonic differences in that region.
+
+`[S]` The p.5 block diagram names the analog switch array **IC47A~F**, and shows the six
+filtered outputs both going to the individual jacks and being summed by **IC38** through a
+resistor network to the L/R mix and phones. (The chip-role table above lists IC24-26 for the
+switches, from the schematic; the block diagram disagrees. IC47A~F is the more specific
+label.)
+
+IC26/IC6 takes `D0-D5` and `A0-A3` from the CPU bus and drives six gate outputs `G0-G5`
+that steer the analog switches. Its **timing** comes from three lines out of IC16 —
+`INH`, `MXA`, `MXD` (inhibit, multiplex address, multiplex data). So IC16 drives the
+multiplex phase and IC26/IC6 performs the analog demultiplex and hold.
+
+The CPU's only involvement is loading eight routing registers at `0x1F00-0x1F07` plus an
+enable at `0x1F08`, as a group selected per patch. See `ROM-ANALYSIS.md` §3.1.
 
 ### 5.3 Selecting a patch, and what MIDI program change really does `[C]`
 
@@ -523,6 +593,23 @@ output never changes and the pan is fixed, exactly as a U-110 owner reports. Ac.
 mode 22 = `M31`: a single group of all 31 voices, mono and centred, which is why it draws
 voices 1-6 freely and why its chart row shows only part 1.
 
+`[C]` **The table is transcribed and validated** in `tools/output_modes.py`. The OCR of the
+scanned page drops cells, but every row must partition **exactly 31 voices**, and that
+invariant recovers them: all 50 rows check out, and mode 10 (`15, 8, 8`) was reconstructed
+from the constraint alone where the scan showed only `15`. Mode 20 reproduces the six Wide
+Piano groups exactly as measured, and mode 22 (`M31`) explains Ac.Piano drawing voices 1-6
+freely from a single 31-voice pool.
+
+`[C]` **The mode is recoverable at run time.** All 50 presets in the table at `0xA8B6` are
+**distinct**, so a driver can identify the current Output Mode by matching the eight bytes the
+firmware writes to `0x1F00`-`0x1F07` — no need to read the patch or peek at RAM `0x280E`.
+
+`[I]` **One chart discrepancy.** OM p.5 gives P-17 12str A.G an Output Mode of **21**; all
+three firmware images (v2.00, v2.03 and the `15179960` dump) hold `+0x0E = 21`, i.e. mode
+**22**, and the running machine writes preset `00 03 00 00 00 00 00 00` to prove it. Mode 21
+is `<L31><R31>` (wet stereo) and 22 is `M31` (dry centre), so the chart's value is the more
+musical one for a 12-string — but the ROM is what the machine does, and it says 22.
+
 `[I]` The footnote to the table: *"In the Output modes 21 to 50, Multi Outputs 1 and 2 are
 regarded as the same Voice Group, and effect can be turned on or off. The one without effect
 (M) is set to the center position of the sound imaging, and the one with effect is stereo
@@ -535,38 +622,6 @@ out. For mode 20 they read as eight voice-quartets with the slot for voice *v* a
 does not fit that rule (its single non-zero byte would leave the voices it actually uses
 unrouted), so the effect modes evidently route differently. **Not needed for emulation:** the
 mode table plus Output Assign gives the part → output mapping directly.
-
-### 5.2 The anti-aliasing filter `[S]`
-
-Fig. 4 gives IC30-35 (uPC4570) as two active sections plus an output RC:
-
-| Section | Components | Corner | Q |
-|---|---|---|---|
-| 1 | R39/R40 10k, C53 8200p, C52 680p | ~6.7 kHz | 1.74 |
-| 2 | R41/R42 10k, C55 3300p, C54 560p | ~11.7 kHz | 1.21 |
-| output | R78 10k, C56 2200p | ~7.2 kHz | 1 pole |
-
-Fifth order overall. The service notes' own simulation plot gives `max: 2.17 dB`,
-`min: -48.57 dB` -- flat with a slight peak, then a cliff.
-
-`[C]` **Verified on hardware.** Service test 8 injects a square wave at the analog switches
-(the CPU toggles `0x1F08`), and its harmonics come out on the ideal 1/h law to within 0.5 dB
-up to 1437 Hz, with even harmonics absent at -52 dB. The output stage is flat well past
-1.4 kHz, so it cannot account for harmonic differences in that region.
-
-`[S]` The p.5 block diagram names the analog switch array **IC47A~F**, and shows the six
-filtered outputs both going to the individual jacks and being summed by **IC38** through a
-resistor network to the L/R mix and phones. (The chip-role table above lists IC24-26 for the
-switches, from the schematic; the block diagram disagrees. IC47A~F is the more specific
-label.)
-
-IC26/IC6 takes `D0-D5` and `A0-A3` from the CPU bus and drives six gate outputs `G0-G5`
-that steer the analog switches. Its **timing** comes from three lines out of IC16 —
-`INH`, `MXA`, `MXD` (inhibit, multiplex address, multiplex data). So IC16 drives the
-multiplex phase and IC26/IC6 performs the analog demultiplex and hold.
-
-The CPU's only involvement is loading eight routing registers at `0x1F00-0x1F07` plus an
-enable at `0x1F08`, as a group selected per patch. See `ROM-ANALYSIS.md` §3.1.
 
 ---
 

@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.DS_STORE
+*._
+*.wav
+!waves/*.wav
+.claude/
+.claude.json
+*.pem
+
+# Audacity working projects -- regenerable, and large
+*.aup3
+*.aup3-unsaved/

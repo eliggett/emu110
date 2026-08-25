@@ -42,9 +42,9 @@ address-scramble bits and all 8 data-scramble bits, derived here independently. 
 | Wave ROM data permutation | **Solved** | §4.3 |
 | **Sample encoding** | **Partly solved** — 1-3-4 float *deltas*; MAME's decoder is documented by MAME as unfixed | `ROM-ANALYSIS.md` §3 |
 | **IC15 register map** | **Solved** | §3 |
-| Engine sample rate | **34,000 Hz** (`clock / 2 / 512`) | §5 |
-| Voice allocation | 32 voices, voice 0 reserved for ROM reads, allocated 31 first | §3 |
-| Chip regs `0x10`-`0x12`, `0x19`-`0x1D` | Unknown to MAME as well | — |
+| Engine sample rate | **32,000 Hz** = `34,816,000 / 1088`. `[C]` Confirmed against hardware; MAME's `clock/2/512` made the emulator +104 cents sharp | §5 |
+| Voice allocation | 32 voices, voice 0 reserved for ROM reads, allocated 31 first. `[C]` Confirmed in emulation: playing voices are 1-31, voice 0 never allocated, and its regs `08`-`0B` step an address while reg `01` is read back | §3 |
+| Chip regs `0x10`-`0x12`, `0x19`-`0x1D` | Still mostly unknown. `[C]` `0x10`/`0x12` select the voice for status reads; `0x1D` varies per patch (a candidate for the effect settings); `0x19`/`0x1B` are constant | — |
 | IC16 output multiplex detail | Partially modelled in MAME | §5 |
 
 ### The remaining U-110-specific work
@@ -55,7 +55,7 @@ MAME's driver is for the **CM-32P**, not the U-110. The differences that matter:
 |---|---|---|
 | CPU | 8097BH, 16-bit bus to IC15 | P8098, 8-bit bus |
 | Chip register addressing | `0x1400 + 2*reg` | `0x1400 + reg` |
-| IC15 crystal | 34.816 MHz → **34 kHz** | 32.768 MHz → 32 kHz |
+| IC15 crystal | 34.816 MHz ÷ **1088** → 32 kHz | 32.768 MHz ÷ 1024 → 32 kHz |
 | `0xE000-0xFFFF` bank switch on P2.7 | **yes** | absent |
 | Cartridge slots | **four** | one |
 | DSP at `0x1080-0x10FF` | absent | present |
@@ -119,10 +119,14 @@ That milestone is worth reaching on its own merits — the timestamped IC15 regi
 produces is the primary dataset for Phase 2, and it already validates modified ROMs for
 everything except sound.
 
-`[C]` **Engine sample rate: 34,000 Hz.** (An earlier revision of this line claimed 32,000 Hz
-from `34,816,000 / 1088` and cited the circulating WAVs as confirmation. Both were wrong —
-see `ROM-ANALYSIS.md` correction #13. The device derives `clock / 2 / 512`, and the running
-emulator reports `Clock 17408000, Rate 34000`.)
+`[C]` **Engine sample rate: 32,000 Hz** = `34,816,000 / 1088`.
+
+> This line has flipped twice. It first said 32,000 Hz, was overturned to 34,000 Hz by
+> correction #13 on the strength of MAME's `clock / 2 / 512`, and is now back to 32,000 —
+> settled against a real U-110 by playing identical MIDI into both. With MAME's `/1024` the
+> emulator ran **+104 cents** sharp, and `1200 * log2(34000/32000) = +104.96`. The original
+> derivation was right; #13 discarded a correct result because an implementation disagreed
+> with it. See `ROM-ANALYSIS.md` correction #22.
 
 ---
 
