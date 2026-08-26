@@ -400,16 +400,16 @@ lands correctly.
 | `0x1402` | `0x01` | **ROM/card data read port** | **yes** (§6.1) |
 | `0x1404` | `0x02` | ROM bank (bits 10-13) + loop mode (bits 14-15) | **yes** (§6.2) |
 | `0x1408` | `0x04` | **pitch**, 2.14 fixed point | partly |
-| `0x140C` | `0x06` | **volume**, 16-bit linear | traffic noted |
+| `0x140C` | `0x06`/`0x07` | **envelope**: low byte = signed ramp rate, high byte = target level (log, 16/octave) | **yes**, see below |
 | `0x1410` | `0x08` | sample start address, **fractional** part | **yes** |
 | `0x1414` | `0x0A` | sample start address, **high word** | **yes** |
 | `0x1418` | `0x0C` | sample **end** address | **yes** |
 | `0x141C` | `0x0E` | sample **loop** address | **yes** |
-| `0x1420` | `0x10` | undocumented in MAME (`??`) | **emulator** |
+| `0x1420` | `0x10` | **status select**: `0x1404` then reads the HIGH 16 bits of the voice's current level | **yes** |
 | `0x1422` | `0x11` | **voice enable**, written 16-bit -> covers regs `0x11`+`0x12`, voices 0-15 | **emulator** |
-| `0x1424` | `0x12` | **voice enable, voices 8-15** — confirmed `[C]`, see below | **emulator** |
+| `0x1424` | `0x12` | **voice enable, voices 8-15** `[C]`; also **status select**: `0x1404` then reads the LOW 10 bits of the current level | **emulator** + **yes** |
 | `0x142A` | `0x15` | **voice enable**, written 16-bit -> covers regs `0x15`+`0x16`, voices 16-31 | **emulator** |
-| `0x142C` | `0x16` | **voice enable, voices 24-31** `[C]` | **emulator** |
+| `0x142C` | `0x16` | **voice enable, voices 24-31** `[C]`; the envelope handler also writes the voice index here before reading its level at `0x1404` — `[I]` the two uses collide under MAME's `addr/2` decode, so the U-110's word bus must not map this register the way the rest do | **emulator** |
 | `0x1432`,`0x1434`,`0x1436` | `0x19`,`0x1A`,`0x1B` | undocumented in MAME (`??`), written at init | **emulator** |
 | `0x143A` | `0x1D` | undocumented in MAME (`??`) | **emulator** |
 | `0x143E` | `0x1F` | **voice select (0-31)** | **yes** |
@@ -447,6 +447,96 @@ routing the high half to the odd offset fixes it without touching the shared dev
 
 `[I]` Register `0x10` remains unexplained; it takes small ascending values as voices are
 allocated and is *not* a bitmask.
+
+### The amplitude envelope lives in the CPU, in the `EXTINT` handler `[C]`
+
+`0x140C` is **not** a 16-bit volume, and the low byte is not a level. The pair is
+
+| chip reg | field | meaning |
+|---|---|---|
+| `0x07` (high) | **target level** | log domain, 16 units per octave = 0.3763 dB/unit, `0xFF` = full scale |
+| `0x06` (low)  | **ramp rate**, *signed 8-bit* | `+1..+0x7F` rises, `0x80..0xFF` (i.e. `-128..-1`) falls |
+
+The chip ramps each voice's internal level toward the target at that rate and raises
+**`EXTINT`** when the voice needs its next segment. The CPU's handler then reads which
+voice from chip register `0x00`, reads the voice's current level back through the status
+port, and writes the next `(target, rate)` pair. **That handler is the U-110's entire
+TVA envelope generator** — attack, decay, sustain and release are firmware, not chip.
+
+Vector `0x200E` -> `0x4020` -> **`0x41C4`**:
+
+```
+41C4: orb int_mask, #40 / ei          ; re-enable, nested
+41D0: ldbze 54, 1400                  ; chip reg 00 = the voice asking for service
+41D5: cmpb 54, #20 / #21              ; 0x20, 0x21 are two non-voice slots
+41E6: ldb  50, 3600[54] / 51, 3660[54]  ; 16-bit rate, per voice
+41F0: ldbze 52, 3680[54]              ; note-on timestamp
+41F5: ldb  56, 3700[54]               ; flags: bits 0-2 = envelope PHASE, bit 4 = service due
+41FF: andb 57, 56, #07                ; dispatch on the phase
+4208:   1 -> lcall b932   2 -> baf4   3 -> bd42
+4226:   4 -> be7f        5 -> bebd    6 -> bfac
+42B3: (bit 4 path) recompute the rate and write it back
+4334: st 52, 140c                     ; new (target, rate)
+435B: ldb 50, #10 / djnz 50           ; ~16-iteration settle delay before RTI
+```
+
+Six phase handlers, one per envelope segment. Each reads the tone's own envelope bytes —
+`0x28A9`/`0x28AA`/`0x28AF` for the first partial, `0x28C9`/`0x28CA`/`0x28CF` for the second —
+and applies **key scaling** about key `0x45` (A4):
+
+```
+B988: ldbze 4e, 0051 ; sub 4e, #0045  ; key - 69
+B991: mulb  4e, 004c                  ; x the tone's key-scale nibble
+B99D: shra  4e, #04 ; add 44, 004e    ; -> the segment's rate
+```
+
+Three write sites pin the encoding beyond doubt:
+
+* **note-on**, `0x69F0`-`0x6A5E`. `reg07` = the velocity/level result (clamped 0..0xFF);
+  `reg06 = (reg07 * K) >> 8 + 16*(nibble-8)`, clamped `1..0x7F` and then capped by a
+  256-entry ROM table at **`0xB0C6`** indexed by `reg07` — a level-dependent ceiling on how
+  fast a voice may rise. Where that table reads 0 (any `reg07 < 0x30`) the firmware
+  substitutes `ld 44, #3001`, i.e. target `0x30` at rate `+1`: silence.
+* **note-off**, `0x649A`-`0x6529`. The rate is built from a ROM table at `0xAFC6`, reduced
+  by a term proportional to **how long the note was held** (`f2 - 3680[voice]`), trimmed by
+  a per-tone nibble, clamped to `0..0x7F` — and then `not 44`, one's complement, making it
+  **negative**. Phase goes to 5.
+* **voice kill / power-up**, `0x721C` and `0xCBFC`. Both write the constant `0x0080`:
+  target `0x00`, rate `-128`, the steepest fall the field can express. The power-up loop
+  then spins on the status port until the reported level reaches zero.
+
+The status port confirms the level readback, and the routine at `0x7655` gives its exact
+shape. It reads the same voice three times, once per select:
+
+```
+7658: st  54, 142c ; ld 3e, 1404     ; select 0x16 -> one field
+7662: stb 54, 1420 ; ld 44, 1404     ; select 0x10 -> the HIGH 16 bits
+766C: stb 54, 1424 ; ld 46, 1404     ; select 0x12 -> the LOW 10 bits
+7679: and  46, #03ff
+767D: shll 44, #06                   ; normalise the 32-bit pair 44:46 ...
+7683: (loop) shll 44, #01 until bit 15 of byte 47 is set, counting 15 down
+7690: 40 = (count << 4) | (bits 6..3 of byte 47)
+```
+
+That is normalise-and-take-the-exponent: the result is `exponent * 16 + mantissa nibble` —
+**the same 16-units-per-octave log scale as `reg07`**. So a voice's current level is a
+**26-bit linear value** split across two selects, and the firmware converts it to the log
+domain itself. The power-up loop at `0xCC0F` uses only the low field, spinning until
+`(0x1404 & 0x03FF) == 0`. The envelope handler selects with `0x142C` and takes the high
+byte, then at `0x432C` copies it straight back into `reg07` — the sustain segment holds by
+setting the target to wherever the ramp has got to.
+
+Measured against this, the earlier reading of `reg06` as "a 7-bit level, role unknown" was
+wrong, and so was the statistical result that `reg06` predicts an instrument's decay at
+r = -0.874. It does, but only because `reg06` *is* a rate: percussive tones are written a
+steep attack and a steep decay, sustaining ones a shallow pair.
+
+**`[I]` What the emulator is missing.** `roland_lp.cpp` calls `m_int_callback(CLEAR_LINE)`
+once at reset and never asserts it, and has no per-voice level, ramp or status port. So the
+handler above never runs: over the whole 392 s reference session the emulator issues
+**490 writes to `0x06`/`0x07` for 228 note-ons** — the two identical stores at `0x6A59`/
+`0x6A5E` and nothing else. Every voice holds its note-on target forever, which is exactly
+the "no decay" the renders show.
 
 ### Pitch: the reference note is at the engine rate `[C]`
 

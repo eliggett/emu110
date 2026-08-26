@@ -5,6 +5,7 @@ on the hardware, and write the results in the same shape.
 
     python3 tools/render_u110.py --out-dir listen/emu
     python3 tools/render_u110.py --only strings1,choir3_pingpong
+    python3 tools/render_u110.py --sequence capture_env --out-dir listen/env-emu
 
 This is the emulator-side counterpart of capture_u110.py.  Where that script drives a real
 U-110 over MIDI and records an interface, this one renders the identical note sequence
@@ -34,6 +35,7 @@ import argparse, os, subprocess, sys, tempfile, wave
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import importlib
 import capture_u110 as cap
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -69,22 +71,32 @@ def main():
                     help='do not apply the session gain; keep the emulator scaling')
     ap.add_argument('--keep-midi', default=None, metavar='FILE',
                     help='also keep the generated MIDI file here')
+    ap.add_argument('--log', action='store_true',
+                    help="also run MAME with -log and keep mame/error.log as "
+                         "<out-dir>/error.log -- that is where the reg 06/07 values are")
+    ap.add_argument('--sequence', default='capture_u110',
+                    help='module in tools/ that defines the sequence: capture_u110 (the '
+                         'reference take, the default) or capture_env (the envelope sweeps)')
     args = ap.parse_args()
 
-    segs = cap.SEGMENTS
+    # Any module exposing SEGMENTS and write_dry_run() will do; capture_env.py is the
+    # other one, and pairs its trials.csv with the reg 06/07 values MAME's -log prints.
+    seq = importlib.import_module(args.sequence)
+
+    segs = seq.SEGMENTS
     if args.only:
         want = [x.strip() for x in args.only.split(',')]
-        segs = [s for s in cap.SEGMENTS if s['name'] in want]
+        segs = [s for s in seq.SEGMENTS if s['name'] in want]
         if not segs:
             sys.exit("no segment matched --only (names: %s)"
-                     % ", ".join(s['name'] for s in cap.SEGMENTS))
+                     % ", ".join(s['name'] for s in seq.SEGMENTS))
 
     out_dir = args.out_dir if os.path.isabs(args.out_dir) else os.path.join(HERE, args.out_dir)
     os.makedirs(out_dir, exist_ok=True)
 
     tmp = tempfile.mkdtemp(prefix='u110render.')
     midi = args.keep_midi or os.path.join(tmp, 'sequence.mid')
-    marks, total = cap.write_dry_run(midi, segs, args.channel - 1, args.control_channel - 1)
+    marks, total = seq.write_dry_run(midi, segs, args.channel - 1, args.control_channel - 1)
 
     session = os.path.join(out_dir, 'session.wav')
     secs = int(total) + 2
@@ -93,11 +105,30 @@ def main():
     cmd = [os.path.join(HERE, 'tools', 'u110run.sh'),
            '-p', str(args.patch), '-t', str(secs), '-m', midi, '-w', session,
            '-samplerate', str(args.samplerate)]
+    if args.log:
+        cmd.append('-log')
+        try:
+            os.remove(os.path.join(HERE, 'mame', 'error.log'))
+        except OSError:
+            pass
     r = subprocess.run(cmd)
     if r.returncode != 0:
         sys.exit("u110run.sh failed (exit %d)" % r.returncode)
     if not os.path.exists(session):
         sys.exit("no audio was written -- did MAME start?")
+
+    # capture_env's write_dry_run() drops a per-trial index beside the MIDI file; it is
+    # what pairs a log line with the sweep setting that produced it, so keep it.
+    trials = os.path.splitext(midi)[0] + '-trials.csv'
+    if os.path.exists(trials):
+        with open(trials) as f:
+            open(os.path.join(out_dir, 'trials.csv'), 'w').write(f.read())
+
+    if args.log:
+        src = os.path.join(HERE, 'mame', 'error.log')
+        if os.path.exists(src):
+            os.replace(src, os.path.join(out_dir, 'error.log'))
+            print("kept the MAME log as %s/error.log" % out_dir)
 
     audio, sr, ch = read_wav(session)
     peak = int(np.abs(audio).max()) if len(audio) else 0
@@ -114,12 +145,12 @@ def main():
     # hardware capture does, so a release or a ping-pong drift is still visible.
     written = []
     for i, (name, a, b) in enumerate(marks):
-        s, e = int(a * sr), min(int((b + cap.SEG_GAP) * sr), len(audio))
+        s, e = int(a * sr), min(int((b + seq.SEG_GAP) * sr), len(audio))
         if e - s < sr // 4:
             continue
         p = os.path.join(out_dir, "%02d_%s.wav" % (i + 1, name))
         write_wav(p, audio[s:e], sr, ch)
-        written.append((i + 1, name, a, b + cap.SEG_GAP,
+        written.append((i + 1, name, a, b + seq.SEG_GAP,
                         20 * np.log10(max(int(np.abs(audio[s:e]).max()), 1) / 32767.0)))
 
     with open(os.path.join(out_dir, 'session.txt'), 'w') as f:
