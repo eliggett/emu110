@@ -188,36 +188,47 @@ And 8 of 12 tones now match on both decay and release:
 
 Median error 0.7 dB, against every tone reading 0.0 before this work started.
 
-### 10 of 12 tones are correct -- two of the four "failures" were the metric
+### All twelve tones now match
 
-`decay at note-off` is measured against the recording's noise floor, and for a tone that
-decays to nothing that is all it measures.  Hardware's vib peaks at -33.5 dBFS over a -101 dB
-floor, so its "-67.4" just means "gone".  The emulator reaching -162 (digital zero) is the
-same outcome, not a 95 dB error.
+Two more faults, both mine.
 
-Timed instead against thresholds above the floor, vib and slap were never broken:
+**A zero-length segment must still signal arrival.** Tone data writes decay segments whose
+target equals the level just reached -- marimba's phase 1 asks for a decay to exactly the
+attack's peak.  That is not a no-op: it finishes immediately, and that interrupt is what
+advances the phase, with the real decay in a later phase.  Swallowing it left marimba and
+Fretless Bass stuck in phase 1, flat for the whole note.
+
+**The volume pair must be evaluated only when complete.** The firmware writes it as one
+16-bit store; the bus splits it into 06 then 07.  Acting on the low byte alone tests the new
+RATE against the OLD target, which trivially looks like an arrival and advances the phase a
+step early.  With arrival now signalled, that raced every voice to silence instantly.  The
+segment is evaluated on the 07 write only.
+
+Timed against thresholds above the recording's noise floor -- `decay at note-off` is floor
+limited, so for a tone that decays to nothing it measures the floor and nothing else:
 
 | time to fall | 10 dB | 20 dB | 40 dB | | | 10 dB | 20 dB | 40 dB |
 |---|---|---|---|---|---|---|---|---|
 | piano hw | 0.64 | 1.14 | 5.07 | | vib hw | 1.04 | 1.88 | 3.58 |
 | piano emu | **0.63** | **1.17** | **5.71** | | vib emu | **1.07** | **2.00** | **3.82** |
 | bell hw | 0.28 | 0.78 | -- | | slap hw | 0.97 | 2.09 | 4.20 |
-| bell emu | **0.34** | **0.78** | -- | | slap emu | **1.11** | **2.27** | **4.51** |
+| bell emu | **0.34** | **0.78** | -- | | slap emu | **1.11** | **2.28** | **4.51** |
+| marimba hw | 0.24 | 0.48 | 0.96 | | fbass hw | 1.05 | 2.10 | 4.18 |
+| marimba emu | **0.23** | **0.48** | **1.01** | | fbass emu | **1.07** | **2.16** | **4.36** |
 
-vib's segment chain also matches directly: 0.583 s per 6.02 dB step against 0.53 measured.
+The release tracks hardware at a constant **0.92-0.94x** across 125x of rate on two
+independent tones, and the attack is unchanged (2.162 s against 2.164 measured, 0.122
+against 0.122).  Roughly half the release residual is the known level-scale item: if a
+16-unit step is really 5.80 dB rather than 6.02, the emulator reads 4% slow by construction.
+The fall divisor has NOT been tuned to absorb that.
 
-`[I]` **Two tones left: marimba and fbass.**  Both fail the same way and it is not the ramp.
-Their phase-1 handler writes a decay segment whose TARGET equals the level just reached --
-marimba gets `rate=-75 target=227` immediately after an attack to 227 -- so the ramp has
-nowhere to go and the note sits flat for the whole 8 s hold.
-
-Not a tone-data problem: the records are read per tone and the phase-1 parameter differs
-correctly (piano `0x64`, vib `0x5C`, bell `0x7D`, marimba `0x7F`), and the per-voice tone
-pointer `3810[voice]` is 0 for every tone including the ones that work.  Note bell reads
-`0x7D`, nearly as high as marimba's `0x7F`, and decays correctly -- so a high value is not
-itself the trigger.  The fault is in how that parameter and the rate byte (`0x44`: bell
-`0x7F`, marimba `0x5C`) combine into the target, in the chain at 0xB9A4-0xBAAE.
-
+`[I]` **Why it is still off: the full session.** Rendered on its own every segment is right,
+including shakuhachi, which tracks hardware note for note.  Rendered as part of the whole
+`listen/3` sequence, two of seventeen segments degrade -- choir3_pingpong and shakuhachi.
+It is not progressive (the last three segments are fine), so it is not simple exhaustion.
+That is the next thread, and the last one before this can be turned on: render the full
+session with `--log`, count voice allocations per segment, and find what those two do that
+the other fifteen do not.
 ### Superseded: a multiplicative falling ramp
 
 Recorded because it looked convincing.  Before the 20 ms quantisation was found, making the
