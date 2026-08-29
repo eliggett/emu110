@@ -151,11 +151,40 @@ A single divisor does not rescue it: 4 puts Bell almost exactly on hardware (set
 -24.2) but leaves piano and vib 2-3x fast and does nothing for marimba, which barely decays.
 `ENV_FALL_DIVISOR` is left at 1 rather than baking in a number that fits one tone.
 
-**Next: implement the falling ramp multiplicatively** and recalibrate against the decay
-curves above.  Note one thing that must be explained rather than fitted -- a single dB/s
-constant derived from piano's decay (0.35 dB/s at rate 0) predicts 58 dB/s for the measured
-release rate of -59, where hardware releases at roughly 600 dB/s.  Decay and release may not
-share a constant, and that is a clue about the mechanism, not noise.
+### Tried: a multiplicative falling ramp.  Fixes the decay, contradicts the release.
+
+Worth recording because it fits so well and is still wrong.  Making the fall shed a fixed
+FRACTION of the level per sample -- `speed / 2^26`, the same rate constant read as a fraction
+of full scale rather than an absolute step, which is one adder with a shifter on its input --
+brought the decay onto hardware for seven of twelve tones:
+
+| tone | hw | emu | | tone | hw | emu |
+|---|---|---|---|---|---|---|
+| choir | -3.0 | **-3.1** | | piano | -45.9 | -34.2 |
+| strings | -2.8 | **-3.1** | | slap | -61.3 | -28.1 |
+| brass | -3.9 | **-4.2** | | vib | -67.4 | -26.8 |
+| flute | -5.0 | **-5.5** | | marimba | -63.9 | -4.7 |
+| bell | -25.2 | **-24.5** | | fbass | -71.8 | -2.6 |
+
+Piano tracked the hardware curve within a few dB across five seconds, against dying at 0.8 s
+before.  But it breaks the release, and the release is the cleaner measurement.  The firmware
+halves the rate every 6.02 dB step (0xC0C4, `shrab 42, #01`).  Under a multiplicative fall
+that halving doubles the time per step, so the release decelerates:
+
+    rate -61 -> 52.3 dB/s,  -53 -> 26.2,  -45 -> 13.1,  -37 -> 6.5,  -29 -> 3.3
+
+Hardware's releases fit a straight line in dB to **0.23-0.27 dB rms** -- no worse than the
+tone's own amplitude ripple -- over 8-9 points on three tones.  A release decelerating 16x
+could not fit that.  Under an ADDITIVE fall the same halving keeps the time per step constant
+(measured: 0.162, 0.190, 0.191, 0.190 s) and so gives exactly the constant dB/s that was
+measured.  Additive is therefore right, and has been restored.
+
+`[I]` **So the decay error is not the ramp law.** With the fall additive the decay runs at a
+constant ~31 dB/s where hardware starts near 14 dB/s and decelerates to 3.  Since the ramp
+law and the rate bytes are both confirmed, what differs must be the SEQUENCE of segments the
+phase machine issues.  One concrete lead: the rate stops halving at -4 and sits there, so the
+last four steps accelerate (0.135, 0.069, 0.035, 0.017 s) into the kill branch instead of
+holding a constant step time.  0xC0C4 should take -4 to -2 to -1; find out why it does not.
 
 ### Reading the CPU's registers
 
