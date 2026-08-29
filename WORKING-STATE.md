@@ -222,13 +222,37 @@ against 0.122).  Roughly half the release residual is the known level-scale item
 16-unit step is really 5.80 dB rather than 6.02, the emulator reads 4% slow by construction.
 The fall divisor has NOT been tuned to absorb that.
 
-`[I]` **Why it is still off: the full session.** Rendered on its own every segment is right,
-including shakuhachi, which tracks hardware note for note.  Rendered as part of the whole
-`listen/3` sequence, two of seventeen segments degrade -- choir3_pingpong and shakuhachi.
-It is not progressive (the last three segments are fine), so it is not simple exhaustion.
-That is the next thread, and the last one before this can be turned on: render the full
-session with `--log`, count voice allocations per segment, and find what those two do that
-the other fifteen do not.
+### The last fault was in the driver, not the envelope
+
+Six of seventeen segments retriggered their notes -- the same voice restarting two or three
+times within 150 ms of note-on -- but only with the engine on, and only for segments whose
+voices landed in 24-31.
+
+`BA45: st 54, 142c` in the phase-1 handler is a 16-bit store whose low byte is the status
+select.  snd_w forwarded its high half by the general rule "high byte goes to offset + 1",
+which put it in register **0x17 -- the voice-enable group for voices 24-31**.  Every status
+select silently switched eight voices off.  The status selects now return before that rule.
+
+With it fixed, sixteen of seventeen segments allocate voices identically to the old stand-in.
+The seventeenth, wide_piano_jazz, allocates 82 against 100 -- expected, and arguably right:
+with real releases voices stay busy longer, and its envelope still correlates 0.94 with the
+hardware recording.
+
+## The envelope engine is ON by default
+
+Against the whole `listen/3` reference session, per segment: note-activity within a few
+points of hardware and the dB envelope correlating **0.79-0.95** (drums 0.38, but percussive
+transients do not correlate well in any case).
+
+`[I]` Two loose ends, neither blocking:
+
+* the release sits at a constant 0.92-0.94x.  About half of that is the level-scale item
+  below: if a 16-unit step is really 5.80 dB rather than 6.02, the emulator reads 4% slow by
+  construction.  The fall divisor has deliberately NOT been tuned to absorb it.
+* `set_env_release_db_per_s()` and `voice_status()` are now dead unless ENV_ENGINE is set
+  false.  They should go once this has had some mileage -- carrying two mechanisms is what
+  let an earlier `m_stream->update()` change slip through unnoticed.
+
 ### Superseded: a multiplicative falling ramp
 
 Recorded because it looked convincing.  Before the 20 ms quantisation was found, making the
