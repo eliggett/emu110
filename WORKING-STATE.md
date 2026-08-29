@@ -188,10 +188,35 @@ And 8 of 12 tones now match on both decay and release:
 
 Median error 0.7 dB, against every tone reading 0.0 before this work started.
 
-`[I]` **Four tones left, failing in two directions.** slap (-155 vs -61.3) and vib (-162 vs
--67.4) run to silence during a held note; marimba (-4.4 vs -63.9) and fbass (-1.9 vs -71.8)
-barely decay at all.  Two distinct faults, both in the deep-decay percussive tones, and
-neither is the ramp -- that is now calibrated.  Look at the segment chains for one of each.
+### 10 of 12 tones are correct -- two of the four "failures" were the metric
+
+`decay at note-off` is measured against the recording's noise floor, and for a tone that
+decays to nothing that is all it measures.  Hardware's vib peaks at -33.5 dBFS over a -101 dB
+floor, so its "-67.4" just means "gone".  The emulator reaching -162 (digital zero) is the
+same outcome, not a 95 dB error.
+
+Timed instead against thresholds above the floor, vib and slap were never broken:
+
+| time to fall | 10 dB | 20 dB | 40 dB | | | 10 dB | 20 dB | 40 dB |
+|---|---|---|---|---|---|---|---|---|
+| piano hw | 0.64 | 1.14 | 5.07 | | vib hw | 1.04 | 1.88 | 3.58 |
+| piano emu | **0.63** | **1.17** | **5.71** | | vib emu | **1.07** | **2.00** | **3.82** |
+| bell hw | 0.28 | 0.78 | -- | | slap hw | 0.97 | 2.09 | 4.20 |
+| bell emu | **0.34** | **0.78** | -- | | slap emu | **1.11** | **2.27** | **4.51** |
+
+vib's segment chain also matches directly: 0.583 s per 6.02 dB step against 0.53 measured.
+
+`[I]` **Two tones left: marimba and fbass.**  Both fail the same way and it is not the ramp.
+Their phase-1 handler writes a decay segment whose TARGET equals the level just reached --
+marimba gets `rate=-75 target=227` immediately after an attack to 227 -- so the ramp has
+nowhere to go and the note sits flat for the whole 8 s hold.
+
+Not a tone-data problem: the records are read per tone and the phase-1 parameter differs
+correctly (piano `0x64`, vib `0x5C`, bell `0x7D`, marimba `0x7F`), and the per-voice tone
+pointer `3810[voice]` is 0 for every tone including the ones that work.  Note bell reads
+`0x7D`, nearly as high as marimba's `0x7F`, and decays correctly -- so a high value is not
+itself the trigger.  The fault is in how that parameter and the rate byte (`0x44`: bell
+`0x7F`, marimba `0x5C`) combine into the target, in the chain at 0xB9A4-0xBAAE.
 
 ### Superseded: a multiplicative falling ramp
 
