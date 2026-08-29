@@ -108,12 +108,29 @@ back as 96, the rate clamped to its minimum, and every release stalled.  With th
 restored the same note-off produces a rate of **-59** instead of -2, and the percussive
 tones decay further (vib -7.4 -> -10.5, slap -4.6 -> -7.5, fbass -0.9 -> -2.9).
 
-`[I]` **What still stalls.** The release now runs one fast segment (rate -59, target 167,
-about 5 ms) and then the next phase writes rate 0 -- a HOLD -- at target 151, roughly 24 dB
-below the peak, instead of continuing to zero.  A real exponential release needs the CPU to
-keep issuing segments with a recomputed (smaller) rate as the level falls, which is exactly
-what the rate-from-level table at 0xAFC6 is for.  So the question is why the phase after the
-release holds rather than issuing the next segment.  That is the next thread.
+**The status word carries the RATE in its low byte, and returning 0 there stalled every
+release.** Select 0x16 hands back the voice's whole current segment: the level reached in the
+high byte, the rate it is running at in the low byte. The release handler at 0xBEBD reads
+that word, scales the rate down through 0xC0C4 (`shrab 42, #01`) and writes it back -- which
+is how an exponential release is built out of linear segments. The proof that the low byte is
+meaningful is in the sustain handler, which has to `clrb` it at 0xBE99 to get a rate of zero.
+With it fixed, **every tone's release now completes**: all twelve reach 60 dB down, in
+0.08-0.17 s against hardware's 0.07-1.16 s, and voices are freed instead of hanging.
+
+The decay chain is now visible and its SHAPE is right. Piano steps its target down in 16-unit
+(6.02 dB) increments with the rate halved each time -- a piecewise-linear exponential --
+totalling about 48 dB against hardware's 45.9 dB.
+
+`[I]` **What is wrong now: the decay never stops at a sustain level.** It keeps stepping until
+the level falls under 0x2F, where 0xBF16 writes volume 0 and frees the voice -- while the key
+is still down. So piano, slap and vib decay to digital silence during the hold (-165, -154,
+-157 dB against -45.9, -61.3, -67.4), and the whole chain runs in 1 s where hardware takes 8.
+Marimba and fbass go the other way and barely decay at all. Bell, which does decay to a fixed
+depth, lands at -25.0 against -25.2.
+
+So the missing piece is the transition out of the decay phase into sustain (phase 4, the hold
+at 0xBE7F). Something compares the current level against a per-tone sustain level and that
+comparison never fires. That is the next thread.
 
 ### Reading the CPU's registers
 
