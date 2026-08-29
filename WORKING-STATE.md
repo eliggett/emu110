@@ -151,40 +151,57 @@ A single divisor does not rescue it: 4 puts Bell almost exactly on hardware (set
 -24.2) but leaves piano and vib 2-3x fast and does nothing for marimba, which barely decays.
 `ENV_FALL_DIVISOR` is left at 1 rather than baking in a number that fits one tone.
 
-### Tried: a multiplicative falling ramp.  Fixes the decay, contradicts the release.
+### Solved: the envelope was quantised to MAME's sound-stream period
 
-Worth recording because it fits so well and is still wrong.  Making the fall shed a fixed
-FRACTION of the level per sample -- `speed / 2^26`, the same rate constant read as a fraction
-of full scale rather than an absolute step, which is one adder with a shifter on its input --
-brought the decay onto hardware for seven of twelve tones:
+Two faults, found by calibrating against the ENV RELEASE sweep.
 
-| tone | hw | emu | | tone | hw | emu |
-|---|---|---|---|---|---|---|
-| choir | -3.0 | **-3.1** | | piano | -45.9 | -34.2 |
-| strings | -2.8 | **-3.1** | | slap | -61.3 | -28.1 |
-| brass | -3.9 | **-4.2** | | vib | -67.4 | -26.8 |
-| flute | -5.0 | **-5.5** | | marimba | -63.9 | -4.7 |
-| bell | -25.2 | **-24.5** | | fbass | -71.8 | -2.6 |
+**1. Segments were quantised to 20 ms.** The level only advanced inside
+`sound_stream_update`, so the arrive -> interrupt -> next-segment cycle could complete at
+most once per stream update.  Every release segment took a flat 0.0200 s whatever rate the
+firmware asked for, capping the chain at fifty segments a second.  The release saturated at
+~316 dB/s against 5 to 1200 on hardware.  Fixed by updating the stream from the envelope
+timer before offering a slot.
 
-Piano tracked the hardware curve within a few dB across five seconds, against dying at 0.8 s
-before.  But it breaks the release, and the release is the cleaner measurement.  The firmware
-halves the rate every 6.02 dB step (0xC0C4, `shrab 42, #01`).  Under a multiplicative fall
-that halving doubles the time per step, so the release decelerates:
+**2. A falling ramp moves 16x slower than a rising one** at the same rate byte -- the rise
+adds `2^(rate/8) << 6` to the level, the fall subtracts `2^(rate/8) << 2`.  Measured, not
+fitted: with the quantisation gone the emulator/hardware ratio was a flat 15.0-15.7x across
+five ENV RELEASE settings spanning a 15x range of rate.
 
-    rate -61 -> 52.3 dB/s,  -53 -> 26.2,  -45 -> 13.1,  -37 -> 6.5,  -29 -> 3.3
+Against the hardware sweeps the release now tracks across its whole range:
 
-Hardware's releases fit a straight line in dB to **0.23-0.27 dB rms** -- no worse than the
-tone's own amplitude ripple -- over 8-9 points on three tones.  A release decelerating 16x
-could not fit that.  Under an ADDITIVE fall the same halving keeps the time per step constant
-(measured: 0.162, 0.190, 0.191, 0.190 s) and so gives exactly the constant dB/s that was
-measured.  Additive is therefore right, and has been restored.
+| ENV RELEASE | -7 | -6 | -5 | -4 | -3 | -2 | -1 | 0 |
+|---|---|---|---|---|---|---|---|---|
+| hardware dB/s | 5.5 | 10.4 | 20.8 | 42.6 | 85.1 | 172.5 | 343.9 | 684.0 |
+| emulator | 4.8 | 9.6 | 19.4 | 39.0 | 78.4 | 159.3 | 319.5 | 627.5 |
 
-`[I]` **So the decay error is not the ramp law.** With the fall additive the decay runs at a
-constant ~31 dB/s where hardware starts near 14 dB/s and decelerates to 3.  Since the ramp
-law and the rate bytes are both confirmed, what differs must be the SEQUENCE of segments the
-phase machine issues.  One concrete lead: the rate stops halving at -4 and sits there, so the
-last four steps accelerate (0.135, 0.069, 0.035, 0.017 s) into the kill branch instead of
-holding a constant step time.  0xC0C4 should take -4 to -2 to -1; find out why it does not.
+A constant 0.92x over 250x of range -- one small scale offset left, well inside the 5%
+uncertainty already noted on `ENV_RATE_SCALE` (the regression gave 60.6, rounded to 64).
+
+And 8 of 12 tones now match on both decay and release:
+
+| tone | decay hw/emu | release hw/emu | | tone | decay hw/emu |
+|---|---|---|---|---|---|
+| shaku | -2.4 / **-2.4** | 0.22 / **0.23 s** | | organ | -0.9 / -1.7 |
+| brass | -3.9 / **-4.0** | 0.07 / **0.07 s** | | flute | -5.0 / -5.4 |
+| choir | -3.0 / **-2.9** | 1.16 / **1.18 s** | | bell | -25.2 / -26.0 |
+| strings | -2.8 / **-2.7** | 0.88 / **0.91 s** | | piano | -45.9 / **-46.5** |
+
+Median error 0.7 dB, against every tone reading 0.0 before this work started.
+
+`[I]` **Four tones left, failing in two directions.** slap (-155 vs -61.3) and vib (-162 vs
+-67.4) run to silence during a held note; marimba (-4.4 vs -63.9) and fbass (-1.9 vs -71.8)
+barely decay at all.  Two distinct faults, both in the deep-decay percussive tones, and
+neither is the ramp -- that is now calibrated.  Look at the segment chains for one of each.
+
+### Superseded: a multiplicative falling ramp
+
+Recorded because it looked convincing.  Before the 20 ms quantisation was found, making the
+fall shed a fraction of the level per sample brought seven tones onto hardware -- but it
+made the release decelerate 16x (52 -> 26 -> 13 -> 6.5 -> 3.3 dB/s) where hardware's
+releases fit a straight line in dB to 0.23-0.27 dB rms.  Both directions are additive; the
+firmware builds every curve out of straight segments by halving the rate every 6.02 dB at
+`0xC0C4`, and the ramp itself is not curved.  The rate floor of -4 in that routine
+(`cmpb 42,#fc` / `ldb 42,#fc`) is deliberate, not a defect.
 
 ### Reading the CPU's registers
 
