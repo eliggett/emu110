@@ -121,16 +121,41 @@ The decay chain is now visible and its SHAPE is right. Piano steps its target do
 (6.02 dB) increments with the rate halved each time -- a piecewise-linear exponential --
 totalling about 48 dB against hardware's 45.9 dB.
 
-`[I]` **What is wrong now: the decay never stops at a sustain level.** It keeps stepping until
-the level falls under 0x2F, where 0xBF16 writes volume 0 and frees the voice -- while the key
-is still down. So piano, slap and vib decay to digital silence during the hold (-165, -154,
--157 dB against -45.9, -61.3, -67.4), and the whole chain runs in 1 s where hardware takes 8.
-Marimba and fbass go the other way and barely decay at all. Bell, which does decay to a fixed
-depth, lands at -25.0 against -25.2.
+### The decay: sustain level and rate bytes are right, the falling RAMP is not
 
-So the missing piece is the transition out of the decay phase into sustain (phase 4, the hold
-at 0xBE7F). Something compares the current level against a per-tone sustain level and that
-comparison never fires. That is the next thread.
+The sustain level and the transition were the obvious suspects and both turned out innocent:
+
+* `0xBD61` reads the sustain level from `36e0[voice]` and `0xBD76` transitions to the hold
+  at `0xBDB4` when the decay reaches it.  For A. Piano 1 that level is **0**, computed at
+  `0xBC0E` from tone parameter `0x28AB`, which really is `0x00` in the cached tone record.
+  A piano decaying to nothing is correct, so there is no missing transition.
+* The rate bytes were checked instruction by instruction with `db@`: key 36, key-scale
+  nibble 12, tone parameter `0x28AC` = 56, key-scale term -13, giving **43** -- exactly the
+  -43 the decay uses.  The firmware's arithmetic is right.
+
+What is wrong is the ramp itself, and only downwards.  The RISING ramp is pinned hard by the
+hardware attack times -- emulator 2.142 / 0.518 / 0.116 s against 2.164 / 0.540 / 0.122
+measured -- but the same scale applied downwards runs every decay about **4x too fast**:
+
+    piano, dB below peak    0.1    0.2    0.4    0.8    1.6    3.2    7.9 s
+    hardware               -2.3   -2.9   -6.3  -12.9  -23.4  -31.6  -45.4
+    emulator               -7.1  -11.1  -16.6  -29.6  (silent from 0.8 s)
+
+Hardware also DECELERATES -- 17 dB/s early, 3 dB/s late -- where the emulator holds a
+constant ~60 dB/s.  That is the signature of a multiplicative fall, and it is exactly what
+the original hardware analysis concluded: **rising ramps are linear in amplitude, falling
+ones are exponential** (0.14 dB rms vs 2.36 for the rise; 0.30 vs 66 for the fall).  Both are
+currently implemented as linear, which is right for one direction and wrong for the other.
+
+A single divisor does not rescue it: 4 puts Bell almost exactly on hardware (settles -24.3 vs
+-24.2) but leaves piano and vib 2-3x fast and does nothing for marimba, which barely decays.
+`ENV_FALL_DIVISOR` is left at 1 rather than baking in a number that fits one tone.
+
+**Next: implement the falling ramp multiplicatively** and recalibrate against the decay
+curves above.  Note one thing that must be explained rather than fitted -- a single dB/s
+constant derived from piano's decay (0.35 dB/s at rate 0) predicts 58 dB/s for the measured
+release rate of -59, where hardware releases at roughly 600 dB/s.  Decay and release may not
+share a constant, and that is a clue about the mechanism, not noise.
 
 ### Reading the CPU's registers
 
