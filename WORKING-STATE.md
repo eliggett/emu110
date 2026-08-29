@@ -100,11 +100,35 @@ every new note-on reads -180 dB, digital silence: the firmware force-silences th
 (0x7217 writes target 0, rate -128) when it needs it again, so nothing accumulates, no notes
 are lost, and the decay figures above are not contaminated by earlier notes.
 
-The cause is the note-off segment coming out at the minimum rate: at 0x64CA the computed
-rate is <= 0 and clamps to 1, giving `not 1` = -2. The ramp then reaches the release phase's
-target and the next phase HOLDS there instead of continuing to zero. The term that eats the
-rate is `((f2 - 3680[voice]) * nibble) >> 7`, where `3680[voice]` is a per-voice curve byte
-read from a 128-byte-per-row table at 0xAAC6 (0xC15F).
+**Half of this was a MAME CPU bug, now fixed.** Opcode 5F, `mulub dst, src, offset[reg]`,
+read the indexed operand and then overwrote it with the register instead of multiplying --
+`TMP = reg_r8(OP2)` where every sibling has `TMP *= reg_r8(OP2)`.  The U-110 computes its
+release rate with exactly that instruction at 0x64A0, `mulub 4a, 44, afc6[48]`: 96 * 66 came
+back as 96, the rate clamped to its minimum, and every release stalled.  With the multiply
+restored the same note-off produces a rate of **-59** instead of -2, and the percussive
+tones decay further (vib -7.4 -> -10.5, slap -4.6 -> -7.5, fbass -0.9 -> -2.9).
+
+`[I]` **What still stalls.** The release now runs one fast segment (rate -59, target 167,
+about 5 ms) and then the next phase writes rate 0 -- a HOLD -- at target 151, roughly 24 dB
+below the peak, instead of continuing to zero.  A real exponential release needs the CPU to
+keep issuing segments with a recomputed (smaller) rate as the level falls, which is exactly
+what the rate-from-level table at 0xAFC6 is for.  So the question is why the phase after the
+release holds rather than issuing the next segment.  That is the next thread.
+
+### Reading the CPU's registers
+
+The MCS-96 register file is on **AS_DATA**, not the program space, so the debugger reaches
+it with the **`db@`** prefix -- `db@0x4b` is register 0x4B.  `b@0x4b` reads ROM instead and
+looks plausible, which wasted time.  Combined with `tracelog` inside an active trace this
+gives direct readings of the firmware's own arithmetic:
+
+    bpset 64a0,1,{tracelog "44=%02X 48=%02X afc6=%02X\n",db@0x44,db@0x48,b@(0xafc6+db@0x48);g}
+
+That is how the MULUB bug was caught: the operands were right and the product was not.
+
+**And run `mame/u110`, not `mame/roland`.** Debugger invocations call `./u110` directly,
+which `u110run.sh` refreshes but a bare `./u110` does not -- several measurements here were
+taken against a stale binary before that was noticed.
 
 `[I]` **Nothing increments `f2`.** The only `inc f2` in the ROM, at 0x96E3, is inside ASCII
 menu text, and 0x439F's `ld f2, #ffff` is the only other write -- yet 0xC167 stores `f2` per
