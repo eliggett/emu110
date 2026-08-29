@@ -175,7 +175,7 @@ _seg('level_sweep', 'PART LEVEL 0..127, organ (flat sustain)',
 # 4. VELOCITY SENS x velocity.  The other handle on register 07, and the one that exposes
 #    how velocity is folded in -- at sens 0 the velocity should stop mattering entirely.
 _seg('velocity_sens', 'VELO SENS x velocity, organ',
-     [_trial(60, v, 1.2, 1.3, 'velo_sens=%d vel=%d' % (s, v),
+     [_trial(60, v, 1.2, 1.3, 'velo_sens=%d/vel=%d' % (s, v),
              {P_TONE: TONE['organ'], P_VELO_SENS: s})
       for s in (0, 4, 8, 12, 15) for v in (1, 40, 80, 127)])
 
@@ -213,6 +213,59 @@ _seg('decay_hold', 'long holds at neutral settings, twelve tones',
      [_trial(60, 100, 8.0, 3.0, 'tone=%s' % n,
              {P_TONE: t, P_ENV_ATTACK: env_val(0), P_ENV_RELEASE: env_val(0)})
       for n, t in sorted(TONE.items(), key=lambda kv: kv[1])])
+
+
+
+# ---------------------------------------------------------------- follow-up sweeps
+#
+# Run with --set followup.  These exist because the first take (listen/env) settled the
+# shape of the rate law but left two things open.
+#
+#  1. Every rate byte the first take produced was a multiple of 8, because ENV ATTACK and
+#     ENV RELEASE move the byte in steps of 16 and 8.  A pure exponential 2^(rate/8) and a
+#     float encoding (3-bit mantissa, 4-bit exponent, the same shape the wave ROM uses)
+#     agree EXACTLY at multiples of 8 and differ in between.  PART LEVEL moves reg07 a
+#     unit or two at a time, and the note-on rate is (reg07 * K) >> 8, so parking ENV
+#     ATTACK/RELEASE low and sweeping the level lands the rate byte on consecutive
+#     integers -- in the slow region where it is measurable.  That is the decisive test.
+#
+#  2. The slowest releases (ENV RELEASE -7, -6) are slower than the 3.2 s gap allows, so
+#     they came out unmeasurable.  Same trials, 25 s of tail.
+#
+# `rate_ladder_*` deliberately uses Vib 1: its own attack is ~20 ms, so the envelope, not
+# the sample, is what the measurement sees.
+
+FOLLOWUP = []
+
+
+def _fseg(name, label, trials, patch=0):
+    FOLLOWUP.append(dict(name=name, label=label, patch=patch, trials=trials))
+
+
+# A fine ladder in the ATTACK rate byte.  Two ENV ATTACK settings so the two ladders
+# overlap: -5 subtracts 80 from the base, -6 subtracts 96, and the level sweep moves the
+# base itself by about a unit per two steps of PART LEVEL.
+for _d in (-5, -6):
+    _fseg('rate_ladder_attack_%d' % abs(_d), 'attack rate ladder, ENV ATTACK %+d, vib' % _d,
+          [_trial(60, 100, 2.5, 1.6, 'env_attack=%+d/level=%d' % (_d, v),
+                  {P_TONE: TONE['vib'], P_ENV_ATTACK: env_val(_d), P_LEVEL: v})
+           for v in range(127, 39, -4)])
+
+# The same idea on the release, which measures far more cleanly -- no sample transient to
+# fight.  ENV RELEASE -4 puts organ near 40 dB/s, slow enough to resolve and fast enough
+# to finish inside the gap.
+_fseg('rate_ladder_release', 'release rate ladder, ENV RELEASE -4, organ',
+      [_trial(60, 100, 1.0, 3.2, 'env_release=-4/level=%d' % v,
+              {P_TONE: TONE['organ'], P_ENV_RELEASE: env_val(-4), P_LEVEL: v})
+       for v in range(127, 39, -4)])
+
+# The slow tail the first take could not reach.  25 s of gap: at ENV RELEASE -7 the fall
+# is under 1 dB/s, so it needs the room.
+for _tn, _t in (('vib', 15), ('choir', 56)):
+    _fseg('slow_release_' + _tn, 'ENV RELEASE -7..-4 with a long tail, %s' % _tn,
+          [_trial(60, 100, 1.0, 25.0, 'env_release=%+d' % d,
+                  {P_TONE: _t, P_ENV_RELEASE: env_val(d)})
+           for d in (-7, -6, -5, -4)])
 
 
 # ---------------------------------------------------------------- SysEx
@@ -380,7 +433,10 @@ def emu_rates(out_dir):
     writes.sort()
 
     rows = list(csv.DictReader(open(idx)))
-    print("%-26s %-18s %5s %5s   %s" % ("sweep", "trial", "reg07", "reg06", "voices"))
+    # Whitespace-columned, and read back by tools/env_analyse.py -- trial tags must not
+    # contain spaces or every column after them shifts.  They must not contain commas
+    # either: trials.csv is written unquoted.
+    print("%-26s %-26s %5s %5s   %s" % ("sweep", "trial", "reg07", "reg06", "voices"))
     for i, r in enumerate(rows):
         on = float(r['onset_s'])
         nxt = float(rows[i + 1]['onset_s']) if i + 1 < len(rows) else on + 30.0
@@ -392,12 +448,12 @@ def emu_rates(out_dir):
                 seen.add((v, lo, hi))
                 uniq.append((lo, hi))
         if not uniq:
-            print("%-26s %-18s %5s %5s   -" % (r['segment'], r['tag'], '-', '-'))
+            print("%-26s %-26s %5s %5s   -" % (r['segment'], r['tag'], '-', '-'))
             continue
         lo, hi = uniq[0]
         extra = "" if len(uniq) == 1 else \
             "  + " + " ".join("%d/%d" % (h, l) for l, h in uniq[1:])
-        print("%-26s %-18s %5d %5d   %d%s"
+        print("%-26s %-26s %5d %5d   %d%s"
               % (r['segment'], r['tag'], hi, lo, len(uniq), extra))
 
 # ---------------------------------------------------------------- main
@@ -413,6 +469,9 @@ def main():
     ap.add_argument('--patch', type=int, default=0,
                     help='patch to work in, as a program number (0 = P-01)')
     ap.add_argument('--only', default=None, help='comma-separated sweep names')
+    ap.add_argument('--set', default='main', choices=('main', 'followup', 'all'),
+                    help="'main' is the original 15 sweeps; 'followup' is the shorter set "
+                         "the first take showed was needed (see FOLLOWUP above)")
     ap.add_argument('--dry-run-midi', default=None, metavar='FILE',
                     help='write the sequence as a MIDI file instead of playing it')
     ap.add_argument('--emu-rates', default=None, metavar='DIR',
@@ -426,13 +485,15 @@ def main():
         emu_rates(args.emu_rates)
         return
 
-    segments = SEGMENTS
+    segments = {'main': SEGMENTS, 'followup': FOLLOWUP,
+                'all': SEGMENTS + FOLLOWUP}[args.set]
     if args.only:
         want = [x.strip() for x in args.only.split(',')]
-        segments = [s for s in SEGMENTS if s['name'] in want]
+        pool = segments
+        segments = [s for s in pool if s['name'] in want]
         if not segments:
             sys.exit("no sweep matched --only (names: %s)"
-                     % ", ".join(s['name'] for s in SEGMENTS))
+                     % ", ".join(s['name'] for s in pool))
     for s in segments:
         s['patch'] = args.patch
 

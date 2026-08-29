@@ -74,6 +74,9 @@ def main():
     ap.add_argument('--log', action='store_true',
                     help="also run MAME with -log and keep mame/error.log as "
                          "<out-dir>/error.log -- that is where the reg 06/07 values are")
+    ap.add_argument('--set', default=None,
+                    help="for --sequence capture_env: 'followup' or 'all' instead of the "
+                         "main sweep set")
     ap.add_argument('--sequence', default='capture_u110',
                     help='module in tools/ that defines the sequence: capture_u110 (the '
                          'reference take, the default) or capture_env (the envelope sweeps)')
@@ -84,6 +87,9 @@ def main():
     seq = importlib.import_module(args.sequence)
 
     segs = seq.SEGMENTS
+    if args.set:
+        segs = {'main': seq.SEGMENTS, 'followup': seq.FOLLOWUP,
+                'all': seq.SEGMENTS + seq.FOLLOWUP}[args.set]
     if args.only:
         want = [x.strip() for x in args.only.split(',')]
         segs = [s for s in seq.SEGMENTS if s['name'] in want]

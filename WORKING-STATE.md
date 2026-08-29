@@ -1,7 +1,201 @@
-# Working state — ping-pong / delta decode
+# Working state — envelope; ping-pong / delta decode
 
 Snapshot of the debugging context, so it survives a compaction. The settled findings live
-in `analysis/ROM-ANALYSIS.md` §3a; this file is the *scaffolding* around them.
+in `analysis/ROM-ANALYSIS.md`; this file is the *scaffolding* around them.
+
+## Current work: the missing decay envelope (2026-08-25)
+
+**Found: the envelope is CPU firmware, and MAME never runs it.** `0x140C` is not a volume
+pair — reg 07 is the envelope's **target level** (log, 16 units/octave) and reg 06 is the
+**signed ramp rate** (`+1..+0x7F` up, `0x80..0xFF` = `-128..-1` down). The chip ramps toward
+the target and raises `EXTINT`; the handler at **`0x41C4`** reads the voice index from chip
+reg `0x00`, reads that voice's current level back through the status port, and writes the
+next `(target, rate)` pair. Six phase handlers (`0xB932`, `0xBAF4`, `0xBD42`, `0xBE7F`,
+`0xBEBD`, `0xBFAC`) are the envelope segments, with key scaling about key `0x45`.
+
+`roland_lp.cpp` calls `m_int_callback(CLEAR_LINE)` at reset and never asserts it, and has no
+per-voice level, ramp or status port. Measured: **490 writes to reg 06/07 for 228 note-ons**
+over the whole 392 s reference session — the two identical stores at `0x6A59`/`0x6A5E` and
+nothing else. Every voice holds its note-on target forever.
+
+Full write-up in `analysis/ROM-ANALYSIS.md`, "The amplitude envelope lives in the CPU".
+
+### Measured on hardware (2026-08-25) — see `listen/env/ANALYSIS.md`
+
+* The ramp is a **straight line in dB**: 0.30 dB rms residual over 36 dB of fall, against
+  66 dB rms for a linear-amplitude model. The chip ramps a log-domain level.
+* **Speed doubles every 8 counts of the rate byte.** ENV RELEASE (which moves the byte by 8)
+  halves the time at every step — ratios 2.02, 2.05, 2.05, 2.00, 2.03, 1.99, 1.99 on organ,
+  and the same on vib and choir. ENV ATTACK (16 per step) gives ~4x per step. So
+  `speed = k * 2^(rate/8)`, with k ~ 7 dB/s at rate 0.
+* The **release rate scales with the target level** the same way the attack does:
+  ~`(reg07 * 62) >> 8` on Brass 1.
+* **No hold-time correction and no key scaling of the release** — both terms are in the
+  code, both measure flat to +/-3% on a flat-sustain tone. They are zero for these tones.
+
+### Settled by the follow-up take (`listen/env2`)
+
+* **The attack is linear in AMPLITUDE** (0.14 dB rms over 29 dB), decay and release are
+  exponential (0.24-0.70 dB rms in dB). Linear attack, exponential decay/release.
+* The rate byte is a **pure exponential, 8.01 counts per doubling** — 2.4 % residual over 41
+  trials spanning `reg06` 2..40 with consecutive integers. A 3-bit-mantissa float gives
+  15.4 % and a coefficient of 0.80 where 1.00 is required: rejected.
+* **Calibration**: `T = 2^(reg07/16 - reg06/8 - 10.886)` s, within 1 % at `reg06` = 8, 24,
+  40. That is a **20-bit linear level incremented by `2^(reg06/8)` once per engine sample
+  (32 kHz)** — which predicts -10.904 against the measured -10.886.
+* So the exponential release is **the CPU's doing**, not the chip's: `0x42B3` adds
+  `(3986[voice] * reg07) >> 9` to the rate with `reg07` refreshed from the level readback,
+  i.e. rate proportional to current level. A linear ramp plus a working EXTINT should
+  produce the measured exponential on its own — that is the test when it is implemented.
+
+### Implementation status (2026-08-28)
+
+In `roland_lp.cpp/h` behind `set_env_engine()`, **off by default** (the driver's `ENV_ENGINE`
+constant switches it and `snd_r` together). With it off the render is **bit-identical** to
+the pre-session build.
+
+The firmware's own envelope now runs, and half the tones are right. Decay over an 8 s hold,
+dB fallen at note-off, against `listen/env`:
+
+| tone | hardware | emulator | | tone | hardware | emulator |
+|---|---|---|---|---|---|---|
+| flute | -5.0 | **-5.1** | | fbass | -71.8 | -0.9 |
+| brass | -3.9 | **-4.1** | | vib | -67.4 | -7.4 |
+| choir | -3.0 | **-2.9** | | marimba | -63.9 | -4.5 |
+| strings | -2.8 | **-2.6** | | slap | -61.3 | -4.6 |
+| shaku | -2.4 | **-2.3** | | piano | -45.9 | -26.2 |
+| organ | -0.9 | **-1.1** | | bell | -25.2 | -8.5 |
+
+Every sustaining tone is within 0.2 dB. Before this work all twelve read 0.0.
+
+Three things had to be found to get there:
+
+* **The scanner was being switched off by the chorus.** Registers 0x19/0x1B/0x1D looked like
+  scanner configuration -- 0x00/0x21/0x64 written together at 0x43DA, and 0x21 is
+  suggestively the top slot number -- but the same trio is rewritten at 0xB4C6 from the
+  patch's CHORUS/TREMOLO byte (0x280E) through a table at 0xA726, beside code writing
+  0x378C/0x378E, which are exactly the RAM the handler's 0x20/0x21 branches read. Driving
+  the scanner from 0x1D killed the envelope whenever the firmware retuned the chorus.
+* **The interrupt is arrival-driven, not round-robin.** The phase advance at 0xBAD4 is an
+  unconditional `incb`, so one interrupt is one envelope step. A round-robin over 34 slots
+  would need ~11000/s to give a piano its attack, which the CPU cannot service; arrival
+  driven, a note needs about four. The "interrupt storm" that made this look wrong the first
+  time was the MCS-96 level-7 bug, since fixed.
+* **Register 0x1A is a fourth status select, and it reads the PLAY ADDRESS, not a level.**
+  0x71AA selects a voice there, reads 0x1404 and compares it with 3720[voice] -- and
+  3720[voice] is written at 0x66BA from the same word just sent to register 0x0E, the sample
+  LOOP address. The question is "has this voice reached its loop point", which gates several
+  phases. Implementing it as a level (the first guess) left every sustaining tone 1-2 dB
+  short; as an address they land within 0.2 dB.
+
+### Why it is still off
+
+**The release stalls part way, so notes hang audibly between notes.** After note-off the
+level drops 20-30 dB in the first quarter second and then sits there: piano goes -15 -> -41
+and creeps only to -51 over the next 3 s; vib flattens at -37 and stays. Hardware reaches
+60 dB down in 0.07 s (organ, brass), 0.09 s (piano), 0.88-1.16 s (strings, choir).
+
+Voices are NOT leaked -- an earlier note here said they were, wrongly. The level just before
+every new note-on reads -180 dB, digital silence: the firmware force-silences the voice
+(0x7217 writes target 0, rate -128) when it needs it again, so nothing accumulates, no notes
+are lost, and the decay figures above are not contaminated by earlier notes.
+
+The cause is the note-off segment coming out at the minimum rate: at 0x64CA the computed
+rate is <= 0 and clamps to 1, giving `not 1` = -2. The ramp then reaches the release phase's
+target and the next phase HOLDS there instead of continuing to zero. The term that eats the
+rate is `((f2 - 3680[voice]) * nibble) >> 7`, where `3680[voice]` is a per-voice curve byte
+read from a 128-byte-per-row table at 0xAAC6 (0xC15F).
+
+`[I]` **Nothing increments `f2`.** The only `inc f2` in the ROM, at 0x96E3, is inside ASCII
+menu text, and 0x439F's `ld f2, #ffff` is the only other write -- yet 0xC167 stores `f2` per
+voice at 0x36C0 as a timestamp, so it must be a running counter on real hardware. Either it
+is written through a pointer the search missed, or a timer this emulation does not deliver
+drives it. That is the next thread: with `f2` static the release rate is computed from a
+frozen clock.
+
+### What is still unknown
+### What is still unknown
+
+* exactly **when `EXTINT` fires** (on arrival at the target is the working assumption);
+* the **`0x142C` / reg `0x16` collision** — the envelope handler writes a voice index to the
+  register MAME decodes as voice-enable bits 24-31, so the U-110's 16-bit bus cannot map
+  that register at `addr/2` like the rest;
+* `[I]` the log level scale measures **0.36 dB/unit**, not the table's 0.3763, and the level
+  and velocity paths disagree with each other by 5%.
+
+### The measurement: tools/capture_env.py
+
+`tools/capture_env.py` drives a real U-110 through its envelope parameters over SysEx and
+records the result -- 15 sweeps, 172 trials, 14 min. It pairs with the emulator: the
+emulator runs the same firmware, so it computes the same rate byte and `-log` prints it,
+even though it then ignores it. Hardware gives the dB/s that byte produces.
+
+    python3 tools/capture_env.py --list
+    python3 tools/render_u110.py --sequence capture_env --log --out-dir listen/env-emu
+    python3 tools/capture_env.py --emu-rates listen/env-emu    # -> the rate per trial
+    python3 tools/capture_env.py --out-dir listen/env          # the hardware take
+
+The emulator half is already done and checked in as `listen/env-emu/rates.txt`. SysEx
+reaches the emulated U-110 and works: DT1 `F0 41 <dev> 23 12 <addr> <data> <sum> F7` with
+**device ID = control channel - 1** (firmware at `0x5624` masks `0x3C01` to a nibble) and
+**model ID `0x23`** (`0x5BD4`); part parameters at `00 1n xx`. PART LEVEL 127 -> 0 moves
+`reg07` 220 -> 48, and 48 = `0x30`, the mute constant.
+
+The three attack sweeps between them cover the rate byte densely:
+
+| ENV ATTACK | -7 | -6 | -5 | -4 | -3 | -2 | -1 | 0 | +1 | +2 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Vib 1 (`reg07` 211) | 1 | 8 | 24 | 40 | 56 | 72 | 88 | **104** | 120 | 127 |
+| Strings 1 (227) | 1 | 1 | 1 | 1 | 8 | 24 | 40 | **56** | 72 | 88 |
+| Brass 1 (227) | 1 | 16 | 32 | 48 | 64 | 80 | 96 | **112** | 127 | 127 |
+
+Steps of exactly 16 -- the `16 * (nibble - 8)` term at `0x6A0C` -- around the unmodified
+base `(reg07 * 127) >> 8`, clamped to 1 below and to the `0xB0C6` ceiling above. Seventeen
+distinct known rate values from three sweeps.
+
+**The release sweeps do not pair.** The emulator's note-off writes no volume at all: the
+release path at `0x64FF` is gated on the envelope phase, the phase only advances from the
+EXTINT handler, and that handler never runs. MAME cuts the enable bit at `0x1422` and
+substitutes its own fixed fade. `release_by_hold` is the sweep that tests the disassembly's
+claim directly -- same note, same settings, holds from 0.2 s to 8 s, and the slope should
+get shallower with hold time.
+
+### The status port reports a 26-bit LINEAR level `[C]`
+
+Found while chasing the missing note-off. The routine at `0x7655` reads the same voice
+three times, once per select:
+
+```
+7658: st 54, 142c ; ld 3e, 1404      ; select 0x16 -> one field
+7662: stb 54, 1420 ; ld 44, 1404     ; select 0x10 -> the HIGH 16 bits
+766C: stb 54, 1424 ; ld 46, 1404     ; select 0x12 -> the LOW 10 bits
+7679: and 46, #03ff
+767D: shll 44, #06                   ; normalise the 32-bit pair...
+7683: (loop) shll 44, #01 until bit 15 of byte 47 is set, counting 15 down
+7690: 40 = (count << 4) | (bits 6..3 of byte 47)
+```
+
+That is a normalise-and-take-the-exponent: the result is `exponent * 16 + mantissa nibble`
+-- **the same 16-units-per-octave log scale as `reg07`**. So the chip reports a voice's
+current level as a 26-bit *linear* value split across two selects, and the firmware converts
+it to the log domain itself. That is a precise specification for what the device has to
+implement, and it is the piece the note-off path is waiting on.
+
+### Anchors for calibrating the rate
+
+* note-off writes a rate built from `0xAFC6[]`, reduced by how long the note was held;
+  measured hardware release is **94-166 dB/s, exponential** (`listen/2/ENVELOPE.md`).
+* voice kill and power-up both write `0x0080`: target 0, rate `-128` — the steepest fall.
+* `listen/3` (hardware) and `listen/emu2` (emulator) are segment-for-segment aligned by
+  `tools/render_u110.py`, so any candidate rate law can be A/B'd directly.
+
+### Tooling added
+
+`tools/mcs96dasm.py` — a standalone MCS-96 disassembler for the program ROM
+(`--xref`, `--all`). MAME's `-debugscript` only runs when the debugger actually stops the
+machine, which under `-debugger none` it usually does not: the `dasm` command silently does
+nothing. This reads the same generated tables MAME's own disassembler is built from and
+its output matches the debugger's byte for byte.
 
 ## Where things stand — RESOLVED (2026-08-25)
 

@@ -57,7 +57,15 @@ fi
 # the old code -- which has happened.  Refresh it here instead of warning about it.
 if [ -x "$HERE/mame/roland" ] && [ "$HERE/mame/roland" -nt "$HERE/mame/u110" ]; then
   echo "u110run: mame/roland is newer than mame/u110 - refreshing the copy." >&2
-  cp "$HERE/mame/roland" "$HERE/mame/u110"
+  if ! cp "$HERE/mame/roland" "$HERE/mame/u110"; then
+    # "Text file busy" means another MAME still has the copy open -- a run that hung, or
+    # one left behind by a debugger session.  Carrying on would measure the OLD build,
+    # which is the exact trap this refresh exists to close, so stop instead.
+    echo "u110run: could not refresh mame/u110 - it is still in use.  Running processes:" >&2
+    pgrep -af "mame/u110|[.]/u110" >&2 || true
+    echo "u110run: kill those and re-run; refusing to measure a stale binary." >&2
+    exit 1
+  fi
 fi
 printf "u110run: patch P-%02d, %ss%s\n" "$PATCHNO" "$SECS" "${MIDI:+, midi $(basename "$MIDI")}"
 
