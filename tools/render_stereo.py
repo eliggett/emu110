@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Render a U-110 patch in stereo, using its per-part Output Assign.
 
 The U-110 is one mono DAC time-multiplexed to six outputs, which IC38 sums to the MIX

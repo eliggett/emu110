@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """
 render_u110.py -- run the emulator through the SAME sequence tools/capture_u110.py plays
 on the hardware, and write the results in the same shape.

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Derive the transfer function between the wave ROM and the U-110's analog output.
 
 Divides a hardware capture's spectrum by a dry render of exactly the same wave-ROM data

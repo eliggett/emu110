@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The U-110's 50 Output Modes (Owner's Manual p.27, "Output Modes").
 
 Each mode partitions the 31 voices into Voice Groups.  A Part's Output Assign selects a

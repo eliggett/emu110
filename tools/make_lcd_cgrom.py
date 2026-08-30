@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """
 Generate a SYNTHETIC 5x8 character generator ROM for the U-110's LCD.
 

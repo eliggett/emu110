@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """
 capture_u110.py -- drive a real Roland U-110 over MIDI and record its audio.
 

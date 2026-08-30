@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Run the U-110 driver headlessly -- no window at all.
 #
 #   tools/u110run.sh [-p PATCH] [-t SECONDS] [-m MIDIFILE] [-w WAVOUT] [extra mame args...]

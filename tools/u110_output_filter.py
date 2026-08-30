@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The U-110's analog reconstruction filter (IC30-35, service notes Fig. 4).
 
 Two equal-R Sallen-Key lowpass sections plus the output RC.  Component values from the

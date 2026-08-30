@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """
 env_analyse.py -- measure attack and release slopes from a tools/capture_env.py take.
 

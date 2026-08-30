@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Assemble a U-110 ping-pong loop offline, treating the ROM bytes as deltas.
 
 Nothing here touches the emulator.  The point is to demonstrate the scheme end to end on

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Render a U-110 preset tone at a given MIDI note, straight from the wave ROMs.
 
 Resolves the tone's keymap to pick the right multisample, pitch-shifts from that

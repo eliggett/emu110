@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Disassemble MCS-96 (8x9x) code -- the U-110's N8097BH program ROM.
 
     python3 tools/mcs96dasm.py 0x69f0 0x120

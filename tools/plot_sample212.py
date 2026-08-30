@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Plot the Sound Check waveform (wave-ROM sample 212) to a PDF.
 
 The point of interest: the ROM holds a trapezoid, but real hardware emits a near-pure

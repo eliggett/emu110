@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Plot the U-110's 8-bit -> 16-bit companding curve and its step size.
 
 The wave ROM byte is not linear PCM.  It is a small floating-point format applied to the

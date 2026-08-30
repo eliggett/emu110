@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Bit-exact model of the U-110 ping-pong loop, diffed against MAME, plus seam plots.
 
 Models one voice exactly as mb87419_mb87420_device does -- same delta accumulation, same

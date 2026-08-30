@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Render a wave-ROM sample under competing decoder hypotheses, for listening tests.
 
 No envelope, no mixing, no interpolation -- one sample played at 1 byte per output frame,

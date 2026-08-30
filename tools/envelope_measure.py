@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Measure the U-110's amplitude envelope by dividing hardware audio by a dry render.
 
 The problem with reading an envelope straight off a note is that the wave-ROM sample has

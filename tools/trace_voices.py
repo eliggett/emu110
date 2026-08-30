@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Reconstruct voice setups from a roland_u110 register trace (error.log).
 
 Maintains per-voice register state and snapshots it whenever a voice is switched

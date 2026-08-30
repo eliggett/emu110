@@ -1,4 +1,6 @@
 #!/usr/bin/python3
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 import argparse
 import numpy as np

@@ -1,3 +1,5 @@
+-- Copyright (c) 2026 Elliott H. Liggett
+-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Select a U-110 patch from the front panel, for automated runs.
 --
 --   U110_PATCH=4 mame u110 -autoboot_script tools/select_patch.lua
