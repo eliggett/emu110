@@ -170,7 +170,7 @@ def main():
     ax = fig.add_subplot(gs[3])
     try:
         import wave as _w
-        f = _w.open('listen/renders/choir_pp_v1.wav')
+        f = _w.open('listen/emulated/scratch/choir_pp_v1.wav')
         rr = f.getframerate()
         y = (np.frombuffer(f.readframes(f.getnframes()), dtype='<i2').astype(float)
              .reshape(-1, f.getnchannels()).mean(1) / 32768.)

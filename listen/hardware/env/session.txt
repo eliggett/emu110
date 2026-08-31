@@ -1,0 +1,211 @@
+U-110 ENVELOPE capture (tools/capture_env.py)
+sample rate 48000, channels 2, duration 860.05 s, peak -15.7 dBFS
+notes on ch 1, patch changes on ch 16, part 0, device ID 15
+parameters saved before the run: level=127, velo_sens=15, env_attack=8, env_release=8
+
+Times are send times.  Measure real onsets from the audio.
+
+   3.003  == release_sweep_vib : ENV RELEASE -7..+7, vib ==
+   4.155  env_release=-7               note  60 vel 100 hold 1.00s
+   8.509  env_release=-6               note  60 vel 100 hold 1.00s
+  12.863  env_release=-5               note  60 vel 100 hold 1.00s
+  17.217  env_release=-4               note  60 vel 100 hold 1.00s
+  21.571  env_release=-3               note  60 vel 100 hold 1.00s
+  25.925  env_release=-2               note  60 vel 100 hold 1.00s
+  30.279  env_release=-1               note  60 vel 100 hold 1.00s
+  34.633  env_release=+0               note  60 vel 100 hold 1.00s
+  38.987  env_release=+1               note  60 vel 100 hold 1.00s
+  43.341  env_release=+2               note  60 vel 100 hold 1.00s
+  47.696  env_release=+3               note  60 vel 100 hold 1.00s
+  52.050  env_release=+4               note  60 vel 100 hold 1.00s
+  56.405  env_release=+5               note  60 vel 100 hold 1.00s
+  60.760  env_release=+6               note  60 vel 100 hold 1.00s
+  65.115  env_release=+7               note  60 vel 100 hold 1.00s
+  71.822  == release_sweep_organ : ENV RELEASE -7..+7, organ ==
+  72.973  env_release=-7               note  60 vel 100 hold 1.00s
+  77.328  env_release=-6               note  60 vel 100 hold 1.00s
+  81.682  env_release=-5               note  60 vel 100 hold 1.00s
+  86.036  env_release=-4               note  60 vel 100 hold 1.00s
+  90.390  env_release=-3               note  60 vel 100 hold 1.00s
+  94.744  env_release=-2               note  60 vel 100 hold 1.00s
+  99.098  env_release=-1               note  60 vel 100 hold 1.00s
+ 103.452  env_release=+0               note  60 vel 100 hold 1.00s
+ 107.806  env_release=+1               note  60 vel 100 hold 1.00s
+ 112.160  env_release=+2               note  60 vel 100 hold 1.00s
+ 116.514  env_release=+3               note  60 vel 100 hold 1.00s
+ 120.868  env_release=+4               note  60 vel 100 hold 1.00s
+ 125.222  env_release=+5               note  60 vel 100 hold 1.00s
+ 129.576  env_release=+6               note  60 vel 100 hold 1.00s
+ 133.930  env_release=+7               note  60 vel 100 hold 1.00s
+ 140.635  == release_sweep_choir : ENV RELEASE -7..+7, choir ==
+ 141.787  env_release=-7               note  60 vel 100 hold 1.00s
+ 146.141  env_release=-6               note  60 vel 100 hold 1.00s
+ 150.496  env_release=-5               note  60 vel 100 hold 1.00s
+ 154.850  env_release=-4               note  60 vel 100 hold 1.00s
+ 159.205  env_release=-3               note  60 vel 100 hold 1.00s
+ 163.559  env_release=-2               note  60 vel 100 hold 1.00s
+ 167.913  env_release=-1               note  60 vel 100 hold 1.00s
+ 172.268  env_release=+0               note  60 vel 100 hold 1.00s
+ 176.622  env_release=+1               note  60 vel 100 hold 1.00s
+ 180.977  env_release=+2               note  60 vel 100 hold 1.00s
+ 185.332  env_release=+3               note  60 vel 100 hold 1.00s
+ 189.687  env_release=+4               note  60 vel 100 hold 1.00s
+ 194.041  env_release=+5               note  60 vel 100 hold 1.00s
+ 198.394  env_release=+6               note  60 vel 100 hold 1.00s
+ 202.748  env_release=+7               note  60 vel 100 hold 1.00s
+ 209.453  == attack_sweep_vib : ENV ATTACK -7..+7, vib ==
+ 210.605  env_attack=-7                note  60 vel 100 hold 2.50s
+ 215.059  env_attack=-6                note  60 vel 100 hold 2.50s
+ 219.514  env_attack=-5                note  60 vel 100 hold 2.50s
+ 223.968  env_attack=-4                note  60 vel 100 hold 2.50s
+ 228.422  env_attack=-3                note  60 vel 100 hold 2.50s
+ 232.877  env_attack=-2                note  60 vel 100 hold 2.50s
+ 237.331  env_attack=-1                note  60 vel 100 hold 2.50s
+ 241.786  env_attack=+0                note  60 vel 100 hold 2.50s
+ 246.241  env_attack=+1                note  60 vel 100 hold 2.50s
+ 250.696  env_attack=+2                note  60 vel 100 hold 2.50s
+ 255.151  env_attack=+3                note  60 vel 100 hold 2.50s
+ 259.606  env_attack=+4                note  60 vel 100 hold 2.50s
+ 264.061  env_attack=+5                note  60 vel 100 hold 2.50s
+ 268.517  env_attack=+6                note  60 vel 100 hold 2.50s
+ 272.972  env_attack=+7                note  60 vel 100 hold 2.50s
+ 279.779  == attack_sweep_strings : ENV ATTACK -7..+7, strings ==
+ 280.931  env_attack=-7                note  60 vel 100 hold 2.50s
+ 285.386  env_attack=-6                note  60 vel 100 hold 2.50s
+ 289.842  env_attack=-5                note  60 vel 100 hold 2.50s
+ 294.297  env_attack=-4                note  60 vel 100 hold 2.50s
+ 298.752  env_attack=-3                note  60 vel 100 hold 2.50s
+ 303.207  env_attack=-2                note  60 vel 100 hold 2.50s
+ 307.663  env_attack=-1                note  60 vel 100 hold 2.50s
+ 312.118  env_attack=+0                note  60 vel 100 hold 2.50s
+ 316.573  env_attack=+1                note  60 vel 100 hold 2.50s
+ 321.029  env_attack=+2                note  60 vel 100 hold 2.50s
+ 325.484  env_attack=+3                note  60 vel 100 hold 2.50s
+ 329.939  env_attack=+4                note  60 vel 100 hold 2.50s
+ 334.394  env_attack=+5                note  60 vel 100 hold 2.50s
+ 338.849  env_attack=+6                note  60 vel 100 hold 2.50s
+ 343.305  env_attack=+7                note  60 vel 100 hold 2.50s
+ 350.112  == attack_sweep_brass : ENV ATTACK -7..+7, brass ==
+ 351.264  env_attack=-7                note  60 vel 100 hold 2.50s
+ 355.719  env_attack=-6                note  60 vel 100 hold 2.50s
+ 360.173  env_attack=-5                note  60 vel 100 hold 2.50s
+ 364.628  env_attack=-4                note  60 vel 100 hold 2.50s
+ 369.083  env_attack=-3                note  60 vel 100 hold 2.50s
+ 373.537  env_attack=-2                note  60 vel 100 hold 2.50s
+ 377.991  env_attack=-1                note  60 vel 100 hold 2.50s
+ 382.445  env_attack=+0                note  60 vel 100 hold 2.50s
+ 386.900  env_attack=+1                note  60 vel 100 hold 2.50s
+ 391.355  env_attack=+2                note  60 vel 100 hold 2.50s
+ 395.809  env_attack=+3                note  60 vel 100 hold 2.50s
+ 400.264  env_attack=+4                note  60 vel 100 hold 2.50s
+ 404.719  env_attack=+5                note  60 vel 100 hold 2.50s
+ 409.174  env_attack=+6                note  60 vel 100 hold 2.50s
+ 413.628  env_attack=+7                note  60 vel 100 hold 2.50s
+ 420.434  == level_sweep : PART LEVEL 0..127, organ (flat sustain) ==
+ 421.586  level=127                    note  60 vel 100 hold 1.20s
+ 424.240  level=112                    note  60 vel 100 hold 1.20s
+ 426.894  level=96                     note  60 vel 100 hold 1.20s
+ 429.547  level=80                     note  60 vel 100 hold 1.20s
+ 432.200  level=64                     note  60 vel 100 hold 1.20s
+ 434.854  level=56                     note  60 vel 100 hold 1.20s
+ 437.507  level=48                     note  60 vel 100 hold 1.20s
+ 440.160  level=40                     note  60 vel 100 hold 1.20s
+ 442.813  level=32                     note  60 vel 100 hold 1.20s
+ 445.466  level=24                     note  60 vel 100 hold 1.20s
+ 448.118  level=16                     note  60 vel 100 hold 1.20s
+ 450.771  level=8                      note  60 vel 100 hold 1.20s
+ 453.424  level=4                      note  60 vel 100 hold 1.20s
+ 456.076  level=0                      note  60 vel 100 hold 1.20s
+ 461.079  == velocity_sens : VELO SENS x velocity, organ ==
+ 462.231  velo_sens=0 vel=1            note  60 vel   1 hold 1.20s
+ 464.884  velo_sens=0 vel=40           note  60 vel  40 hold 1.20s
+ 467.537  velo_sens=0 vel=80           note  60 vel  80 hold 1.20s
+ 470.189  velo_sens=0 vel=127          note  60 vel 127 hold 1.20s
+ 472.842  velo_sens=4 vel=1            note  60 vel   1 hold 1.20s
+ 475.495  velo_sens=4 vel=40           note  60 vel  40 hold 1.20s
+ 478.148  velo_sens=4 vel=80           note  60 vel  80 hold 1.20s
+ 480.801  velo_sens=4 vel=127          note  60 vel 127 hold 1.20s
+ 483.455  velo_sens=8 vel=1            note  60 vel   1 hold 1.20s
+ 486.107  velo_sens=8 vel=40           note  60 vel  40 hold 1.20s
+ 488.761  velo_sens=8 vel=80           note  60 vel  80 hold 1.20s
+ 491.414  velo_sens=8 vel=127          note  60 vel 127 hold 1.20s
+ 494.067  velo_sens=12 vel=1           note  60 vel   1 hold 1.20s
+ 496.719  velo_sens=12 vel=40          note  60 vel  40 hold 1.20s
+ 499.372  velo_sens=12 vel=80          note  60 vel  80 hold 1.20s
+ 502.025  velo_sens=12 vel=127         note  60 vel 127 hold 1.20s
+ 504.678  velo_sens=15 vel=1           note  60 vel   1 hold 1.20s
+ 507.331  velo_sens=15 vel=40          note  60 vel  40 hold 1.20s
+ 509.983  velo_sens=15 vel=80          note  60 vel  80 hold 1.20s
+ 512.636  velo_sens=15 vel=127         note  60 vel 127 hold 1.20s
+ 517.642  == release_by_hold_vib : release vs hold time, vib ==
+ 518.794  hold=0.20                    note  60 vel 100 hold 0.20s
+ 522.649  hold=0.50                    note  60 vel 100 hold 0.50s
+ 526.803  hold=1.00                    note  60 vel 100 hold 1.00s
+ 531.459  hold=2.00                    note  60 vel 100 hold 2.00s
+ 537.114  hold=4.00                    note  60 vel 100 hold 4.00s
+ 544.772  hold=8.00                    note  60 vel 100 hold 8.00s
+ 558.786  == release_by_hold_organ : release vs hold time, organ ==
+ 559.938  hold=0.20                    note  60 vel 100 hold 0.20s
+ 563.792  hold=0.50                    note  60 vel 100 hold 0.50s
+ 567.946  hold=1.00                    note  60 vel 100 hold 1.00s
+ 572.600  hold=2.00                    note  60 vel 100 hold 2.00s
+ 578.255  hold=4.00                    note  60 vel 100 hold 4.00s
+ 585.911  hold=8.00                    note  60 vel 100 hold 8.00s
+ 599.924  == release_by_key_vib : release across the key range, vib ==
+ 601.076  note=36                      note  36 vel 100 hold 1.00s
+ 605.430  note=48                      note  48 vel 100 hold 1.00s
+ 609.784  note=60                      note  60 vel 100 hold 1.00s
+ 614.138  note=69                      note  69 vel 100 hold 1.00s
+ 618.493  note=72                      note  72 vel 100 hold 1.00s
+ 622.847  note=84                      note  84 vel 100 hold 1.00s
+ 627.201  note=96                      note  96 vel 100 hold 1.00s
+ 633.906  == release_by_key_organ : release across the key range, organ ==
+ 635.058  note=36                      note  36 vel 100 hold 1.00s
+ 639.412  note=48                      note  48 vel 100 hold 1.00s
+ 643.766  note=60                      note  60 vel 100 hold 1.00s
+ 648.120  note=69                      note  69 vel 100 hold 1.00s
+ 652.474  note=72                      note  72 vel 100 hold 1.00s
+ 656.828  note=84                      note  84 vel 100 hold 1.00s
+ 661.182  note=96                      note  96 vel 100 hold 1.00s
+ 667.887  == attack_by_velocity_strings : attack vs velocity, strings ==
+ 669.039  vel=16                       note  60 vel  16 hold 2.50s
+ 673.493  vel=40                       note  60 vel  40 hold 2.50s
+ 677.948  vel=64                       note  60 vel  64 hold 2.50s
+ 682.402  vel=96                       note  60 vel  96 hold 2.50s
+ 686.857  vel=127                      note  60 vel 127 hold 2.50s
+ 693.663  == attack_by_velocity_brass : attack vs velocity, brass ==
+ 694.815  vel=16                       note  60 vel  16 hold 2.50s
+ 699.269  vel=40                       note  60 vel  40 hold 2.50s
+ 703.724  vel=64                       note  60 vel  64 hold 2.50s
+ 708.179  vel=96                       note  60 vel  96 hold 2.50s
+ 712.633  vel=127                      note  60 vel 127 hold 2.50s
+ 719.439  == decay_hold : long holds at neutral settings, twelve tones ==
+ 720.590  tone=piano                   note  60 vel 100 hold 8.00s
+ 731.752  tone=vib                     note  60 vel 100 hold 8.00s
+ 742.913  tone=bell                    note  60 vel 100 hold 8.00s
+ 754.074  tone=marimba                 note  60 vel 100 hold 8.00s
+ 765.236  tone=slap                    note  60 vel 100 hold 8.00s
+ 776.398  tone=fbass                   note  60 vel 100 hold 8.00s
+ 787.559  tone=choir                   note  60 vel 100 hold 8.00s
+ 798.718  tone=strings                 note  60 vel 100 hold 8.00s
+ 809.880  tone=organ                   note  60 vel 100 hold 8.00s
+ 821.041  tone=brass                   note  60 vel 100 hold 8.00s
+ 832.195  tone=flute                   note  60 vel 100 hold 8.00s
+ 843.356  tone=shaku                   note  60 vel 100 hold 8.00s
+
+segments
+  01_release_sweep_vib.wav         3.003 ..   69.319
+  02_release_sweep_organ.wav      71.822 ..  138.133
+  03_release_sweep_choir.wav     140.635 ..  206.951
+  04_attack_sweep_vib.wav        209.453 ..  277.276
+  05_attack_sweep_strings.wav    279.779 ..  347.609
+  06_attack_sweep_brass.wav      350.112 ..  417.932
+  07_level_sweep.wav             420.434 ..  458.577
+  08_velocity_sens.wav           461.079 ..  515.140
+  09_release_by_hold_vib.wav     517.642 ..  556.284
+  10_release_by_hold_organ.wav   558.786 ..  597.422
+  11_release_by_key_vib.wav      599.924 ..  631.404
+  12_release_by_key_organ.wav    633.906 ..  665.385
+  13_attack_by_velocity_strings.wav  667.887 ..  691.161
+  14_attack_by_velocity_brass.wav  693.663 ..  716.937
+  15_decay_hold.wav              719.439 ..  854.366

@@ -1,0 +1,25 @@
+U-110 EMULATOR render (tools/render_u110.py)
+sample rate 32000, channels 2, duration 883.00 s
+part channel 1, control channel 16
+emulator peak -18.8 dBFS, session gain x6.17 applied to every file
+command: /home/eliggett/Documents/projects/emu110/tools/u110run.sh -p 1 -t 883 -m /tmp/u110render.y8qgh8h_/sequence.mid -w /home/eliggett/Documents/projects/emu110/listen/env-emu/session.wav -samplerate 32000 -log
+
+Times below are RENDER times and are exact: capture_u110.py's MIDI file
+carries a 10 s lead and MAME's -min adds ~10 s more, both already folded in.
+
+segments
+  01_release_sweep_vib.wav    23.000 ..   91.930   peak  -14.8 dBFS
+  02_release_sweep_organ.wav   91.930 ..  160.860   peak  -11.4 dBFS
+  03_release_sweep_choir.wav  160.860 ..  229.790   peak   -7.6 dBFS
+  04_attack_sweep_vib.wav    229.790 ..  300.220   peak  -14.8 dBFS
+  05_attack_sweep_strings.wav  300.220 ..  370.650   peak   -7.5 dBFS
+  06_attack_sweep_brass.wav  370.650 ..  441.080   peak   -9.3 dBFS
+  07_level_sweep.wav         441.080 ..  481.848   peak  -11.4 dBFS
+  08_velocity_sens.wav       481.848 ..  538.588   peak   -6.9 dBFS
+  09_release_by_hold_vib.wav  538.588 ..  579.760   peak  -14.8 dBFS
+  10_release_by_hold_organ.wav  579.760 ..  620.932   peak  -11.4 dBFS
+  11_release_by_key_vib.wav  620.932 ..  654.966   peak  -14.7 dBFS
+  12_release_by_key_organ.wav  654.966 ..  689.000   peak  -10.9 dBFS
+  13_attack_by_velocity_strings.wav  689.000 ..  714.810   peak   -3.0 dBFS
+  14_attack_by_velocity_brass.wav  714.810 ..  740.620   peak   -4.8 dBFS
+  15_decay_hold.wav          740.620 ..  878.136   peak   -6.3 dBFS

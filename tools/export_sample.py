@@ -10,7 +10,7 @@ own 32 kHz, so the source material can be examined on its own terms.
     python3 tools/export_sample.py --tone 58              # every multisample a tone uses
     python3 tools/export_sample.py --index 122 --flat     # skip the EQ
 
-Writes to listen/renders/ by default.  Each sample produces:
+Writes to listen/emulated/scratch/ by default.  Each sample produces:
     <name>.wav        decoded, de-emphasised, through the Fig. 4 output filter
     <name>_flat.wav   decoded only, with --both
 """
@@ -56,7 +56,7 @@ def write(path, x, peak_dbfs=-3.0):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--index', type=int, nargs='*', default=[])
-    ap.add_argument('--out-dir', default='listen/renders')
+    ap.add_argument('--out-dir', default='listen/emulated/scratch')
     ap.add_argument('--tail', type=int, default=64, help='extra bytes to include past `end`')
     ap.add_argument('--flat', action='store_true', help='no EQ')
     ap.add_argument('--both', action='store_true', help='write EQ and flat versions')

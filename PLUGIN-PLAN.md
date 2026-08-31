@@ -639,7 +639,7 @@ the snapshot. Cheap, and it tells the user what is actually happening.
 
 #### The measurement
 
-Done, against `listen/3` (hardware, UA-25 capture) and `listen/emu3` (emulator),
+Done, against `listen/hardware/3` (hardware, UA-25 capture) and `listen/emulated/emu3` (emulator),
 level-matched over 200 Hz–2 kHz. Plot: **`analysis/hf_excess.pdf`**.
 
 | Band | Emulator − hardware |
@@ -737,8 +737,8 @@ Two consequences worth stating plainly:
 
 #### Verified on a full re-render
 
-`listen/emu4` is the whole session re-rendered with the correction on, measured
-against `listen/3` exactly as before:
+`listen/emulated/emu4` is the whole session re-rendered with the correction on, measured
+against `listen/hardware/3` exactly as before:
 
 | | 6 kHz error, before | after | rms error 300 Hz–10 kHz |
 |---|---|---|---|

@@ -1,0 +1,121 @@
+U-110 ENVELOPE capture (tools/capture_env.py)
+sample rate 48000, channels 2, duration 981.40 s, peak -18.5 dBFS
+notes on ch 1, patch changes on ch 16, part 0, device ID 15
+parameters saved before the run: level=127, velo_sens=15, env_attack=8, env_release=8
+
+Times are send times.  Measure real onsets from the audio.
+
+   3.631  -- scratch patch written (27 parameters) --
+   3.003  == scratch_level_vib : PART LEVEL sweep, vib, scratch patch ==
+   5.033  level=127                    note  60 vel 100 hold 8.00s
+  16.194  level=96                     note  60 vel 100 hold 8.00s
+  27.356  level=72                     note  60 vel 100 hold 8.00s
+  38.518  level=52                     note  60 vel 100 hold 8.00s
+  49.679  level=36                     note  60 vel 100 hold 8.00s
+  60.841  level=24                     note  60 vel 100 hold 8.00s
+  72.002  level=14                     note  60 vel 100 hold 8.00s
+  83.164  level=8                      note  60 vel 100 hold 8.00s
+  97.303  -- scratch patch written (27 parameters) --
+  96.675  == scratch_level_fbass : PART LEVEL sweep, fbass, scratch patch ==
+  98.704  level=127                    note  60 vel 100 hold 8.00s
+ 109.865  level=96                     note  60 vel 100 hold 8.00s
+ 121.026  level=72                     note  60 vel 100 hold 8.00s
+ 132.187  level=52                     note  60 vel 100 hold 8.00s
+ 143.348  level=36                     note  60 vel 100 hold 8.00s
+ 154.509  level=24                     note  60 vel 100 hold 8.00s
+ 165.670  level=14                     note  60 vel 100 hold 8.00s
+ 176.831  level=8                      note  60 vel 100 hold 8.00s
+ 190.972  -- scratch patch written (27 parameters) --
+ 190.344  == scratch_level_marimba : PART LEVEL sweep, marimba, scratch patch ==
+ 192.374  level=127                    note  60 vel 100 hold 8.00s
+ 203.534  level=96                     note  60 vel 100 hold 8.00s
+ 214.695  level=72                     note  60 vel 100 hold 8.00s
+ 225.856  level=52                     note  60 vel 100 hold 8.00s
+ 237.017  level=36                     note  60 vel 100 hold 8.00s
+ 248.178  level=24                     note  60 vel 100 hold 8.00s
+ 259.339  level=14                     note  60 vel 100 hold 8.00s
+ 270.500  level=8                      note  60 vel 100 hold 8.00s
+ 284.641  -- scratch patch written (27 parameters) --
+ 284.013  == scratch_velocity_vib : velocity sweep, vib, scratch patch ==
+ 286.043  vel=127                      note  60 vel 127 hold 8.00s
+ 297.204  vel=110                      note  60 vel 110 hold 8.00s
+ 308.366  vel=90                       note  60 vel  90 hold 8.00s
+ 319.527  vel=70                       note  60 vel  70 hold 8.00s
+ 330.689  vel=50                       note  60 vel  50 hold 8.00s
+ 341.850  vel=30                       note  60 vel  30 hold 8.00s
+ 353.012  vel=15                       note  60 vel  15 hold 8.00s
+ 367.147  -- scratch patch written (27 parameters) --
+ 366.519  == scratch_velocity_marimba : velocity sweep, marimba, scratch patch ==
+ 368.548  vel=127                      note  60 vel 127 hold 8.00s
+ 379.709  vel=110                      note  60 vel 110 hold 8.00s
+ 390.870  vel=90                       note  60 vel  90 hold 8.00s
+ 402.031  vel=70                       note  60 vel  70 hold 8.00s
+ 413.192  vel=50                       note  60 vel  50 hold 8.00s
+ 424.353  vel=30                       note  60 vel  30 hold 8.00s
+ 435.514  vel=15                       note  60 vel  15 hold 8.00s
+ 449.655  -- scratch patch written (27 parameters) --
+ 449.027  == scratch_env_release : ENV RELEASE -4..+2, vib, scratch patch ==
+ 451.056  env_release=-4               note  60 vel 100 hold 8.00s
+ 465.220  env_release=-3               note  60 vel 100 hold 8.00s
+ 479.384  env_release=-2               note  60 vel 100 hold 8.00s
+ 493.548  env_release=-1               note  60 vel 100 hold 8.00s
+ 507.712  env_release=+0               note  60 vel 100 hold 8.00s
+ 521.876  env_release=+1               note  60 vel 100 hold 8.00s
+ 536.040  env_release=+2               note  60 vel 100 hold 8.00s
+ 553.184  -- scratch patch written (27 parameters) --
+ 552.556  == scratch_env_attack : ENV ATTACK -3..+3, vib, scratch patch ==
+ 554.585  env_attack=-4                note  60 vel 100 hold 8.00s
+ 565.746  env_attack=-3                note  60 vel 100 hold 8.00s
+ 576.908  env_attack=-2                note  60 vel 100 hold 8.00s
+ 588.070  env_attack=-1                note  60 vel 100 hold 8.00s
+ 599.232  env_attack=+0                note  60 vel 100 hold 8.00s
+ 610.394  env_attack=+1                note  60 vel 100 hold 8.00s
+ 624.542  -- scratch patch written (27 parameters) --
+ 623.909  == scratch_tones : six tones, identical scratch patch ==
+ 625.944  tone=vib                     note  60 vel 100 hold 8.00s
+ 637.105  tone=bell                    note  60 vel 100 hold 8.00s
+ 648.265  tone=slap                    note  60 vel 100 hold 8.00s
+ 659.426  tone=marimba                 note  60 vel 100 hold 8.00s
+ 670.587  tone=fbass                   note  60 vel 100 hold 8.00s
+ 681.748  tone=piano                   note  60 vel 100 hold 8.00s
+ 695.889  -- scratch patch written (27 parameters) --
+ 695.261  == scratch_keys : vib across the keyboard, scratch patch ==
+ 697.290  note=24                      note  24 vel 100 hold 8.00s
+ 708.451  note=36                      note  36 vel 100 hold 8.00s
+ 719.612  note=48                      note  48 vel 100 hold 8.00s
+ 730.773  note=60                      note  60 vel 100 hold 8.00s
+ 741.934  note=72                      note  72 vel 100 hold 8.00s
+ 753.095  note=84                      note  84 vel 100 hold 8.00s
+ 764.256  note=96                      note  96 vel 100 hold 8.00s
+ 778.397  -- scratch patch written (27 parameters) --
+ 777.769  == scratch_slow_vib : vib, 20 s hold, slow envelope ==
+ 779.798  env_release=+0               note  60 vel 100 hold 20.00s
+ 803.972  env_release=-4               note  60 vel 100 hold 20.00s
+ 828.146  env_release=-7               note  60 vel 100 hold 20.00s
+ 855.300  -- scratch patch written (27 parameters) --
+ 854.672  == scratch_slow_fbass : fretless bass, 20 s hold, slow envelope ==
+ 856.701  env_release=+0               note  60 vel 100 hold 20.00s
+ 880.875  env_release=-4               note  60 vel 100 hold 20.00s
+ 905.049  env_release=-7               note  60 vel 100 hold 20.00s
+ 932.203  -- scratch patch written (27 parameters) --
+ 931.575  == scratch_velo_sens : VELO SENS x velocity, vib, scratch patch ==
+ 933.604  sens=0/vel=100               note  60 vel 100 hold 6.00s
+ 942.262  sens=0/vel=40                note  60 vel  40 hold 6.00s
+ 950.920  sens=8/vel=100               note  60 vel 100 hold 6.00s
+ 959.578  sens=8/vel=40                note  60 vel  40 hold 6.00s
+ 968.236  sens=15/vel=100              note  60 vel 100 hold 6.00s
+ 976.894  sens=15/vel=40               note  60 vel  40 hold 6.00s
+
+segments
+  01_scratch_level_vib.wav         3.003 ..   94.175
+  02_scratch_level_fbass.wav      96.675 ..  187.842
+  03_scratch_level_marimba.wav   190.344 ..  281.511
+  04_scratch_velocity_vib.wav    284.013 ..  364.017
+  05_scratch_velocity_marimba.wav  366.519 ..  446.525
+  06_scratch_env_release.wav     449.027 ..  550.054
+  07_scratch_env_attack.wav      552.556 ..  621.406
+  08_scratch_tones.wav           623.909 ..  692.759
+  09_scratch_keys.wav            695.261 ..  775.267
+  10_scratch_slow_vib.wav        777.769 ..  852.170
+  11_scratch_slow_fbass.wav      854.672 ..  929.073
+  12_scratch_velo_sens.wav       931.575 ..  985.402

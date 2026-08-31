@@ -1,0 +1,13 @@
+segment,trial,tag,note,velocity,hold_s,onset_s
+decay_hold,0,tone=piano,60,100,8.000,24.1680
+decay_hold,1,tone=vib,60,100,8.000,35.3360
+decay_hold,2,tone=bell,60,100,8.000,46.5040
+decay_hold,3,tone=marimba,60,100,8.000,57.6720
+decay_hold,4,tone=slap,60,100,8.000,68.8400
+decay_hold,5,tone=fbass,60,100,8.000,80.0080
+decay_hold,6,tone=choir,60,100,8.000,91.1760
+decay_hold,7,tone=strings,60,100,8.000,102.3440
+decay_hold,8,tone=organ,60,100,8.000,113.5120
+decay_hold,9,tone=brass,60,100,8.000,124.6800
+decay_hold,10,tone=flute,60,100,8.000,135.8480
+decay_hold,11,tone=shaku,60,100,8.000,147.0160

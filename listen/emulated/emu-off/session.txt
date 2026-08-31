@@ -1,0 +1,27 @@
+U-110 EMULATOR render (tools/render_u110.py)
+sample rate 48000, channels 2, duration 392.00 s
+part channel 1, control channel 16
+emulator peak -12.5 dBFS, session gain x2.97 applied to every file
+command: /home/eliggett/Documents/projects/emu110/tools/u110run.sh -p 1 -t 392 -m /tmp/u110render.dibn0rs8/sequence.mid -w /home/eliggett/Documents/projects/emu110/listen/emu-off/session.wav -samplerate 48000 -log
+
+Times below are RENDER times and are exact: capture_u110.py's MIDI file
+carries a 10 s lead and MAME's -min adds ~10 s more, both already folded in.
+
+segments
+  01_piano_scale.wav          23.000 ..   47.300   peak  -13.6 dBFS
+  02_piano_velocity.wav       47.300 ..   59.600   peak   -8.6 dBFS
+  03_flute.wav                59.600 ..   76.900   peak  -14.9 dBFS
+  04_strings1.wav             76.900 ..   91.200   peak  -13.8 dBFS
+  05_slap.wav                 91.200 ..  107.500   peak  -13.3 dBFS
+  06_vibes.wav               107.500 ..  116.800   peak  -21.1 dBFS
+  07_drums.wav               116.800 ..  127.600   peak  -11.6 dBFS
+  08_choir3_pingpong.wav     127.600 ..  160.400   peak  -12.6 dBFS
+  09_strings3_pingpong.wav   160.400 ..  193.200   peak  -13.9 dBFS
+  10_choir3_sustain.wav      193.200 ..  231.500   peak  -12.7 dBFS
+  11_fing_bass.wav           231.500 ..  251.350   peak  -15.0 dBFS
+  12_fless_bass.wav          251.350 ..  271.200   peak  -15.1 dBFS
+  13_shakuhachi.wav          271.200 ..  292.250   peak  -13.7 dBFS
+  14_fantasy.wav             292.250 ..  325.700   peak   -4.3 dBFS
+  15_wide_piano_zones.wav    325.700 ..  349.700   peak   -8.4 dBFS
+  16_wide_piano_chord.wav    349.700 ..  361.200   peak   -3.0 dBFS
+  17_wide_piano_jazz.wav     361.200 ..  387.309   peak   -6.5 dBFS

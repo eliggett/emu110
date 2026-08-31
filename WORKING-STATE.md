@@ -20,7 +20,7 @@ nothing else. Every voice holds its note-on target forever.
 
 Full write-up in `analysis/ROM-ANALYSIS.md`, "The amplitude envelope lives in the CPU".
 
-### Measured on hardware (2026-08-25) — see `listen/env/ANALYSIS.md`
+### Measured on hardware (2026-08-25) — see `listen/hardware/env/ANALYSIS.md`
 
 * The ramp is a **straight line in dB**: 0.30 dB rms residual over 36 dB of fall, against
   66 dB rms for a linear-amplitude model. The chip ramps a log-domain level.
@@ -33,7 +33,7 @@ Full write-up in `analysis/ROM-ANALYSIS.md`, "The amplitude envelope lives in th
 * **No hold-time correction and no key scaling of the release** — both terms are in the
   code, both measure flat to +/-3% on a flat-sustain tone. They are zero for these tones.
 
-### Settled by the follow-up take (`listen/env2`)
+### Settled by the follow-up take (`listen/hardware/env2`)
 
 * **The attack is linear in AMPLITUDE** (0.14 dB rms over 29 dB), decay and release are
   exponential (0.24-0.70 dB rms in dB). Linear attack, exponential decay/release.
@@ -55,7 +55,7 @@ constant switches it and `snd_r` together). With it off the render is **bit-iden
 the pre-session build.
 
 The firmware's own envelope now runs, and half the tones are right. Decay over an 8 s hold,
-dB fallen at note-off, against `listen/env`:
+dB fallen at note-off, against `listen/hardware/env`:
 
 | tone | hardware | emulator | | tone | hardware | emulator |
 |---|---|---|---|---|---|---|
@@ -240,7 +240,7 @@ hardware recording.
 
 ## The envelope engine is ON by default
 
-Against the whole `listen/3` reference session, per segment: note-activity within a few
+Against the whole `listen/hardware/3` reference session, per segment: note-activity within a few
 points of hardware and the dB envelope correlating **0.79-0.95** (drums 0.38, but percussive
 transients do not correlate well in any case).
 
@@ -303,11 +303,11 @@ emulator runs the same firmware, so it computes the same rate byte and `-log` pr
 even though it then ignores it. Hardware gives the dB/s that byte produces.
 
     python3 tools/capture_env.py --list
-    python3 tools/render_u110.py --sequence capture_env --log --out-dir listen/env-emu
-    python3 tools/capture_env.py --emu-rates listen/env-emu    # -> the rate per trial
-    python3 tools/capture_env.py --out-dir listen/env          # the hardware take
+    python3 tools/render_u110.py --sequence capture_env --log --out-dir listen/emulated/env-emu
+    python3 tools/capture_env.py --emu-rates listen/emulated/env-emu    # -> the rate per trial
+    python3 tools/capture_env.py --out-dir listen/hardware/env          # the hardware take
 
-The emulator half is already done and checked in as `listen/env-emu/rates.txt`. SysEx
+The emulator half is already done and checked in as `listen/emulated/env-emu/rates.txt`. SysEx
 reaches the emulated U-110 and works: DT1 `F0 41 <dev> 23 12 <addr> <data> <sum> F7` with
 **device ID = control channel - 1** (firmware at `0x5624` masks `0x3C01` to a nibble) and
 **model ID `0x23`** (`0x5BD4`); part parameters at `00 1n xx`. PART LEVEL 127 -> 0 moves
@@ -356,9 +356,9 @@ implement, and it is the piece the note-off path is waiting on.
 ### Anchors for calibrating the rate
 
 * note-off writes a rate built from `0xAFC6[]`, reduced by how long the note was held;
-  measured hardware release is **94-166 dB/s, exponential** (`listen/2/ENVELOPE.md`).
+  measured hardware release is **94-166 dB/s, exponential** (`listen/hardware/2/ENVELOPE.md`).
 * voice kill and power-up both write `0x0080`: target 0, rate `-128` — the steepest fall.
-* `listen/3` (hardware) and `listen/emu2` (emulator) are segment-for-segment aligned by
+* `listen/hardware/3` (hardware) and `listen/emulated/emu2` (emulator) are segment-for-segment aligned by
   `tools/render_u110.py`, so any candidate rate law can be A/B'd directly.
 
 ### Tooling added
@@ -396,7 +396,7 @@ Verification, in two independent steps:
    analog filter chain: **-48.2 dB (s121), -43.7 dB (s122)**, against -20.5 / -17.2 dB for
    the old model. So the binary really does implement the corrected rule.
 
-Renders for listening: `listen/renders/{strings1,choir3_pingpong,strings3_pingpong}_v19.wav`.
+Renders for listening: `listen/emulated/scratch/{strings1,choir3_pingpong,strings3_pingpong}_v19.wav`.
 
 ## The bug, stated exactly
 
@@ -497,7 +497,7 @@ as the "not a sample" test.
   fractional position. That alone makes the two drift by ~1 sample per few turns, so
   compare against the *continuous* model for sample-accurate work.
 * Change **one** thing per render and A/B it.
-* Renders go in `listen/renders/`; `tools/u110run.sh` puts a bare `-w` name there.
+* Renders go in `listen/emulated/scratch/`; `tools/u110run.sh` puts a bare `-w` name there.
 * `--dry-run-midi` prints file time *and* render time; use the render column.
 * Native-rate renders (`-samplerate 32000`) for anything sample-accurate.
 * `-log` writes `mame/error.log`; grep `Starting channel` / `Smpl End Ofs` for the exact

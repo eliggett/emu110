@@ -1,0 +1,173 @@
+segment,trial,tag,note,velocity,hold_s,onset_s
+release_sweep_vib,0,env_release=-7,60,100,1.000,4.1546
+release_sweep_vib,1,env_release=-6,60,100,1.000,8.5086
+release_sweep_vib,2,env_release=-5,60,100,1.000,12.8626
+release_sweep_vib,3,env_release=-4,60,100,1.000,17.2166
+release_sweep_vib,4,env_release=-3,60,100,1.000,21.5706
+release_sweep_vib,5,env_release=-2,60,100,1.000,25.9246
+release_sweep_vib,6,env_release=-1,60,100,1.000,30.2786
+release_sweep_vib,7,env_release=+0,60,100,1.000,34.6326
+release_sweep_vib,8,env_release=+1,60,100,1.000,38.9866
+release_sweep_vib,9,env_release=+2,60,100,1.000,43.3406
+release_sweep_vib,10,env_release=+3,60,100,1.000,47.6956
+release_sweep_vib,11,env_release=+4,60,100,1.000,52.0505
+release_sweep_vib,12,env_release=+5,60,100,1.000,56.4055
+release_sweep_vib,13,env_release=+6,60,100,1.000,60.7600
+release_sweep_vib,14,env_release=+7,60,100,1.000,65.1150
+release_sweep_organ,0,env_release=-7,60,100,1.000,72.9732
+release_sweep_organ,1,env_release=-6,60,100,1.000,77.3276
+release_sweep_organ,2,env_release=-5,60,100,1.000,81.6816
+release_sweep_organ,3,env_release=-4,60,100,1.000,86.0355
+release_sweep_organ,4,env_release=-3,60,100,1.000,90.3896
+release_sweep_organ,5,env_release=-2,60,100,1.000,94.7436
+release_sweep_organ,6,env_release=-1,60,100,1.000,99.0976
+release_sweep_organ,7,env_release=+0,60,100,1.000,103.4516
+release_sweep_organ,8,env_release=+1,60,100,1.000,107.8055
+release_sweep_organ,9,env_release=+2,60,100,1.000,112.1596
+release_sweep_organ,10,env_release=+3,60,100,1.000,116.5136
+release_sweep_organ,11,env_release=+4,60,100,1.000,120.8676
+release_sweep_organ,12,env_release=+5,60,100,1.000,125.2216
+release_sweep_organ,13,env_release=+6,60,100,1.000,129.5756
+release_sweep_organ,14,env_release=+7,60,100,1.000,133.9296
+release_sweep_choir,0,env_release=-7,60,100,1.000,141.7866
+release_sweep_choir,1,env_release=-6,60,100,1.000,146.1406
+release_sweep_choir,2,env_release=-5,60,100,1.000,150.4956
+release_sweep_choir,3,env_release=-4,60,100,1.000,154.8499
+release_sweep_choir,4,env_release=-3,60,100,1.000,159.2046
+release_sweep_choir,5,env_release=-2,60,100,1.000,163.5590
+release_sweep_choir,6,env_release=-1,60,100,1.000,167.9129
+release_sweep_choir,7,env_release=+0,60,100,1.000,172.2676
+release_sweep_choir,8,env_release=+1,60,100,1.000,176.6223
+release_sweep_choir,9,env_release=+2,60,100,1.000,180.9771
+release_sweep_choir,10,env_release=+3,60,100,1.000,185.3316
+release_sweep_choir,11,env_release=+4,60,100,1.000,189.6865
+release_sweep_choir,12,env_release=+5,60,100,1.000,194.0405
+release_sweep_choir,13,env_release=+6,60,100,1.000,198.3936
+release_sweep_choir,14,env_release=+7,60,100,1.000,202.7476
+attack_sweep_vib,0,env_attack=-7,60,100,2.500,210.6046
+attack_sweep_vib,1,env_attack=-6,60,100,2.500,215.0594
+attack_sweep_vib,2,env_attack=-5,60,100,2.500,219.5135
+attack_sweep_vib,3,env_attack=-4,60,100,2.500,223.9676
+attack_sweep_vib,4,env_attack=-3,60,100,2.500,228.4216
+attack_sweep_vib,5,env_attack=-2,60,100,2.500,232.8767
+attack_sweep_vib,6,env_attack=-1,60,100,2.500,237.3315
+attack_sweep_vib,7,env_attack=+0,60,100,2.500,241.7855
+attack_sweep_vib,8,env_attack=+1,60,100,2.500,246.2406
+attack_sweep_vib,9,env_attack=+2,60,100,2.500,250.6956
+attack_sweep_vib,10,env_attack=+3,60,100,2.500,255.1506
+attack_sweep_vib,11,env_attack=+4,60,100,2.500,259.6056
+attack_sweep_vib,12,env_attack=+5,60,100,2.500,264.0609
+attack_sweep_vib,13,env_attack=+6,60,100,2.500,268.5166
+attack_sweep_vib,14,env_attack=+7,60,100,2.500,272.9718
+attack_sweep_strings,0,env_attack=-7,60,100,2.500,280.9308
+attack_sweep_strings,1,env_attack=-6,60,100,2.500,285.3864
+attack_sweep_strings,2,env_attack=-5,60,100,2.500,289.8415
+attack_sweep_strings,3,env_attack=-4,60,100,2.500,294.2966
+attack_sweep_strings,4,env_attack=-3,60,100,2.500,298.7521
+attack_sweep_strings,5,env_attack=-2,60,100,2.500,303.2074
+attack_sweep_strings,6,env_attack=-1,60,100,2.500,307.6626
+attack_sweep_strings,7,env_attack=+0,60,100,2.500,312.1180
+attack_sweep_strings,8,env_attack=+1,60,100,2.500,316.5734
+attack_sweep_strings,9,env_attack=+2,60,100,2.500,321.0286
+attack_sweep_strings,10,env_attack=+3,60,100,2.500,325.4842
+attack_sweep_strings,11,env_attack=+4,60,100,2.500,329.9388
+attack_sweep_strings,12,env_attack=+5,60,100,2.500,334.3944
+attack_sweep_strings,13,env_attack=+6,60,100,2.500,338.8490
+attack_sweep_strings,14,env_attack=+7,60,100,2.500,343.3046
+attack_sweep_brass,0,env_attack=-7,60,100,2.500,351.2637
+attack_sweep_brass,1,env_attack=-6,60,100,2.500,355.7193
+attack_sweep_brass,2,env_attack=-5,60,100,2.500,360.1726
+attack_sweep_brass,3,env_attack=-4,60,100,2.500,364.6277
+attack_sweep_brass,4,env_attack=-3,60,100,2.500,369.0826
+attack_sweep_brass,5,env_attack=-2,60,100,2.500,373.5366
+attack_sweep_brass,6,env_attack=-1,60,100,2.500,377.9906
+attack_sweep_brass,7,env_attack=+0,60,100,2.500,382.4446
+attack_sweep_brass,8,env_attack=+1,60,100,2.500,386.8995
+attack_sweep_brass,9,env_attack=+2,60,100,2.500,391.3546
+attack_sweep_brass,10,env_attack=+3,60,100,2.500,395.8086
+attack_sweep_brass,11,env_attack=+4,60,100,2.500,400.2639
+attack_sweep_brass,12,env_attack=+5,60,100,2.500,404.7186
+attack_sweep_brass,13,env_attack=+6,60,100,2.500,409.1736
+attack_sweep_brass,14,env_attack=+7,60,100,2.500,413.6275
+level_sweep,0,level=127,60,100,1.200,421.5859
+level_sweep,1,level=112,60,100,1.200,424.2397
+level_sweep,2,level=96,60,100,1.200,426.8935
+level_sweep,3,level=80,60,100,1.200,429.5471
+level_sweep,4,level=64,60,100,1.200,432.2005
+level_sweep,5,level=56,60,100,1.200,434.8537
+level_sweep,6,level=48,60,100,1.200,437.5066
+level_sweep,7,level=40,60,100,1.200,440.1601
+level_sweep,8,level=32,60,100,1.200,442.8132
+level_sweep,9,level=24,60,100,1.200,445.4655
+level_sweep,10,level=16,60,100,1.200,448.1181
+level_sweep,11,level=8,60,100,1.200,450.7710
+level_sweep,12,level=4,60,100,1.200,453.4236
+level_sweep,13,level=0,60,100,1.200,456.0755
+velocity_sens,0,velo_sens=0 vel=1,60,1,1.200,462.2306
+velocity_sens,1,velo_sens=0 vel=40,60,40,1.200,464.8840
+velocity_sens,2,velo_sens=0 vel=80,60,80,1.200,467.5367
+velocity_sens,3,velo_sens=0 vel=127,60,127,1.200,470.1891
+velocity_sens,4,velo_sens=4 vel=1,60,1,1.200,472.8421
+velocity_sens,5,velo_sens=4 vel=40,60,40,1.200,475.4947
+velocity_sens,6,velo_sens=4 vel=80,60,80,1.200,478.1480
+velocity_sens,7,velo_sens=4 vel=127,60,127,1.200,480.8012
+velocity_sens,8,velo_sens=8 vel=1,60,1,1.200,483.4545
+velocity_sens,9,velo_sens=8 vel=40,60,40,1.200,486.1075
+velocity_sens,10,velo_sens=8 vel=80,60,80,1.200,488.7607
+velocity_sens,11,velo_sens=8 vel=127,60,127,1.200,491.4136
+velocity_sens,12,velo_sens=12 vel=1,60,1,1.200,494.0666
+velocity_sens,13,velo_sens=12 vel=40,60,40,1.200,496.7186
+velocity_sens,14,velo_sens=12 vel=80,60,80,1.200,499.3716
+velocity_sens,15,velo_sens=12 vel=127,60,127,1.200,502.0247
+velocity_sens,16,velo_sens=15 vel=1,60,1,1.200,504.6776
+velocity_sens,17,velo_sens=15 vel=40,60,40,1.200,507.3306
+velocity_sens,18,velo_sens=15 vel=80,60,80,1.200,509.9827
+velocity_sens,19,velo_sens=15 vel=127,60,127,1.200,512.6363
+release_by_hold_vib,0,hold=0.20,60,100,0.200,518.7938
+release_by_hold_vib,1,hold=0.50,60,100,0.500,522.6486
+release_by_hold_vib,2,hold=1.00,60,100,1.000,526.8032
+release_by_hold_vib,3,hold=2.00,60,100,2.000,531.4585
+release_by_hold_vib,4,hold=4.00,60,100,4.000,537.1142
+release_by_hold_vib,5,hold=8.00,60,100,8.000,544.7718
+release_by_hold_organ,0,hold=0.20,60,100,0.200,559.9377
+release_by_hold_organ,1,hold=0.50,60,100,0.500,563.7916
+release_by_hold_organ,2,hold=1.00,60,100,1.000,567.9456
+release_by_hold_organ,3,hold=2.00,60,100,2.000,572.5996
+release_by_hold_organ,4,hold=4.00,60,100,4.000,578.2546
+release_by_hold_organ,5,hold=8.00,60,100,8.000,585.9115
+release_by_key_vib,0,note=36,36,100,1.000,601.0756
+release_by_key_vib,1,note=48,48,100,1.000,605.4296
+release_by_key_vib,2,note=60,60,100,1.000,609.7836
+release_by_key_vib,3,note=69,69,100,1.000,614.1378
+release_by_key_vib,4,note=72,72,100,1.000,618.4926
+release_by_key_vib,5,note=84,84,100,1.000,622.8465
+release_by_key_vib,6,note=96,96,100,1.000,627.2005
+release_by_key_organ,0,note=36,36,100,1.000,635.0577
+release_by_key_organ,1,note=48,48,100,1.000,639.4115
+release_by_key_organ,2,note=60,60,100,1.000,643.7655
+release_by_key_organ,3,note=69,69,100,1.000,648.1196
+release_by_key_organ,4,note=72,72,100,1.000,652.4736
+release_by_key_organ,5,note=84,84,100,1.000,656.8276
+release_by_key_organ,6,note=96,96,100,1.000,661.1816
+attack_by_velocity_strings,0,vel=16,60,16,2.500,669.0386
+attack_by_velocity_strings,1,vel=40,60,40,2.500,673.4934
+attack_by_velocity_strings,2,vel=64,60,64,2.500,677.9476
+attack_by_velocity_strings,3,vel=96,60,96,2.500,682.4024
+attack_by_velocity_strings,4,vel=127,60,127,2.500,686.8565
+attack_by_velocity_brass,0,vel=16,60,16,2.500,694.8146
+attack_by_velocity_brass,1,vel=40,60,40,2.500,699.2695
+attack_by_velocity_brass,2,vel=64,60,64,2.500,703.7244
+attack_by_velocity_brass,3,vel=96,60,96,2.500,708.1786
+attack_by_velocity_brass,4,vel=127,60,127,2.500,712.6334
+decay_hold,0,tone=piano,60,100,8.000,720.5905
+decay_hold,1,tone=vib,60,100,8.000,731.7516
+decay_hold,2,tone=bell,60,100,8.000,742.9127
+decay_hold,3,tone=marimba,60,100,8.000,754.0740
+decay_hold,4,tone=slap,60,100,8.000,765.2359
+decay_hold,5,tone=fbass,60,100,8.000,776.3979
+decay_hold,6,tone=choir,60,100,8.000,787.5589
+decay_hold,7,tone=strings,60,100,8.000,798.7181
+decay_hold,8,tone=organ,60,100,8.000,809.8798
+decay_hold,9,tone=brass,60,100,8.000,821.0407
+decay_hold,10,tone=flute,60,100,8.000,832.1946
+decay_hold,11,tone=shaku,60,100,8.000,843.3556

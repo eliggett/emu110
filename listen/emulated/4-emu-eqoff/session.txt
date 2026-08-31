@@ -1,0 +1,14 @@
+U-110 EMULATOR render (tools/render_u110.py)
+sample rate 48000, channels 2, duration 204.00 s
+part channel 1, control channel 16
+emulator peak -3.3 dBFS
+command: /home/eliggett/Documents/projects/emu110/tools/u110run.sh -p 1 -t 204 -m /tmp/u110render.3utwgvxg/sequence.mid -w /home/eliggett/Documents/projects/emu110/listen/4-emu-eqoff/session.wav -samplerate 48000 -autoboot_script /tmp/claude-1000/-home-eliggett-Documents-projects-emu110/3454ac60-d549-4458-9790-f4e24dd32bce/scratchpad/lvl/eq_off.lua
+
+Times below are RENDER times and are exact: capture_u110.py's MIDI file
+carries a 10 s lead and MAME's -min adds ~10 s more, both already folded in.
+
+segments
+  01_piano_vel_43.wav         23.000 ..  126.800   peak   -6.3 dBFS
+  02_fantasy_dry.wav         126.800 ..  160.570   peak   -3.3 dBFS
+  03_shakuhachi_dry.wav      160.570 ..  181.940   peak  -11.1 dBFS
+  04_strings_c_stack.wav     181.940 ..  199.760   peak   -3.9 dBFS

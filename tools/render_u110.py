@@ -5,9 +5,9 @@
 render_u110.py -- run the emulator through the SAME sequence tools/capture_u110.py plays
 on the hardware, and write the results in the same shape.
 
-    python3 tools/render_u110.py --out-dir listen/emu
+    python3 tools/render_u110.py --out-dir listen/emulated/emu
     python3 tools/render_u110.py --only strings1,choir3_pingpong
-    python3 tools/render_u110.py --sequence capture_env --out-dir listen/env-emu
+    python3 tools/render_u110.py --sequence capture_env --out-dir listen/emulated/env-emu
 
 This is the emulator-side counterpart of capture_u110.py.  Where that script drives a real
 U-110 over MIDI and records an interface, this one renders the identical note sequence
@@ -58,13 +58,13 @@ def write_wav(path, a, sr, ch):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--out-dir', default='listen/emu')
+    ap.add_argument('--out-dir', default='listen/emulated/emu')
     ap.add_argument('--only', default=None,
                     help='comma-separated segment names, to render just those')
     ap.add_argument('--channel', type=int, default=1, help='part MIDI channel (1-16)')
     ap.add_argument('--control-channel', type=int, default=cap.CONTROL_CH)
     ap.add_argument('--samplerate', type=int, default=48000,
-                    help='48000 matches the hardware captures under listen/3; '
+                    help='48000 matches the hardware captures under listen/hardware/3; '
                          'use 32000 (the engine rate) for sample-accurate work')
     ap.add_argument('--patch', type=int, default=1,
                     help='front-panel patch to boot into (the sequence sets patches by '
@@ -73,6 +73,12 @@ def main():
                     help='do not apply the session gain; keep the emulator scaling')
     ap.add_argument('--keep-midi', default=None, metavar='FILE',
                     help='also keep the generated MIDI file here')
+    ap.add_argument('--mame-arg', action='append', default=[], metavar='ARG',
+                    help='extra argument passed straight through to MAME; repeatable. '
+                         'u110run.sh forwards these AFTER its own options, so a later '
+                         '-autoboot_script wins over the built-in select_patch.lua '
+                         '(which is a no-op at --patch 1 anyway).  Used to switch the '
+                         'output EQ correction off while measuring the raw chain.')
     ap.add_argument('--log', action='store_true',
                     help="also run MAME with -log and keep mame/error.log as "
                          "<out-dir>/error.log -- that is where the reg 06/07 values are")
@@ -90,8 +96,15 @@ def main():
 
     segs = seq.SEGMENTS
     if args.set:
-        segs = {'main': seq.SEGMENTS, 'followup': seq.FOLLOWUP,
-                'all': seq.SEGMENTS + seq.FOLLOWUP}[args.set]
+        # 'baseline' is capture_u110.py's name for the same thing; accept both so the
+        # two tools take the same --set value.
+        sets = {'main': seq.SEGMENTS, 'baseline': seq.SEGMENTS,
+                'followup': seq.FOLLOWUP,
+                'all': seq.SEGMENTS + seq.FOLLOWUP}
+        if hasattr(seq, 'SCRATCH'):
+            sets['scratch'] = seq.SCRATCH
+            sets['all'] = sets['all'] + seq.SCRATCH
+        segs = sets[args.set]
     if args.only:
         want = [x.strip() for x in args.only.split(',')]
         segs = [s for s in seq.SEGMENTS if s['name'] in want]
@@ -119,6 +132,7 @@ def main():
             os.remove(os.path.join(HERE, 'mame', 'error.log'))
         except OSError:
             pass
+    cmd += args.mame_arg
     r = subprocess.run(cmd)
     if r.returncode != 0:
         sys.exit("u110run.sh failed (exit %d)" % r.returncode)

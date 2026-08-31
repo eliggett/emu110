@@ -78,7 +78,7 @@ def main():
     F = np.logspace(np.log10(80), np.log10(16000), 48)
     curves, names = [], []
     for name, (a, b) in SEG.items():
-        f = glob.glob('listen/3/[0-9][0-9]_%s.wav' % name)
+        f = glob.glob('listen/hardware/3/[0-9][0-9]_%s.wav' % name)
         if not f:
             continue
         hw, sr = read(f[0])

@@ -1,0 +1,93 @@
+U-110 ENVELOPE capture (tools/capture_env.py)
+sample rate 48000, channels 2, duration 516.14 s, peak -19.5 dBFS
+notes on ch 1, patch changes on ch 16, part 0, device ID 15
+parameters saved before the run: level=127, velo_sens=15, env_attack=8, env_release=8
+
+Times are send times.  Measure real onsets from the audio.
+
+   3.003  == rate_ladder_attack_5 : attack rate ladder, ENV ATTACK -5, vib ==
+   4.155  env_attack=-5/level=127      note  60 vel 100 hold 2.50s
+   8.409  env_attack=-5/level=123      note  60 vel 100 hold 2.50s
+  12.664  env_attack=-5/level=119      note  60 vel 100 hold 2.50s
+  16.918  env_attack=-5/level=115      note  60 vel 100 hold 2.50s
+  21.173  env_attack=-5/level=111      note  60 vel 100 hold 2.50s
+  25.427  env_attack=-5/level=107      note  60 vel 100 hold 2.50s
+  29.681  env_attack=-5/level=103      note  60 vel 100 hold 2.50s
+  33.936  env_attack=-5/level=99       note  60 vel 100 hold 2.50s
+  38.191  env_attack=-5/level=95       note  60 vel 100 hold 2.50s
+  42.447  env_attack=-5/level=91       note  60 vel 100 hold 2.50s
+  46.701  env_attack=-5/level=87       note  60 vel 100 hold 2.50s
+  50.956  env_attack=-5/level=83       note  60 vel 100 hold 2.50s
+  55.210  env_attack=-5/level=79       note  60 vel 100 hold 2.50s
+  59.463  env_attack=-5/level=75       note  60 vel 100 hold 2.50s
+  63.717  env_attack=-5/level=71       note  60 vel 100 hold 2.50s
+  67.971  env_attack=-5/level=67       note  60 vel 100 hold 2.50s
+  72.226  env_attack=-5/level=63       note  60 vel 100 hold 2.50s
+  76.479  env_attack=-5/level=59       note  60 vel 100 hold 2.50s
+  80.734  env_attack=-5/level=55       note  60 vel 100 hold 2.50s
+  84.988  env_attack=-5/level=51       note  60 vel 100 hold 2.50s
+  89.243  env_attack=-5/level=47       note  60 vel 100 hold 2.50s
+  93.498  env_attack=-5/level=43       note  60 vel 100 hold 2.50s
+ 100.104  == rate_ladder_attack_6 : attack rate ladder, ENV ATTACK -6, vib ==
+ 101.256  env_attack=-6/level=127      note  60 vel 100 hold 2.50s
+ 105.511  env_attack=-6/level=123      note  60 vel 100 hold 2.50s
+ 109.766  env_attack=-6/level=119      note  60 vel 100 hold 2.50s
+ 114.021  env_attack=-6/level=115      note  60 vel 100 hold 2.50s
+ 118.276  env_attack=-6/level=111      note  60 vel 100 hold 2.50s
+ 122.531  env_attack=-6/level=107      note  60 vel 100 hold 2.50s
+ 126.786  env_attack=-6/level=103      note  60 vel 100 hold 2.50s
+ 131.041  env_attack=-6/level=99       note  60 vel 100 hold 2.50s
+ 135.296  env_attack=-6/level=95       note  60 vel 100 hold 2.50s
+ 139.551  env_attack=-6/level=91       note  60 vel 100 hold 2.50s
+ 143.806  env_attack=-6/level=87       note  60 vel 100 hold 2.50s
+ 148.061  env_attack=-6/level=83       note  60 vel 100 hold 2.50s
+ 152.315  env_attack=-6/level=79       note  60 vel 100 hold 2.50s
+ 156.570  env_attack=-6/level=75       note  60 vel 100 hold 2.50s
+ 160.825  env_attack=-6/level=71       note  60 vel 100 hold 2.50s
+ 165.080  env_attack=-6/level=67       note  60 vel 100 hold 2.50s
+ 169.335  env_attack=-6/level=63       note  60 vel 100 hold 2.50s
+ 173.590  env_attack=-6/level=59       note  60 vel 100 hold 2.50s
+ 177.846  env_attack=-6/level=55       note  60 vel 100 hold 2.50s
+ 182.100  env_attack=-6/level=51       note  60 vel 100 hold 2.50s
+ 186.356  env_attack=-6/level=47       note  60 vel 100 hold 2.50s
+ 190.611  env_attack=-6/level=43       note  60 vel 100 hold 2.50s
+ 197.218  == rate_ladder_release : release rate ladder, ENV RELEASE -4, organ ==
+ 198.370  env_release=-4/level=127     note  60 vel 100 hold 1.00s
+ 202.726  env_release=-4/level=123     note  60 vel 100 hold 1.00s
+ 207.081  env_release=-4/level=119     note  60 vel 100 hold 1.00s
+ 211.436  env_release=-4/level=115     note  60 vel 100 hold 1.00s
+ 215.791  env_release=-4/level=111     note  60 vel 100 hold 1.00s
+ 220.147  env_release=-4/level=107     note  60 vel 100 hold 1.00s
+ 224.502  env_release=-4/level=103     note  60 vel 100 hold 1.00s
+ 228.857  env_release=-4/level=99      note  60 vel 100 hold 1.00s
+ 233.212  env_release=-4/level=95      note  60 vel 100 hold 1.00s
+ 237.565  env_release=-4/level=91      note  60 vel 100 hold 1.00s
+ 241.921  env_release=-4/level=87      note  60 vel 100 hold 1.00s
+ 246.277  env_release=-4/level=83      note  60 vel 100 hold 1.00s
+ 250.632  env_release=-4/level=79      note  60 vel 100 hold 1.00s
+ 254.987  env_release=-4/level=75      note  60 vel 100 hold 1.00s
+ 259.342  env_release=-4/level=71      note  60 vel 100 hold 1.00s
+ 263.697  env_release=-4/level=67      note  60 vel 100 hold 1.00s
+ 268.052  env_release=-4/level=63      note  60 vel 100 hold 1.00s
+ 272.407  env_release=-4/level=59      note  60 vel 100 hold 1.00s
+ 276.763  env_release=-4/level=55      note  60 vel 100 hold 1.00s
+ 281.118  env_release=-4/level=51      note  60 vel 100 hold 1.00s
+ 285.473  env_release=-4/level=47      note  60 vel 100 hold 1.00s
+ 289.828  env_release=-4/level=43      note  60 vel 100 hold 1.00s
+ 296.534  == slow_release_vib : ENV RELEASE -7..-4 with a long tail, vib ==
+ 297.685  env_release=-7               note  60 vel 100 hold 1.00s
+ 323.860  env_release=-6               note  60 vel 100 hold 1.00s
+ 350.037  env_release=-5               note  60 vel 100 hold 1.00s
+ 376.214  env_release=-4               note  60 vel 100 hold 1.00s
+ 404.743  == slow_release_choir : ENV RELEASE -7..-4 with a long tail, choir ==
+ 405.894  env_release=-7               note  60 vel 100 hold 1.00s
+ 432.071  env_release=-6               note  60 vel 100 hold 1.00s
+ 458.249  env_release=-5               note  60 vel 100 hold 1.00s
+ 484.425  env_release=-4               note  60 vel 100 hold 1.00s
+
+segments
+  01_rate_ladder_attack_5.wav      3.003 ..   97.602
+  02_rate_ladder_attack_6.wav    100.104 ..  194.716
+  03_rate_ladder_release.wav     197.218 ..  294.032
+  04_slow_release_vib.wav        296.534 ..  402.240
+  05_slow_release_choir.wav      404.743 ..  510.452

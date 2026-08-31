@@ -1,0 +1,48 @@
+U-110 capture
+sample rate 48000, channels 2, duration 183.17 s
+MIDI port: UA-25:UA-25 MIDI 1 20:0
+part channel 1, control channel 16
+peak -11.6 dBFS, 0 clipped samples
+lead silence 3.0 s (noise-floor reference)
+NOTE: times below are when this script SENT each message; the U-110 acts
+      on it about 0.2 s later.  Measure onsets from the audio.
+
+segments
+  01_piano_vel_43.wav          3.003 ..  106.910
+  02_fantasy_dry.wav         107.233 ..  140.717
+  03_shakuhachi_dry.wav      141.040 ..  162.111
+  04_strings_c_stack.wav     162.434 ..  179.950
+
+time      event
+   3.003  -- patch P-01 on ch 16 --
+   3.003  -- tone 0 on ch 1 --
+   4.305  A. Piano 1 note 43, velocity sweep note  43 vel   1 hold 7.0s
+  14.315  A. Piano 1 note 43, velocity sweep note  43 vel  15 hold 7.0s
+  24.326  A. Piano 1 note 43, velocity sweep note  43 vel  29 hold 7.0s
+  34.336  A. Piano 1 note 43, velocity sweep note  43 vel  43 hold 7.0s
+  44.347  A. Piano 1 note 43, velocity sweep note  43 vel  57 hold 7.0s
+  54.357  A. Piano 1 note 43, velocity sweep note  43 vel  71 hold 7.0s
+  64.368  A. Piano 1 note 43, velocity sweep note  43 vel  85 hold 7.0s
+  74.378  A. Piano 1 note 43, velocity sweep note  43 vel  99 hold 7.0s
+  84.389  A. Piano 1 note 43, velocity sweep note  43 vel 113 hold 7.0s
+  94.399  A. Piano 1 note 43, velocity sweep note  43 vel 127 hold 7.0s
+ 106.912  -- patch P-52 on ch 16 --
+ 106.973  -- sysex F0 41 0F 23 12 00 01 1A 00 65 F7 --
+ 107.033  -- sysex F0 41 0F 23 12 00 01 1C 00 63 F7 --
+ 108.234  P-52 Fantasy (effects off) note  48 vel 100 hold 0.3s
+ 109.035  P-52 Fantasy (effects off) note  60 vel 100 hold 0.3s
+ 110.287  P-52 Fantasy (effects off) note  48 vel 100 hold 8.0s
+ 119.497  P-52 Fantasy (effects off) note  60 vel 100 hold 8.0s
+ 128.706  P-52 Fantasy (effects off) note  72 vel 100 hold 8.0s
+ 140.719  -- patch P-48 on ch 16 --
+ 140.779  -- sysex F0 41 0F 23 12 00 01 1A 00 65 F7 --
+ 140.840  -- sysex F0 41 0F 23 12 00 01 1C 00 63 F7 --
+ 142.041  P-48 Shakuhachi (effects off) note  62 vel 100 hold 0.3s
+ 142.842  P-48 Shakuhachi (effects off) note  67 vel 100 hold 0.3s
+ 143.644  P-48 Shakuhachi (effects off) note  74 vel 100 hold 0.3s
+ 144.895  P-48 Shakuhachi (effects off) note  62 vel 100 hold 6.0s
+ 152.103  P-48 Shakuhachi (effects off) note  74 vel 100 hold 6.0s
+ 162.113  -- patch P-31 on ch 16 --
+ 162.173  -- sysex F0 41 0F 23 12 00 01 1A 00 65 F7 --
+ 162.234  -- sysex F0 41 0F 23 12 00 01 1C 00 63 F7 --
+ 163.435  P-31 Strings, C stack (effects off) score, 8 events, 12.0s

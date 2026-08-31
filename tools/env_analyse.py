@@ -4,8 +4,8 @@
 """
 env_analyse.py -- measure attack and release slopes from a tools/capture_env.py take.
 
-    python3 tools/env_analyse.py listen/env
-    python3 tools/env_analyse.py listen/env --emu listen/env-emu --only attack_sweep_vib
+    python3 tools/env_analyse.py listen/hardware/env
+    python3 tools/env_analyse.py listen/hardware/env --emu listen/emulated/env-emu --only attack_sweep_vib
 
 Per trial it reports, from the audio alone:
 

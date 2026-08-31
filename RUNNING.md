@@ -451,6 +451,95 @@ Two things worth knowing:
 - This is a patch parameter, so it reverts when you change patches unless you save it with
   **PATCH → WRT**.
 
+## Output gain
+
+The U-110 is a quiet machine. Its firmware asks the sound chip for a sustain level of `0xDB`
+— 13.5 dB below the chip's full scale — because it has to leave room for 31 voices, so even
+a max-velocity note on a part at level 127 does not come close to filling a modern output.
+
+The driver has an **Output gain** control for this, in 3 dB steps from -9 dB to +36 dB.
+Three ways to reach the same setting:
+
+| Where | How |
+| --- | --- |
+| Keyboard | `-` and `=` (the standard MAME *Volume Down* / *Volume Up* inputs, remappable under **Tab → Input Settings**) |
+| Menu | **Tab → Machine Configuration → Output gain** |
+| Code | `mb87419_mb87420_device::set_mix_gain_db()`, for a host with no MAME UI |
+
+The keys are the ones to use while live MIDI is playing: each press pops the new value up on
+screen and moves the same setting the menu shows, and MAME saves it to `cfg/u110.cfg` on
+exit, so it is there again next run.
+
+The gain is applied **inside the sound device**, at the point where a voice joins the mix and
+while the sample is still a full-width integer — not on the output route. Raising it adds
+resolution rather than scaling an already-quantised signal: against a render made 12 dB
+lower, 75% of the louder render's samples are not multiples of 4, and the residual against a
+straight ×4 is ±3 LSB.
+
+### What the levels actually are
+
+Measured with `E. Organ 1`, velocity 127, `CC7 = 127`, sustained clusters, at the **0 dB**
+default:
+
+| Notes held | Peak | | Notes held | Peak |
+| --- | --- | --- | --- | --- |
+| 1 | -15.7 dBFS | | 8 | -4.5 dBFS |
+| 2 | -10.9 dBFS | | 12 | -1.5 dBFS |
+| 4 | -7.1 dBFS | | 16 | -0.9 dBFS |
+
+0 dB is calibrated, not arbitrary: it is the point at which one voice at full envelope with a
+full-scale decoded sample reaches digital full scale exactly. A 16-note cluster at maximum
+velocity is the worst case that still fits — one such render put 8 samples out of 4.3 million
+on the rail, all in a single note-on transient.
+
+Ordinary playing has headroom to spare, so **+6 dB is comfortable up to about eight notes**.
+Above that you are trading clipping on dense chords for loudness, which may well be the trade
+you want; nothing downstream is hurt by it, since MAME's mixing path is floating point right
+up to the output.
+
+> **`[I]`** Before this control existed the mixer divided by `32768 << 14`, as though a
+> decoded sample used the full 16-bit range. It does not: `decode_sample()` spans
+> -2048…+1984, and E. Organ 1 at note 60 measures about ±2200 after interpolation. That is
+> exactly 12.04 dB of range thrown away, which is why a loud single note used to peak near
+> -28 dBFS. The divisor is now `2048 * 65536` and the 0 dB setting is a true unity.
+
+### Dither at the 16-bit output
+
+MAME mixes in float from the sound device all the way to the speaker — the four filter
+stages even run their state in `double` — and then meets 16-bit integers twice, at the
+hand-off to your sound card and at `-wavwrite`. Both conversions used to be
+`int(x * 32768)`, which **truncates toward zero**: it doubles the dead zone around silence,
+leaves a DC bias, and makes the quantisation error track the signal. That last part is the
+one you hear — a decaying note fading into distortion rather than into noise.
+
+Those conversions now round and add TPDF dither. Measured on a U-110 organ tone scaled to a
+peak of 6 LSB, a fade about 75 dB down:
+
+| | error rms | correlation with signal | junk in 6–15 kHz |
+| --- | --- | --- | --- |
+| truncate (before) | 0.580 LSB | **-0.768** | -33.7 dB |
+| round | 0.291 LSB | +0.019 | -34.1 dB |
+| **round + TPDF (now)** | 0.501 LSB | +0.004 | **-49.7 dB** |
+
+Rounding alone has the lowest rms but does not fix the artefacts — its error is still
+harmonically related to the signal, which a plain correlation coefficient misses. Dither
+trades 4.7 dB of broadband noise for **16 dB less quantisation junk**, and it is the only
+one of the three whose error is genuinely independent of the signal.
+
+Digital black is passed through undithered, so a silent machine still writes exact silence
+rather than a permanent LSB of hiss.
+
+**Toggling it:** `audio_dither_enabled()` in `mame/src/emu/sound.h`, a plain `bool &` that
+defaults to `true` and is read once per sample. There is no command-line option for it yet;
+wiring one up, or a menu item, is the obvious next step if it ever needs changing without a
+recompile.
+
+> **`[I]`** This one is in **core MAME**, not in the driver or the sound device — so it
+> affects every machine in this build, and it does **not** reach the plugin. The plugin
+> hands `float` to its host (PLUGIN-PLAN.md §4) and has no 16-bit stage to dither.
+
+---
+
 ## Audio and latency
 
 The machine holds exactly real time — measured at 100.00% both windowed and headless, at
@@ -486,6 +575,29 @@ exists in the MAME tree but is **not compiled into this binary** — asking for 
 ---
 
 ## Typical example on this machine:
+
+### Find the audio port:
+```sh
+aplay -l
+```
+
+The specification is "hw" plus the card, plus "," plus the device number. 
+
+```sh
+export AUDIODEV="hw:0,0"
+export SDL_AUDIODRIVER=alsa
+./u110 u110 -midiin "UM-4 MIDI 1" -cart1 "../roms/roland_u220_waverom4_(sn-u110-08).bin" -cart2 "../roms/roland_u220_waverom5_(sn-u110-09).bin" -window -resolution 640x480 
+```
+
+### Real-time priority for low latency: 
+```sh
+chrt -f 80 env AUDIODEV="hw:0,0" SDL_AUDIODRIVER=alsa ./u110 u110 -sound sdl -audio_latency 1 -midiin "UM-4 MIDI 1" -cart1 "../roms/roland_u220_waverom4_(sn-u110-08).bin" -cart2 "../roms/roland_u220_waverom5_(sn-u110-09).bin" -window -resolution 640x480
+```
+
+
+
+Or use the default audio system: 
+
 ```sh
 ./u110 u110 -midiin "UM-4 MIDI 1" -cart1 "../roms/roland_u220_waverom4_(sn-u110-08).bin" -cart2 "../roms/roland_u220_waverom5_(sn-u110-09).bin" -window -resolution 640x480
 ```

@@ -1,0 +1,16 @@
+segment,trial,tag,note,velocity,hold_s,onset_s
+attack_sweep_vib,0,env_attack=-7,60,100,2.500,24.1620
+attack_sweep_vib,1,env_attack=-6,60,100,2.500,28.6240
+attack_sweep_vib,2,env_attack=-5,60,100,2.500,33.0860
+attack_sweep_vib,3,env_attack=-4,60,100,2.500,37.5480
+attack_sweep_vib,4,env_attack=-3,60,100,2.500,42.0100
+attack_sweep_vib,5,env_attack=-2,60,100,2.500,46.4720
+attack_sweep_vib,6,env_attack=-1,60,100,2.500,50.9340
+attack_sweep_vib,7,env_attack=+0,60,100,2.500,55.3960
+attack_sweep_vib,8,env_attack=+1,60,100,2.500,59.8580
+attack_sweep_vib,9,env_attack=+2,60,100,2.500,64.3200
+attack_sweep_vib,10,env_attack=+3,60,100,2.500,68.7820
+attack_sweep_vib,11,env_attack=+4,60,100,2.500,73.2440
+attack_sweep_vib,12,env_attack=+5,60,100,2.500,77.7060
+attack_sweep_vib,13,env_attack=+6,60,100,2.500,82.1680
+attack_sweep_vib,14,env_attack=+7,60,100,2.500,86.6300

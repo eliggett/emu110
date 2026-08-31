@@ -1,0 +1,16 @@
+segment,trial,tag,note,velocity,hold_s,reg07,reg06,peak_db,attack_db_s,t_rise_s,release_db_s,release_frames,decay_while_held_db
+release_sweep_vib,0,env_release=-7,60,100,1.000,211,104,-33.62,nan,0.02,-699.86,26,-9.41
+release_sweep_vib,1,env_release=-6,60,100,1.000,211,104,-33.52,49.45,0.022,-4.69,654,-9.38
+release_sweep_vib,2,env_release=-5,60,100,1.000,211,104,-33.57,47.09,0.02,-4.24,1138,-9.3
+release_sweep_vib,3,env_release=-4,60,100,1.000,211,104,-33.61,nan,0.02,-7.36,1359,-9.42
+release_sweep_vib,4,env_release=-3,60,100,1.000,211,104,-33.52,50.17,0.02,-14.59,1211,-9.38
+release_sweep_vib,5,env_release=-2,60,100,1.000,211,104,-33.62,nan,0.02,-29.69,619,-9.46
+release_sweep_vib,6,env_release=-1,60,100,1.000,211,104,-33.57,nan,0.018,-60.67,301,-9.6
+release_sweep_vib,7,env_release=+0,60,100,1.000,211,104,-33.56,47.71,0.02,-124.28,154,-9.35
+release_sweep_vib,8,env_release=+1,60,100,1.000,211,104,-33.57,nan,0.018,-252.89,74,-9.76
+release_sweep_vib,9,env_release=+2,60,100,1.000,211,104,-33.57,30.15,0.022,-512.05,33,-9.47
+release_sweep_vib,10,env_release=+3,60,100,1.000,211,104,-33.5,57.69,0.022,-1198.83,13,-9.7
+release_sweep_vib,11,env_release=+4,60,100,1.000,211,104,-33.53,61.39,0.018,nan,0,-9.91
+release_sweep_vib,12,env_release=+5,60,100,1.000,211,104,-33.58,nan,0.018,-298.87,5,-9.77
+release_sweep_vib,13,env_release=+6,60,100,1.000,211,104,-33.56,60.46,0.018,-383.68,3,-10.99
+release_sweep_vib,14,env_release=+7,60,100,1.000,211,104,-33.57,nan,0.018,-263.61,7,-10.92

@@ -121,7 +121,7 @@ def main():
     ap.add_argument('--invert', action='store_true',
                     help='flip polarity on the reverse pass (continuous at a zero crossing)')
     ap.add_argument('--no-filter', action='store_true')
-    ap.add_argument('--out-dir', default='listen/renders')
+    ap.add_argument('--out-dir', default='listen/emulated/scratch')
     args = ap.parse_args()
 
     banks = load_roms()

@@ -22,10 +22,10 @@ Whatever is left in that ratio is the chip's doing, because everything else -- t
 own decay, the multisample choice, the two partials' relative level, the output filter --
 is present identically in both.
 
-Use listen/2, not listen/1: listen/1 peaks at 0.9999 with 16 clipped samples, which flattens
+Use listen/hardware/2, not listen/hardware/1: listen/hardware/1 peaks at 0.9999 with 16 clipped samples, which flattens
 every attack in it.
 
-  python3 tools/envelope_measure.py --trace mame/error.log --out listen/2/ENVELOPE.md
+  python3 tools/envelope_measure.py --trace mame/error.log --out listen/hardware/2/ENVELOPE.md
 """
 import argparse, os, re, sys
 import numpy as np
@@ -164,7 +164,7 @@ def read_wav(path):
     return a.reshape(-1, w.getnchannels()).mean(1) / 32768.0, w.getframerate()
 
 # ---------------------------------------------------------------- main
-# listen/2's P-01 section.  Times are the capture log's; the log records when the script
+# listen/hardware/2's P-01 section.  Times are the capture log's; the log records when the script
 # SENT each message, and the note-off lands about 230 ms later -- measure, do not assume.
 EVENTS = [(3.404, 36, 100, 3.0), (7.407, 48, 100, 3.0), (11.412, 60, 100, 3.0),
           (15.416, 72, 100, 3.0), (19.420, 84, 100, 3.0),
@@ -257,12 +257,12 @@ def characterise(t, db, tf=None, dbf=None, hw_fine=None, floor_db=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--trace', default=os.path.join(ROOT, 'mame/error.log'))
-    ap.add_argument('--capture', default=os.path.join(ROOT, 'listen/2/u110_capture.wav'))
+    ap.add_argument('--capture', default=os.path.join(ROOT, 'listen/hardware/2/u110_capture.wav'))
     ap.add_argument('--emu', default=None, help='emulator render of the same events')
     ap.add_argument('--emu-offset', type=float, default=11.6,
                     help='capture time + this = emulator time (MIDI file shift + the\n                          ~10 s the U-110 takes to start accepting MIDI)')
-    ap.add_argument('--out', default=os.path.join(ROOT, 'listen/2/ENVELOPE.md'))
-    ap.add_argument('--csv', default=os.path.join(ROOT, 'listen/2/envelope_data.csv'))
+    ap.add_argument('--out', default=os.path.join(ROOT, 'listen/hardware/2/ENVELOPE.md'))
+    ap.add_argument('--csv', default=os.path.join(ROOT, 'listen/hardware/2/envelope_data.csv'))
     args = ap.parse_args()
 
     banks = load_roms()
@@ -355,7 +355,7 @@ def write_report(out, csvpath, rows, curves, args):
     L.append("## Method\n")
     L.append(__doc__.split('  python3')[0].split('\n', 2)[2].strip() + "\n")
     L.append("Specifics of this run:\n")
-    L.append("- capture `%s` (44.1 kHz; peak 0.796, **no clipping** -- listen/1 clips and\n"
+    L.append("- capture `%s` (44.1 kHz; peak 0.796, **no clipping** -- listen/hardware/1 clips and\n"
              "  must not be used for envelope work)" % os.path.relpath(args.capture, ROOT))
     L.append("- voice parameters from `%s`, a MAME run of the same seven events on P-01\n"
              "  selected from the front panel" % os.path.relpath(args.trace, ROOT))

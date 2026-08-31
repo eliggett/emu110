@@ -1,0 +1,22 @@
+U-110 EMULATOR render (tools/render_u110.py)
+sample rate 48000, channels 2, duration 1010.00 s
+part channel 1, control channel 16
+emulator peak -10.2 dBFS
+command: /home/eliggett/Documents/projects/emu110/tools/u110run.sh -p 1 -t 1010 -m /tmp/u110render.rfenmfwt/sequence.mid -w /home/eliggett/Documents/projects/emu110/listen/emulated/env3-emu-B/session.wav -samplerate 48000
+
+Times below are RENDER times and are exact: capture_u110.py's MIDI file
+carries a 10 s lead and MAME's -min adds ~10 s more, both already folded in.
+
+segments
+  01_scratch_level_vib.wav    23.000 ..  116.460   peak  -16.9 dBFS
+  02_scratch_level_fbass.wav  116.460 ..  209.920   peak  -10.2 dBFS
+  03_scratch_level_marimba.wav  209.920 ..  303.380   peak  -16.1 dBFS
+  04_scratch_velocity_vib.wav  303.380 ..  385.642   peak  -14.6 dBFS
+  05_scratch_velocity_marimba.wav  385.642 ..  467.904   peak  -13.8 dBFS
+  06_scratch_env_release.wav  467.904 ..  571.208   peak  -16.9 dBFS
+  07_scratch_env_attack.wav  571.208 ..  642.356   peak  -16.7 dBFS
+  08_scratch_tones.wav       642.356 ..  713.504   peak  -10.2 dBFS
+  09_scratch_keys.wav        713.504 ..  795.766   peak  -16.4 dBFS
+  10_scratch_slow_vib.wav    795.766 ..  872.446   peak  -16.9 dBFS
+  11_scratch_slow_fbass.wav  872.446 ..  949.126   peak  -10.2 dBFS
+  12_scratch_velo_sens.wav   949.126 .. 1005.274   peak  -14.6 dBFS

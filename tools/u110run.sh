@@ -33,13 +33,13 @@ ARGS=(u110 -seconds_to_run "$SECS" -nothrottle -video none
       -nvram_directory "$NV" -cfg_directory "$CFG"
       -autoboot_script "$HERE/tools/select_patch.lua")
 [ -n "$MIDI" ] && ARGS+=(-min "$MIDI")
-# Generated audio belongs in listen/renders/.  A bare filename goes there; the script
+# Generated audio belongs in listen/emulated/scratch/.  A bare filename goes there; the script
 # cds into mame/ before launching, so a relative path would otherwise land in mame/.
 if [ -n "$WAV" ]; then
   case "$WAV" in
     /*) ;;
     */*) WAV="$(cd "$(dirname "$WAV")" && pwd)/$(basename "$WAV")" ;;
-    *)  mkdir -p "$HERE/listen/renders"; WAV="$HERE/listen/renders/$WAV" ;;
+    *)  mkdir -p "$HERE/listen/emulated/scratch"; WAV="$HERE/listen/emulated/scratch/$WAV" ;;
   esac
   ARGS+=(-wavwrite "$WAV")
 else

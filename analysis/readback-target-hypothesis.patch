@@ -1,0 +1,19 @@
+--- /tmp/claude-1000/-home-eliggett-Documents-projects-emu110/3454ac60-d549-4458-9790-f4e24dd32bce/scratchpad/lvl/roland_lp.cpp.bak	2026-08-30 15:29:30.981786396 -0700
++++ mame/src/devices/sound/roland_lp.cpp	2026-08-30 20:04:32.949874598 -0700
+@@ -145,10 +145,14 @@
+ 				// the sustain handler at 0xBE99 has to `clrb` that byte to get a rate of
+ 				// zero, which only makes sense if it is normally non-zero.  Returning 0 here
+ 				// left every release a single segment followed by a permanent hold.
++				// EXPERIMENT B: report the level the ramp is HEADING TO while it is still
++				// travelling, rather than where it has got to.
++				double const rep = (m_chns[m_status_voice].env_rate != 0.0)
++						? m_chns[m_status_voice].env_target : double(level);
+ 				u8 log_level = 0;
+-				if (level)
++				if (rep > 0.0)
+ 					log_level = (u8)std::clamp(
+-							(int)lround(16.0 * log2(double(level) / ENV_FULL) + 255.0), 1, 255);
++							(int)lround(16.0 * log2(rep / ENV_FULL) + 255.0), 1, 255);
+ 				value = (u16(log_level) << 8) | (m_chns[m_status_voice].volume & 0x00FF);
+ 			}
+ 			break;

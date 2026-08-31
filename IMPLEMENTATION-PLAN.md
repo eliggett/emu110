@@ -584,7 +584,7 @@ Headless, one scratch NVRAM directory per run, patch selected from the panel.
 | `plot_sample212.py` | Plots the Sound Check waveform to PDF. |
 | `render_sample.py` / `render_note.py` | Decode and render a wave-ROM sample directly, no emulator. |
 | `trace_voices.py` | Voice-allocation tracing. |
-| `capture_u110.py` | Drives real hardware over MIDI and records it. **Its program numbers are TONES, not patches** — see §5.3 of `SYSTEM-DESIGN.md`; earlier revisions mislabelled them and the `listen/1` capture's log names are wrong. |
+| `capture_u110.py` | Drives real hardware over MIDI and records it. **Its program numbers are TONES, not patches** — see §5.3 of `SYSTEM-DESIGN.md`; earlier revisions mislabelled them and the `listen/hardware/1` capture's log names are wrong. |
 | `capture_u110_test.py` | Service-test capture with per-step marks. |
 
 `[I]` **MIDI timing.** `-min` events reach the machine about **10 s** after their file
@@ -669,7 +669,7 @@ Measured, not guessed. `tools/envelope_measure.py` divides the hardware capture 
 render of the same wave-ROM data**, so the sample's own decay, the multisample choice, the two
 partials' mix and the output filter all cancel and only the chip's contribution is left. The
 dry render was validated against MAME's own output first: they agree to **0.2 dB** across every
-note. Results are in `listen/2/ENVELOPE.md` with the raw values in `envelope_data.csv`.
+note. Results are in `listen/hardware/2/ENVELOPE.md` with the raw values in `envelope_data.csv`.
 
 | | hardware | emulator now |
 |---|---|---|

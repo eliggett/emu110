@@ -1,0 +1,173 @@
+sweep                      trial                      reg07 reg06   voices
+release_sweep_vib          env_release=-7               211   104   1
+release_sweep_vib          env_release=-6               211   104   1
+release_sweep_vib          env_release=-5               211   104   1
+release_sweep_vib          env_release=-4               211   104   1
+release_sweep_vib          env_release=-3               211   104   1
+release_sweep_vib          env_release=-2               211   104   1
+release_sweep_vib          env_release=-1               211   104   1
+release_sweep_vib          env_release=+0               211   104   1
+release_sweep_vib          env_release=+1               211   104   1
+release_sweep_vib          env_release=+2               211   104   1
+release_sweep_vib          env_release=+3               211   104   1
+release_sweep_vib          env_release=+4               211   104   1
+release_sweep_vib          env_release=+5               211   104   1
+release_sweep_vib          env_release=+6               211   104   1
+release_sweep_vib          env_release=+7               211   104   1
+release_sweep_organ        env_release=-7               220   109   1
+release_sweep_organ        env_release=-6               220   109   1
+release_sweep_organ        env_release=-5               220   109   1
+release_sweep_organ        env_release=-4               220   109   1
+release_sweep_organ        env_release=-3               220   109   1
+release_sweep_organ        env_release=-2               220   109   1
+release_sweep_organ        env_release=-1               220   109   1
+release_sweep_organ        env_release=+0               220   109   1
+release_sweep_organ        env_release=+1               220   109   1
+release_sweep_organ        env_release=+2               220   109   1
+release_sweep_organ        env_release=+3               220   109   1
+release_sweep_organ        env_release=+4               220   109   1
+release_sweep_organ        env_release=+5               220   109   1
+release_sweep_organ        env_release=+6               220   109   1
+release_sweep_organ        env_release=+7               220   109   1
+release_sweep_choir        env_release=-7               208    41   2  + 227/45
+release_sweep_choir        env_release=-6               227    45   2  + 208/41
+release_sweep_choir        env_release=-5               227    45   2  + 208/41
+release_sweep_choir        env_release=-4               227    45   2  + 208/41
+release_sweep_choir        env_release=-3               227    45   2  + 208/41
+release_sweep_choir        env_release=-2               227    45   2  + 208/41
+release_sweep_choir        env_release=-1               227    45   2  + 208/41
+release_sweep_choir        env_release=+0               227    45   2  + 208/41
+release_sweep_choir        env_release=+1               227    45   2  + 208/41
+release_sweep_choir        env_release=+2               227    45   2  + 208/41
+release_sweep_choir        env_release=+3               227    45   2  + 208/41
+release_sweep_choir        env_release=+4               227    45   2  + 208/41
+release_sweep_choir        env_release=+5               227    45   2  + 208/41
+release_sweep_choir        env_release=+6               227    45   2  + 208/41
+release_sweep_choir        env_release=+7               227    45   2  + 208/41
+attack_sweep_vib           env_attack=-7                211     1   1
+attack_sweep_vib           env_attack=-6                211     8   1
+attack_sweep_vib           env_attack=-5                211    24   1
+attack_sweep_vib           env_attack=-4                211    40   1
+attack_sweep_vib           env_attack=-3                211    56   1
+attack_sweep_vib           env_attack=-2                211    72   1
+attack_sweep_vib           env_attack=-1                211    88   1
+attack_sweep_vib           env_attack=+0                211   104   1
+attack_sweep_vib           env_attack=+1                211   120   1
+attack_sweep_vib           env_attack=+2                211   127   1
+attack_sweep_vib           env_attack=+3                211   127   1
+attack_sweep_vib           env_attack=+4                211   127   1
+attack_sweep_vib           env_attack=+5                211   127   1
+attack_sweep_vib           env_attack=+6                211   127   1
+attack_sweep_vib           env_attack=+7                211   127   1
+attack_sweep_strings       env_attack=-7                227     1   1
+attack_sweep_strings       env_attack=-6                227     1   1
+attack_sweep_strings       env_attack=-5                227     1   1
+attack_sweep_strings       env_attack=-4                227     1   1
+attack_sweep_strings       env_attack=-3                227     8   1
+attack_sweep_strings       env_attack=-2                227    24   1
+attack_sweep_strings       env_attack=-1                227    40   1
+attack_sweep_strings       env_attack=+0                227    56   1
+attack_sweep_strings       env_attack=+1                227    72   1
+attack_sweep_strings       env_attack=+2                227    88   1
+attack_sweep_strings       env_attack=+3                227   104   1
+attack_sweep_strings       env_attack=+4                227   120   1
+attack_sweep_strings       env_attack=+5                227   127   1
+attack_sweep_strings       env_attack=+6                227   127   1
+attack_sweep_strings       env_attack=+7                227   127   1
+attack_sweep_brass         env_attack=-7                227     1   1
+attack_sweep_brass         env_attack=-6                227    16   1
+attack_sweep_brass         env_attack=-5                227    32   1
+attack_sweep_brass         env_attack=-4                227    48   1
+attack_sweep_brass         env_attack=-3                227    64   1
+attack_sweep_brass         env_attack=-2                227    80   1
+attack_sweep_brass         env_attack=-1                227    96   1
+attack_sweep_brass         env_attack=+0                227   112   1
+attack_sweep_brass         env_attack=+1                227   127   1
+attack_sweep_brass         env_attack=+2                227   127   1
+attack_sweep_brass         env_attack=+3                227   127   1
+attack_sweep_brass         env_attack=+4                227   127   1
+attack_sweep_brass         env_attack=+5                227   127   1
+attack_sweep_brass         env_attack=+6                227   127   1
+attack_sweep_brass         env_attack=+7                227   127   1
+level_sweep                level=127                    220   109   1
+level_sweep                level=112                    217   107   1
+level_sweep                level=96                     213   105   1
+level_sweep                level=80                     210   104   1
+level_sweep                level=64                     206   102   1
+level_sweep                level=56                     203   100   1
+level_sweep                level=48                     199    98   1
+level_sweep                level=40                     196    97   1
+level_sweep                level=32                     192    95   1
+level_sweep                level=24                     185    91   1
+level_sweep                level=16                     178    88   1
+level_sweep                level=8                      163    80   1
+level_sweep                level=4                      149    73   1
+level_sweep                level=0                       48     1   1
+velocity_sens              velo_sens=0/vel=1            232   115   1
+velocity_sens              velo_sens=0/vel=40           232   115   1
+velocity_sens              velo_sens=0/vel=80           232   115   1
+velocity_sens              velo_sens=0/vel=127          232   115   1
+velocity_sens              velo_sens=4/vel=1            212   105   1
+velocity_sens              velo_sens=4/vel=40           220   109   1
+velocity_sens              velo_sens=4/vel=80           226   112   1
+velocity_sens              velo_sens=4/vel=127          232   115   1
+velocity_sens              velo_sens=8/vel=1            192    95   1
+velocity_sens              velo_sens=8/vel=40           208   103   1
+velocity_sens              velo_sens=8/vel=80           221   109   1
+velocity_sens              velo_sens=8/vel=127          232   115   1
+velocity_sens              velo_sens=12/vel=1           173    85   1
+velocity_sens              velo_sens=12/vel=40          196    97   1
+velocity_sens              velo_sens=12/vel=80          215   106   1
+velocity_sens              velo_sens=12/vel=127         232   115   1
+velocity_sens              velo_sens=15/vel=1           158    78   1
+velocity_sens              velo_sens=15/vel=40          187    92   1
+velocity_sens              velo_sens=15/vel=80          211   104   1
+velocity_sens              velo_sens=15/vel=127         232   115   1
+release_by_hold_vib        hold=0.20                    211   104   1
+release_by_hold_vib        hold=0.50                    211   104   1
+release_by_hold_vib        hold=1.00                    211   104   1
+release_by_hold_vib        hold=2.00                    211   104   1
+release_by_hold_vib        hold=4.00                    211   104   1
+release_by_hold_vib        hold=8.00                    211   104   1
+release_by_hold_organ      hold=0.20                    220   109   1
+release_by_hold_organ      hold=0.50                    220   109   1
+release_by_hold_organ      hold=1.00                    220   109   1
+release_by_hold_organ      hold=2.00                    220   109   1
+release_by_hold_organ      hold=4.00                    220   109   1
+release_by_hold_organ      hold=8.00                    220   109   1
+release_by_key_vib         note=36                      211   104   1
+release_by_key_vib         note=48                      211   104   1
+release_by_key_vib         note=60                      211   104   1
+release_by_key_vib         note=69                      211   104   1
+release_by_key_vib         note=72                      211   104   1
+release_by_key_vib         note=84                      211   104   1
+release_by_key_vib         note=96                      211   104   1
+release_by_key_organ       note=36                      220   109   1
+release_by_key_organ       note=48                      220   109   1
+release_by_key_organ       note=60                      220   109   1
+release_by_key_organ       note=69                      220   109   1
+release_by_key_organ       note=72                      220   109   1
+release_by_key_organ       note=84                      220   109   1
+release_by_key_organ       note=96                        -     -   -
+attack_by_velocity_strings vel=16                       171    21   1
+attack_by_velocity_strings vel=40                       194    30   1
+attack_by_velocity_strings vel=64                       211    39   1
+attack_by_velocity_strings vel=96                       226    56   1
+attack_by_velocity_strings vel=127                      239    59   1
+attack_by_velocity_brass   vel=16                       171    63   1
+attack_by_velocity_brass   vel=40                       194    78   1
+attack_by_velocity_brass   vel=64                       211    91   1
+attack_by_velocity_brass   vel=96                       226   112   1
+attack_by_velocity_brass   vel=127                      239   118   1
+decay_hold                 tone=piano                   227   112   2  + 203/100
+decay_hold                 tone=vib                     211   104   1
+decay_hold                 tone=bell                    227   112   1
+decay_hold                 tone=marimba                 227   112   1
+decay_hold                 tone=slap                    227   112   1
+decay_hold                 tone=fbass                   227   112   1
+decay_hold                 tone=choir                   227    45   2  + 208/41
+decay_hold                 tone=strings                 227    56   1
+decay_hold                 tone=organ                   220   109   1
+decay_hold                 tone=brass                   227   112   1
+decay_hold                 tone=flute                   227    71   1
+decay_hold                 tone=shaku                   227    66   1

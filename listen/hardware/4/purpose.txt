@@ -1,0 +1,1 @@
+This test was to capture some dry and spectrally-broad tones from the hardware from which to establish the hardware vs emu EQ. There is also a test of a piano note that I thought sounded a bit off in emulation. 

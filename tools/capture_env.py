@@ -5,7 +5,7 @@
 capture_env.py -- drive a real U-110 through its ENVELOPE parameters and record the result.
 
     python3 tools/capture_env.py --list
-    python3 tools/capture_env.py --out-dir listen/env
+    python3 tools/capture_env.py --out-dir listen/hardware/env
     python3 tools/capture_env.py --only release_sweep,release_by_hold
 
 This exists to pin down one number that cannot be got any other way: **how fast one unit of
@@ -21,9 +21,9 @@ The trick this script sets up is a pairing.  The *emulator* runs the same firmwa
 computes the same rate byte and logs it -- even though it then ignores it.  The *hardware*
 gives the dB/s that byte produces.  Run the identical sequence through both:
 
-    python3 tools/render_u110.py --sequence capture_env --log --out-dir listen/env-emu
+    python3 tools/render_u110.py --sequence capture_env --log --out-dir listen/emulated/env-emu
 
-and pair `reg06` from `listen/env-emu/error.log` against the slope measured here.  Two
+and pair `reg06` from `listen/emulated/env-emu/error.log` against the slope measured here.  Two
 unknowns, two measurements.
 
 That pairing is already verified for the note-on rate.  Rendering `attack_sweep_vib`
@@ -96,6 +96,31 @@ P_LEVEL       = 0x07        # 0..127
 P_VELO_SENS   = 0x08        # 0..15
 P_ENV_ATTACK  = 0x0A        # 1..15  ->  -7..+7   (8 = 0, the neutral setting)
 P_ENV_RELEASE = 0x0B        # 1..15  ->  -7..+7
+
+# The rest of the part block (Owner's Manual 4.2.2), needed to dictate a patch outright
+# rather than inherit whatever the factory patch happens to hold.  Verified one at a time
+# against the emulator by writing a distinctive value and dumping the edit buffer at
+# 0x2814: tone lands at part+0x01, bend/channel share part+0x02 (high nibble / low nibble),
+# key range at +0x03 and +0x04, level at +0x05, output assign at +0x0B.
+P_OUT_ASSIGN   = 0x00       # 0..6
+P_RX_CHANNEL   = 0x01       # 0..15
+P_BEND_RANGE   = 0x04       # 0..12
+P_KEY_LO       = 0x05       # 0..127
+P_KEY_HI       = 0x06       # 0..127
+P_PITCH_COARSE = 0x0C       # 52..76  -> -12..+12 semitones, 64 = 0
+P_PITCH_FINE   = 0x0D       # 14..114 -> -50..+50 cents,     64 = 0
+P_LFO_RATE     = 0x0E
+P_LFO_DELAY    = 0x0F
+P_LFO_RISE     = 0x10
+P_LFO_DEPTH    = 0x11
+P_LFO_MRISE    = 0x12
+P_LFO_MDEPTH   = 0x13
+P_LFO_CHPRESS  = 0x14
+
+# Patch COMMON parameters, temporary area 00 01 xx.  Chorus and tremolo are here, not in
+# the part block, which is why they need their own writer.
+C_CHORUS_RATE, C_CHORUS_DEPTH   = 0x19, 0x1A
+C_TREMOLO_RATE, C_TREMOLO_DEPTH = 0x1B, 0x1C
 
 PARAM_NAMES = {P_TONE_MEDIA: 'tone_media', P_TONE: 'tone', P_LEVEL: 'level',
                P_VELO_SENS: 'velo_sens', P_ENV_ATTACK: 'env_attack',
@@ -218,9 +243,148 @@ _seg('decay_hold', 'long holds at neutral settings, twelve tones',
 
 
 
+# ---------------------------------------------------------------- scratch-patch sweeps
+#
+# Run with --set scratch.  Everything else in this file leans on a factory patch and
+# changes one or two parameters; this set dictates the WHOLE patch first, so nothing is
+# inherited and nothing else can move.  That matters because the open question -- what the
+# falling ramp actually does -- has so far been answered differently by different tones,
+# and a tone is not a controlled variable if the patch around it is not pinned.
+#
+# THE SCRATCH PATCH
+#
+#   * part 0 gets every parameter written explicitly: tone, level, velocity sens, both ENV
+#     rates, full key range, no pitch shift, ALL LFO depths zero;
+#   * parts 1-5 are moved to MIDI channel 14, so they never see a note and never allocate
+#     a voice.  Not level 0 -- a silent part still costs polyphony and can still be given a
+#     segment, and the point is to have exactly one voice in flight;
+#   * chorus and tremolo depth are set to 0 in the patch common block.
+#
+# It is written after the program change (which reloads the patch and would wipe it) and
+# lives only in the edit buffer -- nothing here can touch the 64 stored patches.
+#
+# WHAT EACH SEGMENT ASKS
+#
+# The decisive one is scratch_level, and it is sharper than it first looks.  Dropping PART
+# LEVEL does not only lower the level: the firmware scales the decay RATE with it too.
+# Rendered through the emulator, PART LEVEL 127 -> 8 walks register 07 from 217 to 158 --
+# 59 units, 22.2 dB of level -- while the first decay segment goes from rate -43 to -24,
+# 19 counts.  The two candidate models then predict OPPOSITE directions:
+#
+#     linear-amplitude ramp   t = (level/2) / speed
+#                             level x0.077, speed x0.192  ->  dB/s goes UP about 2.5x
+#     log-domain ramp         dB/s = k * 2^(rate/8)
+#                             rate -19 counts             ->  dB/s goes DOWN about 5.2x
+#
+# A factor of thirteen apart, in opposite directions, from one sweep.  Whichever way the
+# hardware moves settles it, and neither answer needs the rate ladder to be known.
+#
+# scratch_velocity is the same question through a different lever, and must agree.
+# scratch_keys is the complement: note number moves the rate (-38 at note 24 to -51 at 96,
+# verified in the emulator) while register 07 and every target stay identical, so it
+# measures the rate exponent at CONSTANT level -- the calibration the release sweep gives at note-off, now
+# during a note.  Both models predict the same thing there, which is what makes it a clean
+# control rather than a second opinion.
+#
+# Every one of these runs on a tone that currently measures RIGHT (Vib 1) and on one that
+# measures 2x SLOW (Fretless Bass, Marimba).  If the answer differs between those two
+# families, that difference is the bug.
+
+SCRATCH_MUTE_CH = 13            # parts 1-5 parked on MIDI channel 14
+
+SCRATCH_PART0 = {
+    P_OUT_ASSIGN: 0, P_RX_CHANNEL: 0, P_TONE_MEDIA: 0,
+    P_BEND_RANGE: 2, P_KEY_LO: 0, P_KEY_HI: 127,
+    P_LEVEL: 127, P_VELO_SENS: 8,
+    P_ENV_ATTACK: 8, P_ENV_RELEASE: 8,          # 8 on the wire = 0 on the panel
+    P_PITCH_COARSE: 64, P_PITCH_FINE: 64,
+    P_LFO_RATE: 0, P_LFO_DELAY: 0, P_LFO_RISE: 0, P_LFO_DEPTH: 0,
+    P_LFO_MRISE: 0, P_LFO_MDEPTH: 0, P_LFO_CHPRESS: 0,
+}
+
+
+def _scratch_setup(tone):
+    """Every write that builds the scratch patch, in the order it must happen."""
+    out = [('common', C_CHORUS_DEPTH, 0), ('common', C_TREMOLO_DEPTH, 0)]
+    for off, val in sorted(SCRATCH_PART0.items()):
+        out.append(('part', 0, off, val))
+    out.append(('part', 0, P_TONE, tone))
+    for part in range(1, 6):
+        out.append(('part', part, P_RX_CHANNEL, SCRATCH_MUTE_CH))
+    return out
+
+
+def _sseg(name, label, tone, trials):
+    SCRATCH.append(dict(name=name, label=label, patch=0,
+                        setup=_scratch_setup(tone), trials=trials))
+
+
+SCRATCH = []
+
+# 1. THE DECISIVE ONE.  PART LEVEL sweep, everything else pinned.
+#    linear-amplitude ramp -> dB/s doubles for each halving of level
+#    log-domain ramp       -> dB/s flat across the whole sweep
+for _tn, _tone in (('vib', 15), ('fbass', 44), ('marimba', 22)):
+    _sseg('scratch_level_' + _tn, 'PART LEVEL sweep, %s, scratch patch' % _tn, _tone,
+          [_trial(60, 100, 8.0, 3.0, 'level=%d' % v, {P_LEVEL: v})
+           for v in (127, 96, 72, 52, 36, 24, 14, 8)])
+
+# 2. The same question through velocity, which moves register 07 and leaves the rate alone.
+for _tn, _tone in (('vib', 15), ('marimba', 22)):
+    _sseg('scratch_velocity_' + _tn, 'velocity sweep, %s, scratch patch' % _tn, _tone,
+          [_trial(60, v, 8.0, 3.0, 'vel=%d' % v, {})
+           for v in (127, 110, 90, 70, 50, 30, 15)])
+
+# 3. NEGATIVE CONTROL.  Rendered through the emulator, ENV RELEASE does not touch the
+#    in-note decay at all -- all seven settings produce the identical ladder, r-50 -> 198,
+#    r-43 -> 182, r-35 -> 166.  Only the fall after note-off moves.  Worth confirming on
+#    hardware, because it says the in-note decay and the release are separate mechanisms,
+#    and every model of one has to leave the other alone.  The 6 s gap catches the release
+#    as well, so this doubles as a check that the release law still holds with the whole
+#    patch dictated rather than inherited.
+_sseg('scratch_env_release', 'ENV RELEASE -4..+2, vib, scratch patch', 15,
+      [_trial(60, 100, 8.0, 6.0, 'env_release=%+d' % d, {P_ENV_RELEASE: env_val(d)})
+       for d in (-4, -3, -2, -1, 0, 1, 2)])
+
+# 4. ENV ATTACK moves the byte by 16 instead of 8 -- a coarser lever on the same law.
+_sseg('scratch_env_attack', 'ENV ATTACK -3..+3, vib, scratch patch', 15,
+      [_trial(60, 100, 8.0, 3.0, 'env_attack=%+d' % d, {P_ENV_ATTACK: env_val(d)})
+       for d in (-4, -3, -2, -1, 0, 1)])       # +2 and beyond saturate the byte at 0x7F
+
+# 5. Six tones under IDENTICAL dictated settings.  Three of these (marimba, fbass, piano)
+#    write a zero-length segment and currently render 2x slow; three do not and render
+#    right.  With the patch pinned, tone is finally the only variable.
+_sseg('scratch_tones', 'six tones, identical scratch patch', 15,
+      [_trial(60, 100, 8.0, 3.0, 'tone=%s' % n, {P_TONE: t})
+       for n, t in (('vib', 15), ('bell', 18), ('slap', 32),
+                    ('marimba', 22), ('fbass', 44), ('piano', 0))])
+
+# 6. Key scaling: the phase handlers scale rates by (key - 0x45), so the note number is a
+#    lever on the rate that does not touch the level.  The complement of segment 1.
+_sseg('scratch_keys', 'vib across the keyboard, scratch patch', 15,
+      [_trial(n, 100, 8.0, 3.0, 'note=%d' % n, {})
+       for n in (24, 36, 48, 60, 72, 84, 96)])
+
+# 7. SHAPE, not speed.  Long holds so the decay can be fitted frame by frame rather than
+#    averaged: a linear-amplitude ramp is concave in dB within each 6 dB segment and a
+#    log-domain one is dead straight.  Slowest ENV RELEASE in case it reaches the decay.
+_sseg('scratch_slow_vib', 'vib, 20 s hold, slow envelope', 15,
+      [_trial(60, 100, 20.0, 4.0, 'env_release=%+d' % d, {P_ENV_RELEASE: env_val(d)})
+       for d in (0, -4, -7)])
+_sseg('scratch_slow_fbass', 'fretless bass, 20 s hold, slow envelope', 44,
+      [_trial(60, 100, 20.0, 4.0, 'env_release=%+d' % d, {P_ENV_RELEASE: env_val(d)})
+       for d in (0, -4, -7)])
+
+# 8. VELOCITY SENS against velocity: separates "how hard it was hit" from "how much this
+#    part cares", which are the two things that feed register 07 at note-on.
+_sseg('scratch_velo_sens', 'VELO SENS x velocity, vib, scratch patch', 15,
+      [_trial(60, v, 6.0, 2.5, 'sens=%d/vel=%d' % (sv, v), {P_VELO_SENS: sv})
+       for sv in (0, 8, 15) for v in (100, 40)])
+
+
 # ---------------------------------------------------------------- follow-up sweeps
 #
-# Run with --set followup.  These exist because the first take (listen/env) settled the
+# Run with --set followup.  These exist because the first take (listen/hardware/env) settled the
 # shape of the rate law but left two things open.
 #
 #  1. Every rate byte the first take produced was a multiple of 8, because ENV ATTACK and
@@ -290,6 +454,18 @@ def part_addr(part, off):
     return (0x00, 0x10 | (part & 0x0F), off)
 
 
+def common_addr(off):
+    return (0x00, 0x01, off)
+
+
+def send_common(out, mido, dev, off, value):
+    """Write one patch-COMMON parameter to the TEMPORARY patch."""
+    addr = common_addr(off)
+    if addr[0] != 0x00 or addr[1] != 0x01:
+        raise ValueError("refusing to write outside the temporary patch: %r" % (addr,))
+    out.send(mido.Message('sysex', data=dt1(dev, addr, [value & 0x7F])))
+
+
 def send_param(out, mido, dev, part, off, value):
     """Write one part parameter to the TEMPORARY patch.  Refuses anything else."""
     addr = part_addr(part, off)
@@ -356,6 +532,17 @@ def write_dry_run(path, segments, ch, cch, part=0, midi_delay=10.0):
     for seg in segments:
         start = t
         ev.append((t, bytes([0xC0 | cch, seg['patch']])))
+        t += 0.30
+        # The scratch patch, if this segment has one.  AFTER the program change, which has
+        # just reloaded the patch from memory and would otherwise wipe every write.
+        for item in seg.get('setup', ()):
+            if item[0] == 'common':
+                ev.append((t, sysex(dt1(dev, common_addr(item[1]), [item[2]]))))
+            else:
+                ev.append((t, sysex(dt1(dev, part_addr(item[1], item[2]), [item[3]]))))
+            t += 0.006
+        if seg.get('setup'):
+            t += 0.25
         t += PATCH_SETTLE
         for i, tr in enumerate(seg['trials']):
             for off in sorted(tr['params']):
@@ -405,8 +592,8 @@ def write_trials(path, rows):
 def emu_rates(out_dir):
     """Print the rate byte the firmware computed for each trial, from an emulator render.
 
-        python3 tools/render_u110.py --sequence capture_env --log --out-dir listen/env-emu
-        python3 tools/capture_env.py --emu-rates listen/env-emu
+        python3 tools/render_u110.py --sequence capture_env --log --out-dir listen/emulated/env-emu
+        python3 tools/capture_env.py --emu-rates listen/emulated/env-emu
 
     Matching is by TIME, not by index: layered tones start two voices per note, so the
     n-th note-on is not the n-th trial.  MAME's TG trace timestamps every register write,
@@ -461,7 +648,7 @@ def emu_rates(out_dir):
 # ---------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--out-dir', default='listen/env')
+    ap.add_argument('--out-dir', default='listen/hardware/env')
     ap.add_argument('--device', default=None, help='audio input device name or index')
     ap.add_argument('--list-devices', action='store_true')
     ap.add_argument('--list', action='store_true', help='show the sweeps and stop')
@@ -471,7 +658,8 @@ def main():
     ap.add_argument('--patch', type=int, default=0,
                     help='patch to work in, as a program number (0 = P-01)')
     ap.add_argument('--only', default=None, help='comma-separated sweep names')
-    ap.add_argument('--set', default='main', choices=('main', 'followup', 'all'),
+    ap.add_argument('--set', default='main',
+                    choices=('main', 'followup', 'scratch', 'all'),
                     help="'main' is the original 15 sweeps; 'followup' is the shorter set "
                          "the first take showed was needed (see FOLLOWUP above)")
     ap.add_argument('--dry-run-midi', default=None, metavar='FILE',
@@ -487,8 +675,8 @@ def main():
         emu_rates(args.emu_rates)
         return
 
-    segments = {'main': SEGMENTS, 'followup': FOLLOWUP,
-                'all': SEGMENTS + FOLLOWUP}[args.set]
+    segments = {'main': SEGMENTS, 'followup': FOLLOWUP, 'scratch': SCRATCH,
+                'all': SEGMENTS + FOLLOWUP + SCRATCH}[args.set]
     if args.only:
         want = [x.strip() for x in args.only.split(',')]
         pool = segments
@@ -561,7 +749,7 @@ def main():
     print("and the sweeps all come out identical.  Nothing is written to stored patches:")
     print("only the temporary patch is touched, and the run ends by reselecting the patch,")
     print("which reloads it.  Do not press WRITE afterwards.")
-    print("\nKeep the input gain where it was for listen/3 if you want the takes to be")
+    print("\nKeep the input gain where it was for listen/hardware/3 if you want the takes to be")
     print("comparable -- but the measurements here are slopes in dB/s, so gain does not")
     print("matter as long as nothing clips.")
     input("\nPress Enter to start...")
@@ -611,6 +799,17 @@ def main():
                 for seg in segments:
                     seg_start = time.time() - t0
                     out.send(mido.Message('program_change', channel=cch, program=seg['patch']))
+                    time.sleep(0.30)
+                    for item in seg.get('setup', ()):
+                        if item[0] == 'common':
+                            send_common(out, mido, dev, item[1], item[2])
+                        else:
+                            send_param(out, mido, dev, item[1], item[2], item[3])
+                        time.sleep(0.012)
+                    if seg.get('setup'):
+                        log.append("%8.3f  -- scratch patch written (%d parameters) --"
+                                   % (time.time() - t0, len(seg['setup'])))
+                        time.sleep(0.25)
                     time.sleep(PATCH_SETTLE)
                     print("  [%s] %s" % (seg['name'], seg['label']))
                     log.append("%8.3f  == %s : %s ==" % (seg_start, seg['name'], seg['label']))
