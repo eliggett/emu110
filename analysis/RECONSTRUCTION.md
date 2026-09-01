@@ -161,7 +161,7 @@ That excess resonance is real but small: correcting Q1 to 1.315 changes 7 kHz by
 | Oversample the engine to 192 kHz, filter there, decimate (Gemini's Method A) | Tested numerically on a 9450 Hz source: images at 6450 / 7950 / 8950 Hz come out at -16.5 / -29.9 / -49.9 dB against -16.5 / -29.7 / -50.4 for the 32 kHz path. **Unchanged within 0.5 dB.** The premise is "stop the images folding down", but nothing folds -- they are at multiples of the SOURCE rate and are born in-band. Correct medicine for step > 1 (section 2), wrong disease here. |
 | The demux / sample-and-hold / fast DAC suppress them in hardware | Cannot. A 9450 Hz image is indistinguishable from a genuine 9450 Hz partial to anything downstream of the DAC. The per-channel S/H is still 1/32000 long: `sinc(f/32000)` = **-1.3 dB at 9.45 kHz**. What the fast DAC and demux buy is suppression of the 32 kHz+ family, which is why a gentle analog filter sufficed. The simple filter is evidence the chip never MADE these images, not that it removed them. |
 | Hardware plays a different, higher-rate multisample | Keymap says no. Note 43 takes sample 2, reference note 64; predicted step 0.2973 against the firmware's 0.2952. Our selection and rate match the firmware, and the firmware is the hardware. |
-| The output EQ correction's shape is the fault | Its required amount depends on the playback **step** -- at note 60 (step 0.53) it is pure over-darkening, at note 43 (step 0.295) it is still masking image energy. A filter response cannot depend on step. |
+| The output EQ correction's shape is the fault | `[RETRACTED]` This was argued from long-window scores that showed the EQ helping at note 43 and over-darkening at note 60, i.e. varying with step, which no filter can do. Re-measured in the corrected short window the EQ helps in **both** cases (note 43 mean 6.9 -> 2.7 dB, six tones 6.8 -> 3.9), so there is no step dependence and the argument is withdrawn. See section 7. |
 | Sallen-Key resonance too high | Real (+4.17 vs +2.17 dB) but worth only ~2 dB at 7-8 kHz. Not the excess. |
 | A *smoother* kernel is wrong; a *sharper* one is right | Followed from a measurement artefact -- see section 6. The 16-tap windowed sinc overshoots (-12.5 dB at 8-9 kHz on note 43) and Catmull-Rom undershoots badly (+15.5 dB at 7-8 kHz, worse than linear, because an interpolating cubic peaks near Nyquist). Quadratic sits between them, where the hardware is. |
 
@@ -214,14 +214,63 @@ onset**, and check the window before believing a spectral comparison.
 **Step > 1 has no anti-aliasing.**  Section 2.  Structurally real, but checked against the
 hardware by ear and inaudible on both machines, so it is documented rather than scheduled.
 
-**Marimba is -11.7 dB at 6-9 kHz** and no kernel moves it (-12.1 / -11.7 / -11.7 across
-linear, quadratic and gated quadratic).  Its step is 0.841, so its 6-9 kHz is genuine
-recorded content, not images.  Unexplained.
+### Marimba is 6-12 dB too dark at 6-9 kHz `[open]`
 
-**The EQ correction is empirically justified but physically unexplained.**  Quadratic *with*
-it beats quadratic without it on both datasets, yet its required amount varies with step,
-which no filter response can do.  It is still doing work we do not understand, so the
-spectral side is not finished.
+The one tone where the emulator has LESS high-frequency energy than the hardware, and the
+largest single spectral error left.
+
+    MARIMBA, scratch patch tone 22, note 60
+      sample reference note 63, step 0.8409 -> source rate 26909 Hz, Nyquist 13454 Hz
+
+so 6-9 kHz is **genuine recorded content, not images** -- which is why no kernel touches it.
+Measured at 6-9 kHz against 200-1200 Hz, emulator minus hardware, 0.05-0.25 s window:
+
+    linear + EQ   -12.1        quadratic + EQ   -11.7
+    linear no EQ   -7.5        quadratic no EQ   -6.7
+
+Two things worth noting.  The EQ correction accounts for about 4-5 dB of it, and marimba is
+the only tone that measurably wants the EQ **off** -- which ties it to the open question
+below.  The remaining ~7 dB is unexplained.
+
+The envelope is not the cause: the decay fits at 52.33 dB/s on hardware against 47.52 here,
+-9%, in line with the rest of the set.
+
+Not yet checked, in the order I would check them: whether the keymap picks the same sample
+the firmware does (the check that settled A. PIANO 1 in section 1, and it is cheap); whether
+the loop length and loop mode are handled correctly for this sample; and whether the raw
+decoded ROM data has the high-frequency content at all, by rendering the sample directly
+with `tools/render_note.py` and comparing against the hardware capture.  If the raw sample
+is already dark, the fault is in the decoder, not the player.
+
+### The output EQ correction is unexplained `[open]`
+
+    FILTER_BIQUAD PEAK, fc 5933.3 Hz, Q 1.9306, gain 0.436787 (-7.195 dB)
+    roland_u110.cpp, switchable at runtime and with U110_EQ
+
+It is a fitted correction layer, not derived from the circuit, and it **helps consistently**:
+
+                          note 43      six tones
+      quadratic, no EQ      6.9 dB        6.8 dB
+      quadratic + EQ        2.7 dB        3.9 dB
+
+`[RETRACTED]` An earlier reading of this document claimed the EQ's required amount varies
+with playback step -- which would have meant it could not be a filter response at all.  That
+came from long-window scores; in the corrected short window (section 6) it helps in both
+cases, and the claim is withdrawn.  Do not build on it.
+
+What remains genuinely open is **why it is needed**, since we now know the treble excess it
+was originally fitted against was largely reconstruction images, which the kernel has since
+removed -- and yet the correction still earns its place.  The leading candidate is the known
+error in the analog model: the Sallen-Key chain as modelled peaks **+4.17 dB at 6087 Hz**
+where the service notes' own simulation of the same circuit says **+2.17 dB max** (section 3).
+Twice the resonance, in the same place.  Correcting Q1 from 1.736 to 1.315 is worth about
++2.4 dB at 7 kHz, so it plausibly accounts for a good part of a -7.2 dB bell centred at
+5.9 kHz, but not obviously all of it.
+
+The principled repair is to fix the circuit model first and then re-fit or delete the
+correction -- in that order, because re-fitting the EQ against a wrong Sallen-Key Q just
+re-encodes the error.  Until that is done the emulator carries a correction it cannot
+justify from the hardware, and the spectral side is not finished.
 
 **We may now be quieter than the hardware above 10 kHz.**  Hardware's peak-to-median there
 is 8.0 dB -- its own noise floor -- while ours is dither.  After A/B-ing the two the user's
