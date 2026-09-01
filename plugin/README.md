@@ -116,3 +116,28 @@ Two things the harness guards against, both of which bit it during development:
 - **MIDI files it writes always carry an explicit `set_tempo`.** MAME's reader falls back
   to 60 BPM without one, not the spec's 120, and the sequence then plays at half speed --
   which is indistinguishable from the emulator running slow.
+
+## Building the core
+
+```sh
+plugin/tools/build_core.sh
+```
+
+Compiles MAME's device sources against `compat/emu.h`, links them, and runs a smoke test
+that starts each device and exercises the scheduler, the streams and a memory space.
+
+The file list in that script is the **same source MAME builds** -- no copies, no patches.
+If a file there ever needs editing to compile, the shim is wrong, not the file. `git -C
+mame status src/devices/` should stay empty.
+
+Three things to know before touching `compat/`:
+
+- **`mame/src/emu` is deliberately not on the include path.** If it were, `#include
+  "emu.h"` would find MAME's, and the build would silently compile the wrong thing.
+- **The shim implements only what these sources actually use.** When a MAME update breaks
+  the build, add the one thing it now needs -- do not widen the shim speculatively.
+- **C++20**, matching MAME. `flt_biquad.cpp` uses `<numbers>`.
+
+`mcs96.hxx`, `i8x9x.hxx` and `i8x9xd.hxx` are generated into `generated/` by MAME's own
+`mcs96make.py` from MAME's own `mcs96ops.lst`, so the two builds cannot diverge there
+either.

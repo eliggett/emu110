@@ -155,9 +155,19 @@ CORE_SOURCES = \
   $(MAME)/src/devices/cpu/mcs96/i8x9x.cpp \
   $(MAME)/src/devices/video/msm6222b.cpp \
   $(MAME)/src/devices/sound/flt_biquad.cpp \
-  $(MAME)/src/devices/sound/flt_rc.cpp
-CORE_CXXFLAGS = -I plugin/compat -I $(MAME)/src/mame/roland
+  $(MAME)/src/devices/sound/flt_rc.cpp \
+  $(MAME)/src/devices/cpu/mcs96/mcs96d.cpp \
+  $(MAME)/src/devices/cpu/mcs96/i8x9xd.cpp
+CORE_CXXFLAGS = -std=c++20 -I plugin/compat -I $(MAME)/src/devices \
+                -I $(MAME)/src/lib/util -I $(MAME)/src/osd \
+                -I $(MAME)/src/mame/roland
 ```
+
+`plugin/tools/build_core.sh` is this, working today.
+
+**`$(MAME)/src/emu` is deliberately absent from the include path.** If it were
+there, `#include "emu.h"` would find MAME's and the whole exercise would silently
+compile the wrong thing — and it would nearly work, which is worse.
 
 **The two filter devices are on that list deliberately.** Both are BSD-3-Clause
 (checked), so the *entire* audio chain — voices, pan matrix, Sallen-Key cascade,
@@ -178,14 +188,37 @@ the change is in. No fork, no drift, one source of truth.
 ### What this costs
 
 **The shim must match MAME's API, not a nicer one.** This is the whole
-constraint: we are writing a drop-in `emu.h`, so we implement what these four
-files actually use and no more — `device_t`, `device_sound_interface`,
-`device_rom_interface<N>`, `device_execute_interface`, `devcb_write_line`,
-`emu_timer` / `attotime`, `sound_stream`, `address_space`, `save_item`,
-`logerror`, and the `DECLARE_/DEFINE_DEVICE_TYPE` macros.
+constraint: we are writing a drop-in `emu.h`, so we implement what these files
+actually use and no more.
 
-Bounded: 80 total references to `machine()`, `save_item`, `logerror`, `attotime`
-and `emu_timer` across the four device files. `msm6222b.cpp` has exactly one.
+**Done, and the estimate held.** The measured surface was 61 `save_item`, 37
+`state_add`, 34 `logerror`, 26 `LOGMASKED`, 8 `side_effects_disabled`, 3
+`stream_alloc`, 3 `machine().time`, and one each of `timer_alloc`,
+`set_icountptr` and `attotime::from_hz`. About 1100 lines of shim in three
+headers plus one `.cpp`.
+
+Four things cost more than the raw counts suggested, all in the CPU:
+
+- **`cpu_device` is five interfaces at once** — execute, memory, state, disasm,
+  on top of `device_t`.
+- **The `address_map` DSL had to be real.** The i8x9x declares its whole internal
+  register file with it. Only the forms those twenty lines use are implemented,
+  but they include overlapping entries — a 16-bit read across `0x02..0x03` and an
+  8-bit write at `0x02` are separate entries at the same address — so lookup takes
+  the latest entry that can answer, which is what MAME does.
+- **Handler width comes from the member function's signature**, so an 8-bit
+  handler on a two-byte range is called once per byte and a 16-bit one once per
+  word.
+- **`FUNC(x)` expands to `&x, #x`** — two arguments, not one. Everything taking a
+  `FUNC()` has a `const char *` in the middle of its parameter list.
+
+Some genuinely standalone MAME sources are used as-is rather than reimplemented:
+`osdcomm.h` (the integer types), `rescap.h`, `endianness.h`, `strformat`,
+`disasmintf`. They pull in nothing but the standard library. The disassembler
+comes along for free, which the ImGui debug window (§5) will want.
+
+**MAME builds as C++20**, not 17 — `flt_biquad.cpp` uses `<numbers>` and
+`strformat.h` uses `requires`. The plugin must match.
 
 **`mcs96ops.lst` is generated** by `mcs96make.py`. The plugin build runs that
 Python step too.
@@ -1031,8 +1064,11 @@ Extracted and headless should be a few percent — comfortable for many instance
    `plugin/core/u110_core.h` (BSD, compiles standalone) and
    `plugin/tools/null_test.py`. `--self` proves the oracle: MAME renders
    bit-identically run to run, 864001 frames at 32 kHz native.
-4. Write `plugin/compat/emu.h`; compile MAME's four device sources against it;
-   drive the null test to green and put it in CI (§3).
+4. **Half done.** ~~Write `plugin/compat/emu.h`; compile MAME's device sources
+   against it~~ — all eight compile, link and pass a smoke test
+   (`plugin/tools/build_core.sh`), against **unmodified** MAME sources.
+   Still to do: assemble them into a machine and drive the null test to green,
+   then put it in CI.
 5. DPF standalone, no UI, plus the ImGui debug window (§2.1, §5).
 6. Panel snapshot protocol and command queue (§8).
 7. Bake the CGROM from MatrixSans Screen; hand-fix the mangled glyphs (§7).
