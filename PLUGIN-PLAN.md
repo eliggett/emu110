@@ -121,8 +121,12 @@ no host in the way. Build it first, not last.
 
 - `[?]` Check the FL Studio version. CLAP support arrived in the 2024 releases;
   older FL needs VST3 instead.
-- Cross-compile from Linux with mingw-w64 — the low-friction path with DPF.
-  Prove the toolchain with a hello-world plugin *before* the UI exists.
+- **Deferred until Linux works.** Two paths when it comes up: cross-compile from
+  Linux with mingw-w64, or build natively on a GitHub Actions Windows runner.
+  The runner is the better option if it is available — it tests on the target
+  platform instead of merely producing binaries for it, and it costs no local
+  toolchain. Either way, prove it with a hello-world plugin *before* the UI
+  exists.
 
 ### macOS
 
@@ -330,6 +334,47 @@ The `hit` layer is the trick worth adopting: draw invisible rectangles over each
 control, read their `x/y/w/h` from the parsed SVG at load, and derive every
 hit-box from the artwork. Move a button in Inkscape and the mouse target follows
 with no code change.
+
+### The exporter — `plugin/tools/panel_export.py`
+
+Built. Reads the artwork, composes every transform down to canvas coordinates,
+and writes `plugin/generated/`:
+
+| File | What |
+|---|---|
+| `panel_geometry.h` | every control as a `constexpr Rect` in design units |
+| `panel_geometry.json` | the same, for tooling |
+| `panel_flat.svg` | what the renderer loads — text flattened, aid layers gone |
+
+Three findings from running it on the first artwork, all of which shaped the tool:
+
+- **Inkscape's `--export-plain-svg` strips `inkscape:label`.** So the editing-aid
+  layers must be pruned *before* Inkscape runs, not after — afterwards they are
+  unidentifiable. The exporter does this in the right order.
+- **The `Foreground Text as Text` layer must not reach the renderer.** It and its
+  flattened twin `Foreground Text as Paths` would otherwise draw on top of each
+  other. Pruned by label, along with `Example_LCD_Testing_only` and anything
+  labelled `*_duplicate`.
+- **A `<text>` that survives text-to-path is dropped from the flat SVG**, because
+  nanosvg would ignore it silently and the reference render (`rsvg-convert`)
+  would then disagree with what the plugin actually draws. The exporter warns
+  when it has to do this.
+
+The linter matters more than it sounds: nanosvg drops unsupported constructs with
+no error at all, so the failure mode is a control that is simply absent.
+`--check` exits non-zero, making it a build step.
+
+### The panel may grow downward
+
+`BUT_dive` is earmarked for expanding the window to expose a second bank of
+controls, not yet designed. Two consequences for anything built now:
+
+- **Do not treat `kDesignHeight` as a constant of the design.** It is the height
+  of the *collapsed* panel. The expanded region will be additive — a second
+  Inkscape layer, exported the same way, with its own height.
+- **Keep the window resize path working from the start**, even though nothing
+  uses it yet. Retrofitting a resize into a UI that assumed a fixed size is
+  considerably more work than allowing for it now.
 
 ### What to draw in code, not SVG
 
@@ -976,4 +1021,5 @@ that subsystem, so the hook point is known.
 - `[?]` The top-octave deficit above 10 kHz — how much is bilinear warping and how
   much is the chain model itself? Oversampling the filter stage would separate them.
 - `[?]` `14_fantasy`'s +14 dB error — chorus/tremolo, or something else?
-- `[?]` Product name, given the Roland and VST trademarks.
+- ~~`[?]` Product name, given the Roland and VST trademarks.~~ **Resolved:
+  `Voltaire 110`.** Distinct mark; the U-110 lineage is described in prose.
