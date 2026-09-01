@@ -258,7 +258,16 @@ not an envelope one, and belongs with the output-filter fit rather than here.
 
 ---
 
-## 6. Where the data and tools are
+## 6. See also
+
+`RECONSTRUCTION.md` covers the spectral side: pitch-shift images, the interpolation kernel,
+and the fact that samples played ABOVE their stored rate still get no anti-aliasing at all.
+It also records the measurement trap that bit this investigation twice -- comparing spectra
+of decaying notes over a one-second window mixes decay rate and noise floor into the answer.
+
+---
+
+## 7. Where the data and tools are
 
     listen/hardware/env3/          the scratch-patch take, 76 trials + ANALYSIS.md
     listen/hardware/env/           release/attack sweeps, 15_decay_hold.wav

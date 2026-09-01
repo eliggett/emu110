@@ -1,0 +1,238 @@
+# Sample reconstruction, pitch shifting, and the treble excess
+
+State as of 2026-08-31.  Companion to `ENVELOPE-DECAY.md`, which covers amplitude; this
+one covers spectrum.
+
+The symptom, in the user's words: *"the emulator sounds bright. There's a definite increase
+in the 7k-8k band when I compare them."*
+
+**Resolved.**  It was reconstruction images from pitch-shifting, and one more order of
+interpolation kernel removes most of them.  `U110_RECON=1` (quadratic B-spline) is now the
+default; `U110_RECON=0` restores the old linear path for A/B.
+
+    A. PIANO 1 note 43, emulator minus hardware, level-matched 150-1000 Hz
+
+                   3-4k   5-6k   6-7k   7-8k   8-9k  9-10k   mean
+      linear       +1.9   +3.3   +6.7  +11.5  +11.3  +11.0    6.2
+      quadratic    +0.9   +0.7   +2.2   +4.1   +1.9   +0.7    1.5
+
+Six scratch tones at note 60: **7.3 -> 3.9 dB** mean absolute error.  The 76-trial envelope
+score is unchanged at 8.6%, as it must be -- this changes spectrum, not timing.
+
+---
+
+## 1. What the machine is actually doing `[C]`
+
+**Samples are stored decimated, and played back well below their stored rate.**  Every split
+of A. PIANO 1 plays its sample 5 to 24 semitones below that sample's reference note.  That
+is deliberate ROM economy, and it is the root of everything here.
+
+    A. PIANO 1   splits [30, 39, 46, 52, 61, 71, 84, 96], samples 0-8
+    note 43   -> sample 2, reference note 64, i.e. 21 semitones down
+              -> step 2^(-21/12) = 0.2973 predicted
+              -> firmware wrote 0x12E5 = 0.2952  (the 0.7% is the sample's `fine` byte, 65)
+
+So for that note the sample runs at **9450 Hz** and its Nyquist is at **4725 Hz**.
+Everything above 4.7 kHz in the output is reconstruction -- on both machines.
+
+**Our sample choice and rate match the firmware exactly**, so the hardware plays the same
+data at the same rate.  Whatever differs is in how the two reconstruct it.
+
+Playing a 9450 Hz source out of a 32 kHz engine is a 3.39x upsample.  Doing it correctly
+needs a brick wall at 4725 Hz; linear interpolation is a crude approximation of one, so
+copies of the baseband centred at 9450 Hz, 18900 Hz... survive.  The first copy occupies
+**4725-14175 Hz -- inside the audio band** -- and is baked into the 32 kHz stream before the
+DAC ever sees it.
+
+### These are IMAGES, not aliasing
+
+Worth keeping straight, because it decides what can fix them:
+
+* **Aliasing** happens at record time, or when decimating.  Content above Nyquist folds
+  down and is unrecoverable.
+* **Images** happen at reconstruction time.  The spectrum repeats; the copies are removable
+  by filtering, and the interpolation kernel IS that filter.
+
+Ours are images.  The kernel's frequency response is just the Fourier transform of its
+kernel, so rejection follows directly:
+
+| reconstruction | response | rejection of an image of 1 kHz content, fs = 9450 |
+|---|---|---|
+| drop-sample | sinc | ~-13 dB |
+| linear (what we had) | sinc^2 | -37 dB |
+| **quadratic B-spline (now)** | sinc^3 | **-55 dB** |
+
+The gain is strongly frequency dependent, and that asymmetry is the fingerprint that
+confirmed the diagnosis: one more order buys **18 dB** on an image of 1 kHz content (landing
+near 9450 Hz) but only **2.6 dB** on an image of 4 kHz content (landing at 5450, just above
+the source Nyquist).  The measured error had exactly that shape -- +11 dB at 7-10 kHz,
++3 dB at 5-6 kHz.
+
+### It scales with each tone's own step, and that is measurable
+
+Predicted extra attenuation at 6-9 kHz from each tone's step, against what actually happened
+when the kernel changed:
+
+| tone | ref | step | source rate | predicted | measured |
+|---|---|---|---|---|---|
+| bell (BELL 1) | 93 | 0.149 | 4757 Hz | -14.7 .. -25.0 | **-14.4** |
+| vib (VIB 1) | 71 | 0.530 | 16951 Hz | -1.9 .. -4.5 | **-2.5** |
+| piano (A.PIANO 1) | 71 | 0.530 | 16951 Hz | -1.9 .. -4.5 | **-2.4** |
+| fbass (FINGERED 1) | 61 | 0.944 | 30204 Hz | -0.6 .. -1.3 | **-1.0** |
+| marimba (MARIMBA) | 63 | 0.841 | 26909 Hz | -0.7 .. -1.7 | **0.0** |
+| slap (SLAP 1) | 49 | 1.888 | 60408 Hz | -0.1 .. -0.3 | n/a, gated off |
+
+The model predicting its own effect tone by tone is the strongest evidence here.
+
+---
+
+## 2. STEP > 1 GETS NO ANTI-ALIASING AT ALL `[open]`
+
+**This is a real, known, unfixed fault.  Come back to it.**
+
+When a sample plays *faster* than its stored rate we are **decimating**, and there is no
+anti-alias filter anywhere in the path.  Source content above the 32 kHz engine's Nyquist
+folds down into the audible band, and unlike images it is **unrecoverable** once folded --
+no downstream filter can separate it from real music.
+
+Tones known to be there:
+
+    SLAP 1              step 1.888   source 60408 Hz   content to 30 kHz folds
+    VIB 1 at note 96    step 2.000   source 64000 Hz
+    P-27 Synth Bass note 57, both voices:
+       v01  bank 3400  addr 2E7C9  step 0x482F = 1.1279  loop 123 bytes
+       v02  bank 2400  addr 06417  step 0x5573 = 1.3351  loop  97 bytes
+
+The three-tap kernels are **gated off above step 1** (see section 5), so those tones get
+plain linear interpolation, exactly as before.  They are not made worse -- but they are not
+helped either.
+
+**The fix is oversampling, not interpolation.**  Run the voice engine at a multiple of
+32 kHz so the folded content lands above the audio band, apply the output filter there, then
+decimate.  This is the one place the suggestion in section 4 is right.  Not attempted yet.
+It would need `set_rate_divider()` lowered with the envelope rate scaled to compensate, since
+`env_rate` is applied per output sample.
+
+Unknown: **how audible this is.**  Slap measures -1.9 dB at 6-9 kHz, which is fine, so the
+aliasing may be modest in practice.  Worth measuring before building anything.
+
+---
+
+## 3. What is measured correct `[C]`
+
+`-wavwrite` **does** include the full analog chain.  The tap is the speaker's *input* buffer
+(`sound.cpp:332`), and the two Sallen-Key sections, the RC and the EQ correction are all
+sound devices upstream of it.  Only MAME's own mixer effects rack is excluded.  Verified
+against the rendered files: the rolloff is unmistakably present.
+
+The modelled analog chain, dB re 1 kHz, computed independently and agreeing with the
+driver's own comment:
+
+    SK1 f0 6740 Hz Q 1.736   SK2 f0 11708 Hz Q 1.214   RC fc 7234 Hz
+    peak +4.17 dB at 6087 Hz  -- the service notes' own simulation says +2.17 dB max
+
+That excess resonance is real but small: correcting Q1 to 1.315 changes 7 kHz by only
++2.4 dB, 8 kHz by +1.9.  It is not the treble excess and never was.
+
+---
+
+## 4. Eliminated, with evidence `[C]`
+
+| hypothesis | how it died |
+|---|---|
+| Interpolator truncation (`>> 14` to 12 bits before the envelope multiply) | Plausible -- the error is signal-scaled, so it follows the note down. Tested with `U110_INTERP` 0/1/2 (floor / round / full precision): moves 6-9 kHz by **0.1 to 0.4 dB** on all six tones. |
+| "Multiply-add": add `delta * step` per output sample instead of interpolating | **Algebraically identical.** Within one byte the value is `s[n] + d[n+1]*frac` and frac grows by `step` each output sample, so it reproduces the same piecewise-linear curve. Convolution and integration commute. Checked numerically: max difference 7e-15. |
+| Oversample the engine to 192 kHz, filter there, decimate (Gemini's Method A) | Tested numerically on a 9450 Hz source: images at 6450 / 7950 / 8950 Hz come out at -16.5 / -29.9 / -49.9 dB against -16.5 / -29.7 / -50.4 for the 32 kHz path. **Unchanged within 0.5 dB.** The premise is "stop the images folding down", but nothing folds -- they are at multiples of the SOURCE rate and are born in-band. Correct medicine for step > 1 (section 2), wrong disease here. |
+| The demux / sample-and-hold / fast DAC suppress them in hardware | Cannot. A 9450 Hz image is indistinguishable from a genuine 9450 Hz partial to anything downstream of the DAC. The per-channel S/H is still 1/32000 long: `sinc(f/32000)` = **-1.3 dB at 9.45 kHz**. What the fast DAC and demux buy is suppression of the 32 kHz+ family, which is why a gentle analog filter sufficed. The simple filter is evidence the chip never MADE these images, not that it removed them. |
+| Hardware plays a different, higher-rate multisample | Keymap says no. Note 43 takes sample 2, reference note 64; predicted step 0.2973 against the firmware's 0.2952. Our selection and rate match the firmware, and the firmware is the hardware. |
+| The output EQ correction's shape is the fault | Its required amount depends on the playback **step** -- at note 60 (step 0.53) it is pure over-darkening, at note 43 (step 0.295) it is still masking image energy. A filter response cannot depend on step. |
+| Sallen-Key resonance too high | Real (+4.17 vs +2.17 dB) but worth only ~2 dB at 7-8 kHz. Not the excess. |
+| A *smoother* kernel is wrong; a *sharper* one is right | Followed from a measurement artefact -- see section 6. The 16-tap windowed sinc overshoots (-12.5 dB at 8-9 kHz on note 43) and Catmull-Rom undershoots badly (+15.5 dB at 7-8 kHz, worse than linear, because an interpolating cubic peaks near Nyquist). Quadratic sits between them, where the hardware is. |
+
+---
+
+## 5. The bug that got shipped, and how it was caught `[C]`
+
+The quadratic went in **ungated**, and `U110_RECON=2` was the only mode checking
+`step <= 0x4000`.  Found by ear within an evening: *"note 57 played through patch P-27:Synth
+Bass sounds very different... fuzzy with the fix enabled."*
+
+`smpl_cur` and `smpl_nxt` are always adjacent bytes, but the third tap comes from the
+previous **output** sample, which sits `step` bytes back -- one byte or two, depending where
+the fraction falls.  Above step 1 the three taps are irregularly spaced while the weights
+assume unit spacing, and the spacing pattern beats against the fractional part of the step.
+On Synth Bass (steps 1.1279 and 1.3351, loops of only 123 and 97 bytes) that is a beat every
+~8 output samples on a strongly periodic tone.  Plainly audible.
+
+With the gate, that note renders **bit-identical** between `RECON=0` and `RECON=1`.
+
+Linear uses only the adjacent pair and was never affected -- which is exactly why the
+fault appeared only when the new kernel was switched on.
+
+---
+
+## 6. The measurement trap `[C]`
+
+**Do not compare spectra of decaying notes over long windows.**  It conflates spectrum with
+decay rate, and it cost two wrong kernels.
+
+Scoring the six scratch tones at 6-9 kHz relative to 200-1200 Hz, emulator minus hardware:
+
+    window            vib   bell   slap  marimba  fbass  piano
+    0.05-0.25 s      +9.3  +26.6   +3.5    -7.5   +4.9   +9.3
+    0.2 -1.2  s      -3.0  +14.6   +3.1   -17.7   +0.5   +7.3
+
+The long window says vib, marimba and fbass are too *dark* and invites a "two opposite
+faults" story -- passband droop plus images.  The short window says the emulator is simply
+too **bright** on five of six tones, which is one fault.  Marimba decays at 52 dB/s, so most
+of a one-second window is tail and noise floor, and the two machines' floors differ (theirs
+is analog noise, ours is dither at -93 dBFS).
+
+Modes 2 and 3 were both built on the long-window reading.  Use **0.05-0.25 s after the
+onset**, and check the window before believing a spectral comparison.
+
+---
+
+## 7. Still open
+
+**Step > 1 has no anti-aliasing.**  Section 2.  The largest known structural gap.
+
+**Marimba is -11.7 dB at 6-9 kHz** and no kernel moves it (-12.1 / -11.7 / -11.7 across
+linear, quadratic and gated quadratic).  Its step is 0.841, so its 6-9 kHz is genuine
+recorded content, not images.  Unexplained.
+
+**The EQ correction is empirically justified but physically unexplained.**  Quadratic *with*
+it beats quadratic without it on both datasets, yet its required amount varies with step,
+which no filter response can do.  It is still doing work we do not understand, so the
+spectral side is not finished.
+
+**We may now be quieter than the hardware above 10 kHz.**  Hardware's peak-to-median there
+is 8.0 dB -- its own noise floor -- while ours is dither. Some of "sounds better than the
+hardware" is the absence of their hiss, and that is a fidelity question, not a win.
+
+---
+
+## 8. Switches, data and tools
+
+    U110_RECON=0|1|2|3   reconstruction kernel: linear / quadratic B-spline (default) /
+                         16-tap windowed sinc / Catmull-Rom.  Modes 1-3 apply at step <= 1
+                         only; above that all fall back to linear.
+    U110_INTERP=0|1|2    interpolator precision: truncate (default) / round / full.
+                         Kept for the record; measured irrelevant.
+    U110_EQ=0|1          force the output EQ correction off or on, bypassing cfg.
+    U110_ENVTRACE=1      the envelope handshake trace, see ENVELOPE-DECAY.md.
+
+    listen/hardware/4/01_piano_vel_43.wav      the velocity sweep on note 43
+    listen/hardware/env3/08_scratch_tones.wav  six tones, dictated scratch patch, note 60
+    listen/hardware/env3/09_scratch_keys.wav   VIB 1 at notes 24..96, i.e. 7 steps
+    listen/comparisons/reconstruction-kernel/  hardware / linear / quadratic on note 43
+
+Tracing which sample a note actually plays, and at what rate:
+
+    ./roland u110 -min <file>.mid -wavwrite /dev/null -seconds_to_run <n> \
+      -nothrottle -video none -log -cfg_directory "$(mktemp -d)" -nvram_directory "$(mktemp -d)"
+    awk '$3+0>=<t> && $3+0<=<t+0.002> && $6!="1F"' error.log
+
+Registers: 02/03 bank, 04/05 step (2.14, 0x4000 = unity), 08-0B start address (18.14),
+0C/0D end, 0E/0F loop, 06/07 the envelope segment.  Resolve a start address against the
+wave ROM sample table with `tools/render_note.py`'s `load()` and `tone_rec()`.
