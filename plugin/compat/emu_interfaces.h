@@ -188,10 +188,23 @@ public:
 	void install_rom(offs_t start, offs_t end, const u8 *base);
 	void install_ram(offs_t start, offs_t end, u8 *base);
 	void install_handler(offs_t start, offs_t end, read8_cb r, write8_cb w);
+
+	// A 16-bit device on the 16-bit bus.  The offset handed to the callback is a WORD
+	// offset and the mask says which lane is live, exactly as MAME's ACCESSING_BITS_*
+	// expect -- a byte access to an odd address arrives as mask 0xff00 with the data in
+	// the high lane.  Getting this wrong would still boot and would not be bit-identical.
+	using read16_cb  = std::function<u16(offs_t, u16)>;
+	using write16_cb = std::function<void(offs_t, u16, u16)>;
+	void install_handler16(offs_t start, offs_t end, read16_cb r, write16_cb w);
+
+	/// Forward a range into an address_map built by a device's own internal map.
+	void install_map(offs_t start, offs_t end, address_map *map);
+
 	void unmap(offs_t start, offs_t end);
 
 private:
-	struct region { offs_t start, end; const u8 *rom; u8 *ram; read8_cb r; write8_cb w; };
+	struct region { offs_t start, end; const u8 *rom; u8 *ram;
+			read8_cb r; write8_cb w; read16_cb r16; write16_cb w16; address_map *map; };
 	const region *find(offs_t a) const;
 
 	u32 m_size;
@@ -207,6 +220,10 @@ public:
 
 	using space_config_vector = ::space_config_vector;
 	virtual space_config_vector memory_space_config() const = 0;
+
+	// mcs96 narrows memory_space_config() to protected, so the core reaches it through
+	// this: access is checked against the base, and the call still dispatches virtually.
+	space_config_vector space_configs() const { return memory_space_config(); }
 
 	address_space &space(int index = 0) const { return *m_spaces.at(index); }
 	bool has_space(int index = 0) const { return index < int(m_spaces.size()) && m_spaces[index]; }
@@ -319,6 +336,12 @@ public:
 	// --- what the core calls -------------------------------------------------------
 	/// Run for `cycles`, returning how many were actually consumed.
 	int run_cycles(int cycles);
+
+	/// End the slice early, as MAME's abort_timeslice does.  The cycles not run are
+	/// STOLEN -- removed from the slice's budget -- so that the caller is charged only for
+	/// what was executed.  Charging the whole slice instead makes the CPU appear to run
+	/// far slower than its clock, which is exactly what it looks like from the outside.
+	void steal_remaining_cycles();
 
 private:
 	int *m_icountptr = nullptr;
@@ -441,7 +464,18 @@ class devcb_write_line
 public:
 	explicit devcb_write_line(device_t &owner) { }
 	template <typename T> devcb_write_line(device_t &owner, T &&dflt) { }
-	devcb_write_line &bind() { return *this; }
+	// MAME's accessors are `auto foo_cb() { return m_foo_cb.bind(); }`.  `auto` deduces BY
+	// VALUE, so bind() must NOT return *this -- the caller would configure a copy and the
+	// real callback would stay unset, silently.  It returns a proxy holding a pointer.
+	struct binder
+	{
+		devcb_write_line *target;
+		template <typename T> void set(T &&fn) { target->m_fn = std::forward<T>(fn); }
+		template <typename T> binder &operator=(T &&fn)
+		{ target->m_fn = std::forward<T>(fn); return *this; }
+		void set_inputline(...) { }
+	};
+	binder bind() { return binder{ this }; }
 	template <typename T> void set(T &&fn) { m_fn = std::forward<T>(fn); }
 	void operator()(int state) const { if (m_fn) m_fn(state); }
 private:
@@ -453,7 +487,18 @@ class devcb_write8
 public:
 	explicit devcb_write8(device_t &owner) { }
 	template <typename T> devcb_write8(device_t &owner, T &&dflt) { }
-	devcb_write8 &bind() { return *this; }
+	// MAME's accessors are `auto foo_cb() { return m_foo_cb.bind(); }`.  `auto` deduces BY
+	// VALUE, so bind() must NOT return *this -- the caller would configure a copy and the
+	// real callback would stay unset, silently.  It returns a proxy holding a pointer.
+	struct binder
+	{
+		devcb_write8 *target;
+		template <typename T> void set(T &&fn) { target->m_fn = std::forward<T>(fn); }
+		template <typename T> binder &operator=(T &&fn)
+		{ target->m_fn = std::forward<T>(fn); return *this; }
+		void set_inputline(...) { }
+	};
+	binder bind() { return binder{ this }; }
 	template <typename T> void set(T &&fn) { m_fn = std::forward<T>(fn); }
 	void operator()(u8 data) const { if (m_fn) m_fn(data); }
 	void operator()(offs_t offset, u8 data) const { if (m_fn) m_fn(data); }
@@ -468,7 +513,18 @@ class devcb_read16
 public:
 	explicit devcb_read16(device_t &owner) { }
 	template <typename T> devcb_read16(device_t &owner, T &&dflt) { }
-	devcb_read16 &bind() { return *this; }
+	// MAME's accessors are `auto foo_cb() { return m_foo_cb.bind(); }`.  `auto` deduces BY
+	// VALUE, so bind() must NOT return *this -- the caller would configure a copy and the
+	// real callback would stay unset, silently.  It returns a proxy holding a pointer.
+	struct binder
+	{
+		devcb_read16 *target;
+		template <typename T> void set(T &&fn) { target->m_fn = std::forward<T>(fn); }
+		template <typename T> binder &operator=(T &&fn)
+		{ target->m_fn = std::forward<T>(fn); return *this; }
+		void set_inputline(...) { }
+	};
+	binder bind() { return binder{ this }; }
 	template <typename T> void set(T &&fn) { m_fn = std::forward<T>(fn); }
 	u16 operator()() const { return m_fn ? m_fn() : 0; }
 	u16 operator()(offs_t offset) const { return m_fn ? m_fn() : 0; }
@@ -500,7 +556,18 @@ class devcb_read8
 public:
 	explicit devcb_read8(device_t &owner) { }
 	template <typename T> devcb_read8(device_t &owner, T &&dflt) { }
-	devcb_read8 &bind() { return *this; }
+	// MAME's accessors are `auto foo_cb() { return m_foo_cb.bind(); }`.  `auto` deduces BY
+	// VALUE, so bind() must NOT return *this -- the caller would configure a copy and the
+	// real callback would stay unset, silently.  It returns a proxy holding a pointer.
+	struct binder
+	{
+		devcb_read8 *target;
+		template <typename T> void set(T &&fn) { target->m_fn = std::forward<T>(fn); }
+		template <typename T> binder &operator=(T &&fn)
+		{ target->m_fn = std::forward<T>(fn); return *this; }
+		void set_inputline(...) { }
+	};
+	binder bind() { return binder{ this }; }
 	template <typename T> void set(T &&fn) { m_fn = std::forward<T>(fn); }
 	u8 operator()() const { return m_fn ? m_fn() : 0xff; }
 	u8 operator()(offs_t offset) const { return m_fn ? m_fn() : 0xff; }

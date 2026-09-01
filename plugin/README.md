@@ -141,3 +141,30 @@ Three things to know before touching `compat/`:
 `mcs96.hxx`, `i8x9x.hxx` and `i8x9xd.hxx` are generated into `generated/` by MAME's own
 `mcs96make.py` from MAME's own `mcs96ops.lst`, so the two builds cannot diverge there
 either.
+
+## The core
+
+```sh
+plugin/tools/build_core.sh                       # build everything
+plugin/build/u110_render --roms roms --seconds 12 --lcd     # watch it boot
+plugin/tools/null_test.py                        # MAME vs the core
+```
+
+`u110_render --lcd` is the fastest way to tell whether the core is alive: a working
+machine prints its banner and then `P-01:Ac.Piano | MIDI.1.*.*.*.*.*`.
+
+Useful environment variables, all off by default and all costing one branch when off:
+
+| | |
+|---|---|
+| `U110_LCDTRACE=1` | every LCD control and data write with a timestamp -- the format MAME's `-log` uses, so the two can be diffed directly |
+| `U110_TGTRACE=1` | every sound-chip register write, likewise |
+| `U110_CYCLES=1` | CPU cycles per emulated second, plus register, ROM-read and interrupt counts |
+
+Diffing these against MAME's `error.log` is how every bug in the core so far has been
+found. **The traces line up event for event long before the audio does**, so a divergence
+shows up as a timestamp difference in a trace rather than as a vague sense that a render
+sounds wrong.
+
+`U110_DITHER=0` does the corresponding job on the MAME side, switching off the TPDF dither
+at the 16-bit output so the two ends can be compared sample for sample.

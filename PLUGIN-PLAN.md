@@ -315,6 +315,62 @@ resampler is in the path.
 Nearly all the harness exists: `-wavwrite`, `listen/`, `tools/render_u110.py`,
 `tools/select_patch.lua`, `tools/capture_u110.py`.
 
+### Where the core actually is
+
+**It boots and it plays.** `plugin/build/u110_render` loads the ROMs, runs the real
+firmware, and reaches `P-01:Ac.Piano | MIDI.1.*.*.*.*.*` — the play screen — then
+sounds notes over MIDI.
+
+Measured against MAME, dither off at both ends:
+
+| | Result |
+|---|---|
+| **Boot, 12 s** | **bit-identical.** All 542 LCD control and data writes match in content *and* time, worst 1.5 ms over 6 s |
+| **One note (C4, vel 100)** | correlation **1.000000**; **98.6% of frames bit-identical**, worst 2 LSB; everything before 13.40 s exact |
+| **Block-size independence** | **exact.** 64, 512 and 4096 samples per block give byte-identical output, with and without MIDI |
+| **Full sequence** (chords, velocities, bender, CC7) | 59.8% of frames identical — **the remaining work** |
+
+Two known differences, both characterised:
+
+- **A constant output offset** of ~18 samples (0.6 ms). MAME's sound manager has its
+  own output phase and the core has no reason to reproduce it. The harness measures
+  and removes it before comparing, and reports it.
+- **±1 LSB on a small fraction of frames**, starting well into a note's decay.
+  Consistent with float summation order in the mixing, not with an emulation
+  difference — the correlation is exactly 1.000000.
+
+`[?]` **The full sequence is the open item.** A single constant lag does not fit it,
+which points at per-byte MIDI *delivery* timing rather than at the emulation: each
+note's onset lands a few samples out, differently. The single-note case being
+near-exact supports that reading. Next step is to compare arrival times byte by byte
+rather than trusting the replay.
+
+### Six bugs the null test found, that listening would not have
+
+Each of these produced a machine that booted and made plausible noise:
+
+1. **Handler lambdas captured a dangling `this`.** `map(a,b).rw(...)` builds a
+   temporary `map_entry`; capturing it meant the CPU read freed memory on its first
+   register access. This one at least crashed.
+2. **`bind()` returned a copy.** MAME writes `auto foo_cb() { return m_cb.bind(); }`
+   and `auto` deduces *by value*, so every callback the core "wired" — the envelope
+   interrupt, MIDI out, port 2 — was set on a temporary and silently discarded.
+3. **Periodic timers fired once.** `adjust(period, 0, period)` is self-rearming; the
+   shim stored the period and ignored it. The envelope interrupt therefore never
+   arrived, so notes sounded but decayed far too slowly.
+4. **A timer armed during a CPU slice could not fire until the slice ended.** MAME
+   aborts the timeslice; without that the LCD's 40 µs ready interrupt was served once
+   per audio block, and boot took twice as long as the real machine.
+5. **Aborting a slice charged the whole slice.** The fix for (4) needs MAME's
+   cycle-stealing accounting, or the CPU appears to run at a fraction of its clock.
+6. **The audio timeline drifted off the sample grid.** Taking each block's start from
+   `machine.time()` let the CPU's end-of-slice overshoot accumulate, at a rate that
+   depended on the block size. Anchoring to the absolute sample count fixed
+   block-size independence outright.
+
+None of these are exotic. They are the difference between "an emulator that works"
+and "the same emulator", which is exactly what the null test exists to tell apart.
+
 ### What this buys
 
 - **Multiple instances** in one session — the thing that rules out linking MAME.
@@ -1064,11 +1120,9 @@ Extracted and headless should be a few percent — comfortable for many instance
    `plugin/core/u110_core.h` (BSD, compiles standalone) and
    `plugin/tools/null_test.py`. `--self` proves the oracle: MAME renders
    bit-identically run to run, 864001 frames at 32 kHz native.
-4. **Half done.** ~~Write `plugin/compat/emu.h`; compile MAME's device sources
-   against it~~ — all eight compile, link and pass a smoke test
-   (`plugin/tools/build_core.sh`), against **unmodified** MAME sources.
-   Still to do: assemble them into a machine and drive the null test to green,
-   then put it in CI.
+4. **Mostly done.** The shim is written, MAME's sources compile against it
+   unmodified, and the core **boots the real firmware and plays notes**. The null
+   test runs end to end. It is not green yet — see §4 for exactly how close.
 5. DPF standalone, no UI, plus the ImGui debug window (§2.1, §5).
 6. Panel snapshot protocol and command queue (§8).
 7. Bake the CGROM from MatrixSans Screen; hand-fix the mangled glyphs (§7).

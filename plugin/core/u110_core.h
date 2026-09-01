@@ -176,6 +176,14 @@ public:
 	/// checks, and it is easy to lose by accident.
 	void render(float *const outs[kNumOutputs], uint32_t nframes);
 
+	/// The stereo mix: the six jacks through the pan matrix, the Sallen-Key cascade, the
+	/// output RC and the HF correction, at kCoreSampleRate.
+	///
+	/// This is the MAME-equivalent path and it is what the null test compares.  Section 11
+	/// wants the reconstruction chain moved after the resampler eventually; do that only
+	/// once this is bit-identical, so the improvement has a trustworthy baseline.
+	void renderStereo(float *left, float *right, uint32_t nframes);
+
 	/// Panel switch state.  Send EDGES, and hold a press long enough in EMULATED time for
 	/// the firmware's debouncer at 0x4118 to see it -- roughly 150 ms.  A press and release
 	/// inside one buffer will be missed entirely.

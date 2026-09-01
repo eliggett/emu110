@@ -18,6 +18,13 @@ void device_t::start()
 {
 	if (m_started)
 		return;
+	// Finders resolve before device_start(), because that is where the device reads them.
+	for (share_finder_base *f : m_share_finders)
+	{
+		auto found = m_share_provider ? m_share_provider(f->share_tag())
+									  : std::pair<void *, size_t>{ nullptr, 0 };
+		f->resolve(found.first, found.second);
+	}
 	for (device_interface *i : m_interfaces)
 		i->interface_pre_start();
 	device_start();
@@ -61,6 +68,29 @@ void device_t::logerror(const char *fmt, ...) const
     Scheduler and timers
 ***************************************************************************************/
 
+attotime device_scheduler::time() const
+{
+	if (!m_executing)
+		return m_now;
+	const int *ic = m_executing->icountptr();
+	const int used = ic ? (m_slice_cycles - *ic) : 0;
+	return m_now + m_executing->cycles_to_attotime(used > 0 ? u64(used) : 0);
+}
+
+void device_scheduler::set_executing(device_execute_interface *d, int slice_cycles)
+{
+	m_executing = d;
+	m_slice_cycles = slice_cycles;
+	m_slice_end = d ? (m_now + d->cycles_to_attotime(u64(slice_cycles > 0 ? slice_cycles : 0)))
+					: attotime::never();
+}
+
+void device_scheduler::abort_timeslice()
+{
+	if (m_executing)
+		m_executing->steal_remaining_cycles();
+}
+
 emu_timer *device_scheduler::alloc(std::function<void(s32)> cb)
 {
 	m_timers.emplace_back(new emu_timer(this, std::move(cb)));
@@ -91,7 +121,16 @@ void device_scheduler::advance_to(attotime target)
 		if (!next)
 			break;
 		m_now = next->m_expire;
-		next->m_active = false;
+
+		// Re-arm BEFORE the callback runs, so that a callback which adjusts the timer
+		// itself overrides the period rather than being overridden by it.
+		const bool periodic = !next->m_period.is_never()
+				&& next->m_period > attotime::zero();
+		if (periodic)
+			next->m_expire = next->m_expire + next->m_period;
+		else
+			next->m_active = false;
+
 		auto cb = next->m_cb;
 		s32 param = next->m_param;
 		if (cb)
@@ -191,6 +230,14 @@ u8 address_space::read_byte(offs_t a) const
 	if (r->rom) return r->rom[a - r->start];
 	if (r->ram) return r->ram[a - r->start];
 	if (r->r)   return r->r(a - r->start);
+	if (r->r16)
+	{
+		const offs_t off = (a - r->start) >> 1;
+		const u16 mask = (a & 1) ? 0xff00 : 0x00ff;
+		const u16 v = r->r16(off, mask);
+		return u8((a & 1) ? (v >> 8) : v);
+	}
+	if (r->map) return r->map->read_byte(a - r->start);
 	return 0xff;
 }
 
@@ -200,26 +247,51 @@ void address_space::write_byte(offs_t a, u8 v)
 	if (!r)
 		return;
 	if (r->ram) { r->ram[a - r->start] = v; return; }
-	if (r->w)   { r->w(a - r->start, v); }
+	if (r->w)   { r->w(a - r->start, v); return; }
+	if (r->w16)
+	{
+		const offs_t off = (a - r->start) >> 1;
+		if (a & 1) r->w16(off, u16(v) << 8, 0xff00);
+		else       r->w16(off, v, 0x00ff);
+		return;
+	}
+	if (r->map) r->map->write_byte(a - r->start, v);
 }
 
 u16 address_space::read_word(offs_t a) const
-{ return u16(read_byte(a)) | (u16(read_byte(a + 1)) << 8); }
+{
+	const region *r = find(a);
+	if (r && r->r16)  return r->r16((a - r->start) >> 1, 0xffff);
+	if (r && r->map)  return r->map->read_word(a - r->start);
+	return u16(read_byte(a)) | (u16(read_byte(a + 1)) << 8);
+}
 
 void address_space::write_word(offs_t a, u16 v)
-{ write_byte(a, u8(v)); write_byte(a + 1, u8(v >> 8)); }
+{
+	const region *r = find(a);
+	if (r && r->w16) { r->w16((a - r->start) >> 1, v, 0xffff); return; }
+	if (r && r->map) { r->map->write_word(a - r->start, v); return; }
+	write_byte(a, u8(v));
+	write_byte(a + 1, u8(v >> 8));
+}
 
 void address_space::install_rom(offs_t start, offs_t end, const u8 *base)
-{ m_regions.push_back({ start, end, base, nullptr, nullptr, nullptr }); }
+{ m_regions.push_back({ start, end, base, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr }); }
 
 void address_space::install_ram(offs_t start, offs_t end, u8 *base)
-{ m_regions.push_back({ start, end, nullptr, base, nullptr, nullptr }); }
+{ m_regions.push_back({ start, end, nullptr, base, nullptr, nullptr, nullptr, nullptr, nullptr }); }
 
 void address_space::install_handler(offs_t start, offs_t end, read8_cb r, write8_cb w)
-{ m_regions.push_back({ start, end, nullptr, nullptr, std::move(r), std::move(w) }); }
+{ m_regions.push_back({ start, end, nullptr, nullptr, std::move(r), std::move(w), nullptr, nullptr, nullptr }); }
+
+void address_space::install_handler16(offs_t start, offs_t end, read16_cb r, write16_cb w)
+{ m_regions.push_back({ start, end, nullptr, nullptr, nullptr, nullptr, std::move(r), std::move(w), nullptr }); }
+
+void address_space::install_map(offs_t start, offs_t end, address_map *map)
+{ m_regions.push_back({ start, end, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, map }); }
 
 void address_space::unmap(offs_t start, offs_t end)
-{ m_regions.push_back({ start, end, nullptr, nullptr, nullptr, nullptr }); }
+{ m_regions.push_back({ start, end, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr }); }
 
 
 /***************************************************************************************
@@ -238,6 +310,17 @@ u64 device_execute_interface::attotime_to_cycles(attotime t) const
 	return clk ? execute_clocks_to_cycles(t.as_ticks(clk)) : 0;
 }
 
+void device_execute_interface::steal_remaining_cycles()
+{
+	if (!m_running || !m_icountptr)
+		return;
+	const int remaining = *m_icountptr;
+	if (remaining <= 0)
+		return;
+	m_cycles_this_slice -= remaining;      // shrink the budget, do not give them away
+	*m_icountptr = 0;
+}
+
 int device_execute_interface::run_cycles(int cycles)
 {
 	if (m_suspended || !m_icountptr)
@@ -245,9 +328,12 @@ int device_execute_interface::run_cycles(int cycles)
 	*m_icountptr = cycles;
 	m_cycles_this_slice = cycles;
 	m_running = true;
+	device().machine().scheduler().set_executing(this, cycles);
 	execute_run();
+	device().machine().scheduler().set_executing(nullptr, 0);
 	m_running = false;
-	const int used = cycles - *m_icountptr;
+	// m_cycles_this_slice, not `cycles`: an abort shrinks the budget.
+	const int used = m_cycles_this_slice - *m_icountptr;
 	m_totalcycles += used;
 	return used;
 }

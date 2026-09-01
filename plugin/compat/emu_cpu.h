@@ -51,21 +51,32 @@ public:
 	map_entry &nopr();
 	map_entry &noprw() { return nopr().nopw(); }
 
-	// 8-bit handlers, with and without an offset argument
+	// 8-bit handlers, with and without an offset argument.
+	//
+	// The owner is captured BY VALUE.  map_entry is a temporary -- `map(a,b).rw(...)`
+	// builds one on the stack -- so a lambda capturing `this` would be reading freed
+	// memory the first time the CPU touched the register.  It crashes on the first
+	// instruction, which at least fails loudly.
 	template <typename T> map_entry &r(u8 (T::*fn)(), const char *name)
-	{ return set_r8([this, fn](offs_t) { return (static_cast<T *>(owner())->*fn)(); }); }
+	{ auto *o = static_cast<T *>(owner());
+	  return set_r8([o, fn](offs_t) { return (o->*fn)(); }); }
 	template <typename T> map_entry &r(u8 (T::*fn)(offs_t), const char *name)
-	{ return set_r8([this, fn](offs_t o) { return (static_cast<T *>(owner())->*fn)(o); }); }
+	{ auto *o = static_cast<T *>(owner());
+	  return set_r8([o, fn](offs_t a) { return (o->*fn)(a); }); }
 	template <typename T> map_entry &w(void (T::*fn)(u8), const char *name)
-	{ return set_w8([this, fn](offs_t, u8 d) { (static_cast<T *>(owner())->*fn)(d); }); }
+	{ auto *o = static_cast<T *>(owner());
+	  return set_w8([o, fn](offs_t, u8 d) { (o->*fn)(d); }); }
 	template <typename T> map_entry &w(void (T::*fn)(offs_t, u8), const char *name)
-	{ return set_w8([this, fn](offs_t o, u8 d) { (static_cast<T *>(owner())->*fn)(o, d); }); }
+	{ auto *o = static_cast<T *>(owner());
+	  return set_w8([o, fn](offs_t a, u8 d) { (o->*fn)(a, d); }); }
 
 	// 16-bit handlers
 	template <typename T> map_entry &r(u16 (T::*fn)(), const char *name)
-	{ return set_r16([this, fn](offs_t) { return (static_cast<T *>(owner())->*fn)(); }); }
+	{ auto *o = static_cast<T *>(owner());
+	  return set_r16([o, fn](offs_t) { return (o->*fn)(); }); }
 	template <typename T> map_entry &w(void (T::*fn)(u16), const char *name)
-	{ return set_w16([this, fn](offs_t, u16 d) { (static_cast<T *>(owner())->*fn)(d); }); }
+	{ auto *o = static_cast<T *>(owner());
+	  return set_w16([o, fn](offs_t, u16 d) { (o->*fn)(d); }); }
 
 	template <typename R, typename W>
 	map_entry &rw(R rfn, const char *rname, W wfn, const char *wname)
@@ -158,10 +169,15 @@ private:
     `.ram().share("register_file")` names a RAM block; required_shared_ptr finds it.
 ***************************************************************************************/
 
-template <typename T> class required_shared_ptr
+template <typename T> class required_shared_ptr : public share_finder_base
 {
 public:
-	required_shared_ptr(device_t &owner, const char *tag) : m_tag(tag) { }
+	required_shared_ptr(device_t &owner, const char *tag)
+		: share_finder_base(tag), m_tag(tag) { owner.register_share(this); }
+
+	void resolve(void *base, size_t bytes) override
+	{ m_base = static_cast<T *>(base); m_count = bytes / sizeof(T); }
+
 	void set(T *base, size_t count) { m_base = base; m_count = count; }
 	T *target() const { return m_base; }
 	T &operator[](int index) const { return m_base[index]; }

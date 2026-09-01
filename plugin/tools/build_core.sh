@@ -18,7 +18,8 @@ INCS=(-I "$HERE/plugin/compat"
       -I "$MAME/src/lib/util"
       -I "$MAME/src/osd"
       -I "$MAME/src/mame/roland"
-      -I "$GEN")
+      -I "$GEN"
+      -I "$HERE/plugin/core")
 
 # NOTE: mame/src/emu is deliberately NOT on the include path.  If it were, `#include
 # "emu.h"` would find MAME's and the whole exercise would silently compile the wrong thing.
@@ -33,6 +34,7 @@ SOURCES=(
   "$MAME/src/devices/cpu/mcs96/mcs96d.cpp"
   "$MAME/src/devices/cpu/mcs96/i8x9xd.cpp"
   "$HERE/plugin/compat/emu_shim.cpp"
+  "$HERE/plugin/core/u110_core.cpp"
   # Standalone MAME utility sources -- used as-is, they pull in nothing but the standard
   # library.  Reimplementing them would be pointless duplication.
   "$MAME/src/lib/util/strformat.cpp"
@@ -83,6 +85,17 @@ if g++ "${CXXFLAGS[@]}" "${INCS[@]}" "$HERE/plugin/tools/link_check.cpp" "${OBJS
   "$OUT/link_check" || fail=1
 else
   echo "FAILED  (see $(realpath --relative-to="$HERE" "$OUT/link_check.log"))"
+  fail=1
+fi
+
+# The core renderer the null test drives.
+echo
+printf '  %-24s ' "u110_render"
+if g++ "${CXXFLAGS[@]}" "${INCS[@]}" "$HERE/plugin/tools/u110_render.cpp" "${OBJS[@]}" \
+        -o "$OUT/u110_render" 2> "$OUT/u110_render.log"; then
+  echo "built"
+else
+  echo "FAILED  (see $(realpath --relative-to="$HERE" "$OUT/u110_render.log"))"
   fail=1
 fi
 exit $fail

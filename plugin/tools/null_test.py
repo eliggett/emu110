@@ -32,6 +32,7 @@ and the residual in dB relative to the reference.
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -118,15 +119,87 @@ def build_test_midi(path):
     return t + 2.0 + MIDI_DELIVERY_LAG_S
 
 
-def render_mame(midi, wav, seconds, samplerate=32000, patch=1):
-    """One deterministic MAME render at the chip's native rate."""
+def render_mame(midi, wav, seconds, samplerate=32000, patch=1, log=None):
+    """One deterministic MAME render at the chip's native rate.
+
+    Dither is switched OFF.  It is deterministic (a seeded xorshift32, which is why two
+    MAME runs match each other), but the core cannot reproduce MAME's exact sequence of
+    calls into it and there is no reason it should have to.  emu/sound.h says as much.
+    """
+    env = dict(os.environ, U110_DITHER='0')
     cmd = [U110RUN, '-t', str(int(seconds)), '-m', midi, '-w', wav,
            '-samplerate', str(samplerate)]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    if log:
+        cmd.append('-log')
+    r = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if r.returncode != 0:
         sys.stderr.write(r.stdout + r.stderr)
         raise SystemExit('MAME render failed')
+    if log:
+        src = os.path.join(HERE, 'mame', 'error.log')
+        if os.path.exists(src):
+            os.replace(src, log)
     return wav
+
+
+def midi_arrival_times(logfile, out_csv):
+    """Pull "MIDI IN <t> <byte>" out of MAME's log.
+
+    The core is then fed the SAME bytes at the SAME emulated instants.  Without this the
+    test would be measuring MAME's -min delivery lag and bit clock rather than the
+    emulation, and those are transport details the plugin deliberately does not copy.
+    """
+    rows = []
+    with open(logfile, errors='ignore') as f:
+        for line in f:
+            m = re.search(r'MIDI IN ([\d.]+) ([0-9A-F]{2})', line)
+            if m:
+                rows.append((float(m.group(1)), int(m.group(2), 16)))
+    with open(out_csv, 'w') as f:
+        for t, b in rows:
+            f.write('%.6f,%02x\n' % (t, b))
+    return len(rows)
+
+
+def render_core(midi_csv, wav, seconds, block=512):
+    """Render through U110Core.  Returns None if it has not been built."""
+    exe = os.path.join(HERE, 'plugin', 'build', 'u110_render')
+    if not os.path.exists(exe):
+        return None
+    cmd = [exe, '--roms', os.path.join(HERE, 'roms'),
+           '--seconds', str(seconds), '--block', str(block),
+           '--out', wav]
+    if midi_csv:
+        cmd += ['--midi-at', midi_csv]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.stderr.write(r.stdout + r.stderr)
+        raise SystemExit('core render failed')
+    return wav
+
+
+def best_alignment(a, b, search=512):
+    """The lag at which the two line up best, and the count of differing frames there.
+
+    An offset is expected and is not an emulation error: MAME's sound manager has its own
+    output phase, which the core has no reason to reproduce.  What matters is whether the
+    SAMPLES agree once that constant offset is taken out.
+    """
+    best = None
+    n0 = min(len(a), len(b))
+    for lag in range(-search, search + 1):
+        if lag < 0:
+            x, y = a[-lag:n0], b[0:n0 + lag]
+        else:
+            x, y = a[0:n0 - lag], b[lag:n0]
+        n = min(len(x), len(y))
+        if n < 1000:
+            continue
+        d = x[:n].astype(np.int64) - y[:n].astype(np.int64)
+        diff = int((np.abs(d).sum(axis=1) > 0).sum())
+        if best is None or diff < best[1]:
+            best = (lag, diff, d, n)
+    return best
 
 
 def read_wav(path):
@@ -205,6 +278,8 @@ def main():
     ap.add_argument('--midi', default=None, help='MIDI file to use instead of the built-in')
     ap.add_argument('--seconds', type=float, default=None)
     ap.add_argument('--patch', type=int, default=1)
+    ap.add_argument('--block', type=int, default=512,
+                    help='core render block size; the output must not depend on it')
     ap.add_argument('--keep', default=None, metavar='DIR',
                     help='keep the rendered wavs in DIR instead of a temp dir')
     args = ap.parse_args()
@@ -212,17 +287,23 @@ def main():
     out = args.keep or tempfile.mkdtemp(prefix='u110null.')
     os.makedirs(out, exist_ok=True)
 
-    midi = args.midi or os.path.join(out, 'null_test.mid')
     if args.midi:
+        midi = args.midi
         seconds = args.seconds or 60.0
     else:
-        seconds = args.seconds or build_test_midi(midi)
+        # Always build the sequence: --seconds overrides how long to RENDER it, it does
+        # not mean "the file already exists".
+        midi = os.path.join(out, 'null_test.mid')
+        needed = build_test_midi(midi)
+        seconds = args.seconds or needed
 
     print('null test: %s, %.0f s at %d Hz' % (os.path.basename(midi), seconds, 32000))
     print('  sequence : %s' % midi)
     print('  outputs  : %s\n' % out)
 
-    ref = render_mame(midi, os.path.join(out, 'mame_a.wav'), seconds, patch=args.patch)
+    log = os.path.join(out, 'mame.log')
+    ref = render_mame(midi, os.path.join(out, 'mame_a.wav'), seconds,
+                      patch=args.patch, log=log)
     if not check_not_silent(ref):
         return 3
 
@@ -237,17 +318,39 @@ def main():
                   'against it until that is fixed -- do not trust a later PASS.')
         return 0 if ok else 1
 
-    core = os.path.join(HERE, 'plugin', 'build', 'u110_render')
-    if not os.path.exists(core):
-        print('\nThe core renderer (%s) does not exist yet.'
-              % os.path.relpath(core, HERE))
-        print('Built the reference only.  Run with --self to check the harness meanwhile.')
+    csv = os.path.join(out, 'midi_at.csv')
+    nbytes = midi_arrival_times(log, csv)
+    print('MIDI: %d bytes, replayed into the core at MAME\'s own arrival times' % nbytes)
+
+    core = render_core(csv if nbytes else None, os.path.join(out, 'core.wav'),
+                       seconds, block=args.block)
+    if core is None:
+        print('\nThe core renderer (plugin/build/u110_render) does not exist yet.')
+        print('Run plugin/tools/build_core.sh.  Built the reference only.')
         return 2
 
-    subprocess.run([core, '--midi', midi, '--seconds', str(seconds),
-                    '--out', os.path.join(out, 'core.wav')], check=True)
     print('\n-- MAME vs U110Core --')
-    return 0 if compare(ref, os.path.join(out, 'core.wav'), 'mame', 'core') else 1
+    a, b = read_wav(ref), read_wav(core)
+    lag, diff, d, n = best_alignment(a, b)
+
+    print('  constant offset  : %+d samples (%.3f ms)' % (lag, lag / 32.0))
+    print('  frames identical : %d of %d (%.4f%%)'
+          % (n - diff, n, 100.0 * (n - diff) / n))
+    if diff == 0:
+        print('\nPASS  bit-identical once the constant output offset is removed.')
+        return 0
+
+    nz = np.flatnonzero(np.abs(d).sum(axis=1))
+    print('  worst error      : %d LSB' % np.abs(d).max())
+    print('  first difference : %.4f s' % (nz[0] / 32000.0))
+    ref_rms = np.sqrt(np.mean(a[:n].astype(np.float64) ** 2))
+    err_rms = np.sqrt(np.mean(d.astype(np.float64) ** 2))
+    if err_rms > 0:
+        print('  residual         : %.1f dB below the reference'
+              % (20 * np.log10(ref_rms / err_rms)))
+    print('\nNOT YET BIT-IDENTICAL.  See PLUGIN-PLAN.md section 4 for what is known '
+          'about the remaining difference.')
+    return 1
 
 
 if __name__ == '__main__':

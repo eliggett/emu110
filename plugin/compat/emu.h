@@ -187,10 +187,32 @@ inline attotime attotime_from_attoseconds(attoseconds_t a) { return attotime(a);
 
 class emu_timer;
 
+class device_execute_interface;
+
 class device_scheduler
 {
 public:
-	attotime time() const { return m_now; }
+	// Time INCLUDES the cycles the currently-executing CPU has consumed inside its slice.
+	// MAME does the same, and it is not cosmetic: roland_lp calls stream->update() before
+	// acting on a register write so the write lands on the right sample, and that only
+	// works if time moves while the CPU runs.  Without this every write in a slice would
+	// land at the slice's start and the render would not be bit-identical.
+	attotime time() const;
+
+	void set_executing(device_execute_interface *d, int slice_cycles);
+
+	/// End the running CPU slice now.
+	///
+	/// MAME does this whenever a timer is armed to expire inside the slice already
+	/// underway, and it is not an optimisation -- without it a device timer cannot fire
+	/// any sooner than the end of the current slice.  The U-110's LCD arms a 40 us
+	/// ready-interrupt on every write; with a 16 ms audio block that made the firmware's
+	/// text queue drain one character per BLOCK instead of one per 40 us, and the boot
+	/// took twice as long as the real machine.
+	void abort_timeslice();
+
+	attotime slice_end() const { return m_slice_end; }
+	bool executing() const { return m_executing != nullptr; }
 
 	emu_timer *alloc(std::function<void(s32)> cb);
 	void advance_to(attotime target);          // fire everything due, then set the clock
@@ -199,6 +221,9 @@ public:
 private:
 	friend class emu_timer;
 	attotime m_now;
+	device_execute_interface *m_executing = nullptr;
+	int m_slice_cycles = 0;
+	attotime m_slice_end;
 	std::vector<std::unique_ptr<emu_timer>> m_timers;
 };
 
@@ -206,7 +231,20 @@ class emu_timer
 {
 public:
 	void adjust(attotime duration, s32 param = 0)
-	{ m_expire = duration.is_never() ? attotime::never() : m_sched->time() + duration; m_param = param; m_active = !duration.is_never(); }
+	{
+		m_expire = duration.is_never() ? attotime::never() : m_sched->time() + duration;
+		m_param = param;
+		m_active = !duration.is_never();
+		m_period = attotime::zero();          // the two-argument form is one-shot
+		// If this lands inside the slice already running, cut the slice short so it can
+		// actually fire on time.  See device_scheduler::abort_timeslice().
+		if (m_active && m_sched->executing() && m_expire < m_sched->slice_end())
+			m_sched->abort_timeslice();
+	}
+	// The three-argument form is PERIODIC: it re-arms itself after every expiry.  The
+	// sound chip's envelope interrupt is offered on one of these, so a shim that fires it
+	// once leaves the machine with no envelope interrupts at all -- the notes still sound,
+	// they just never decay properly, which is a very quiet way to be wrong.
 	void adjust(attotime duration, s32 param, attotime period)
 	{ adjust(duration, param); m_period = period; }
 	void reset() { m_active = false; }
@@ -353,6 +391,19 @@ struct save_entry
 
 class device_interface;
 
+// MAME resolves its finders while the device tree starts.  The shim does the same, but
+// the lookup is supplied by the core rather than walked out of a tree.
+class share_finder_base
+{
+public:
+	virtual ~share_finder_base() = default;
+	virtual void resolve(void *base, size_t bytes) = 0;
+	const char *share_tag() const { return m_share_tag; }
+protected:
+	explicit share_finder_base(const char *tag) : m_share_tag(tag) { }
+	const char *m_share_tag;
+};
+
 class device_t
 {
 public:
@@ -391,6 +442,12 @@ public:
 	// Devices whose interfaces need starting register themselves here.
 	void register_interface(device_interface *i) { m_interfaces.push_back(i); }
 
+	void register_share(share_finder_base *f) { m_share_finders.push_back(f); }
+
+	/// The core installs this so `.share("register_file")` can be found at start time.
+	using share_lookup = std::function<std::pair<void *, size_t>(const char *)>;
+	void set_share_provider(share_lookup f) { m_share_provider = std::move(f); }
+
 protected:
 	device_t(const machine_config &mconfig, device_type type, const char *tag,
 			device_t *owner, u32 clock)
@@ -416,6 +473,8 @@ private:
 	u32 m_clock;
 	std::vector<save_entry> m_saves;
 	std::vector<device_interface *> m_interfaces;
+	std::vector<share_finder_base *> m_share_finders;
+	share_lookup m_share_provider;
 	bool m_started = false;
 };
 

@@ -71,3 +71,25 @@ MIDI IN line state off the opto-isolator, with no CPU involvement.
 - **Samples played above their stored rate get no anti-aliasing.**  Structurally true,
   checked against the hardware by ear and inaudible on both machines.  Documented, not
   scheduled.  Section 2.
+
+## Plugin core (see PLUGIN-PLAN.md sections 3 and 4)
+
+**The core boots and plays.**  MAME's device sources compile unmodified against
+`plugin/compat/emu.h`, and `plugin/build/u110_render` runs the real firmware to the play
+screen and sounds notes.
+
+Against MAME with dither off at both ends: boot is **bit-identical** for 12 s (all 542 LCD
+writes match in content and time), one note is **98.6% of frames bit-identical** with a
+correlation of 1.000000, and the core is **exactly block-size independent** at 64, 512 and
+4096 samples.
+
+Not finished:
+
+- **The full test sequence** (chords, velocities, bender, CC7) matches only 59.8% of
+  frames.  A single constant lag does not fit it, which points at per-byte MIDI delivery
+  timing rather than at the emulation.  This is the next thing to chase.
+- **A constant ~18-sample output offset** against MAME.  Expected -- MAME's sound manager
+  has its own output phase -- and measured and removed by the harness, not a defect.
+- **±1 LSB on a small fraction of frames** late in a note's decay.  Consistent with float
+  summation order in the mixing.
+- `saveState` / `loadState` are stubs.
