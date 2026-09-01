@@ -1,0 +1,22 @@
+U-110 EMULATOR render (tools/render_u110.py)
+sample rate 48000, channels 2, duration 892.00 s
+part channel 1, control channel 16
+emulator peak -2.0 dBFS, session gain x0.89 applied to every file
+command: /home/eliggett/Documents/projects/emu110/tools/u110run.sh -p 1 -t 892 -m /tmp/u110render.3h9ap9cr/sequence.mid -w /home/eliggett/Documents/projects/emu110/listen/emulated/effects-emu/session.wav -samplerate 48000
+
+Times below are RENDER times and are exact: capture_u110.py's MIDI file
+carries a 10 s lead and MAME's -min adds ~10 s more, both already folded in.
+
+segments
+  01_fx_chorus_rate.wav       23.000 ..   90.630   peak  -15.5 dBFS
+  02_fx_chorus_depth.wav      90.630 ..  170.940   peak  -15.4 dBFS
+  03_fx_tremolo_rate.wav     170.940 ..  238.570   peak  -13.6 dBFS
+  04_fx_tremolo_depth.wav    238.570 ..  318.880   peak  -13.8 dBFS
+  05_fx_shape.wav            318.880 ..  489.190   peak  -13.5 dBFS
+  06_fx_stereo.wav           489.190 ..  599.500   peak  -13.7 dBFS
+  07_fx_tones_strings.wav    599.500 ..  633.090   peak   -4.9 dBFS
+  08_fx_tones_choir.wav      633.090 ..  666.680   peak   -3.0 dBFS
+  09_fx_tones_vib.wav        666.680 ..  700.270   peak  -13.0 dBFS
+  10_fx_factory_p01.wav      700.270 ..  762.790   peak  -11.7 dBFS
+  11_fx_factory_p31.wav      762.790 ..  825.310   peak   -9.4 dBFS
+  12_fx_factory_p14.wav      825.310 ..  887.830   peak  -14.5 dBFS
