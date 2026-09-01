@@ -86,9 +86,21 @@ The model predicting its own effect tone by tone is the strongest evidence here.
 
 ---
 
-## 2. STEP > 1 GETS NO ANTI-ALIASING AT ALL `[open]`
+## 2. STEP > 1 GETS NO ANTI-ALIASING AT ALL `[known, not audible, deprioritised]`
 
-**This is a real, known, unfixed fault.  Come back to it.**
+**Checked by ear against the hardware on 2026-08-31 and closed for now.**  The user played
+the worst-offending patches on the real U-110 and on the emulator: *"I did not hear any
+noticable image artifact sounds on the patches indicated, emulated or hardware."*  Both
+machines behave the same way, and neither is objectionable.
+
+The likely reason is content rather than filtering: the offenders are bass and synth tones
+whose source material carries little energy near its own Nyquist, so what folds down is
+low-level and masked by the tone itself.  Aliasing is only as loud as the content that
+folds.
+
+So this is documented, not scheduled.  What follows is what it IS, so that if a tone ever
+does sound gritty in a way that moves DOWN the keyboard as you play UP, the mechanism is
+already written down.
 
 When a sample plays *faster* than its stored rate we are **decimating**, and there is no
 anti-alias filter anywhere in the path.  Source content above the 32 kHz engine's Nyquist
@@ -107,14 +119,18 @@ The three-tap kernels are **gated off above step 1** (see section 5), so those t
 plain linear interpolation, exactly as before.  They are not made worse -- but they are not
 helped either.
 
-**The fix is oversampling, not interpolation.**  Run the voice engine at a multiple of
-32 kHz so the folded content lands above the audio band, apply the output filter there, then
-decimate.  This is the one place the suggestion in section 4 is right.  Not attempted yet.
-It would need `set_rate_divider()` lowered with the envelope rate scaled to compensate, since
-`env_rate` is applied per output sample.
+**If it ever needs fixing, the fix is oversampling, not interpolation.**  Run the voice
+engine at a multiple of 32 kHz so the folded content lands above the audio band, apply the
+output filter there, then decimate.  This is the one place the suggestion in section 4 is
+right.  It would need `set_rate_divider()` lowered with the envelope rate scaled to
+compensate, since `env_rate` is applied per output sample.
 
-Unknown: **how audible this is.**  Slap measures -1.9 dB at 6-9 kHz, which is fine, so the
-aliasing may be modest in practice.  Worth measuring before building anything.
+**How to find the offenders again.**  A patch scan measured 77 of 182 patch/note
+combinations above step 1, concentrated in P-15 to P-30.  Worst: P-27 at note 72 (step
+2.683), P-25 at 84 (2.488), P-26 at 60 (2.236), P-19 at 84 (2.229, across four voices).
+P-26, P-21 and P-20 are already past 1.8 at middle C.  Render a MIDI that program-changes
+through the presets playing a few notes each, trace with `-log`, and read register 04/05 at
+PC 67FF -- see section 8.
 
 ---
 
@@ -195,7 +211,8 @@ onset**, and check the window before believing a spectral comparison.
 
 ## 7. Still open
 
-**Step > 1 has no anti-aliasing.**  Section 2.  The largest known structural gap.
+**Step > 1 has no anti-aliasing.**  Section 2.  Structurally real, but checked against the
+hardware by ear and inaudible on both machines, so it is documented rather than scheduled.
 
 **Marimba is -11.7 dB at 6-9 kHz** and no kernel moves it (-12.1 / -11.7 / -11.7 across
 linear, quadratic and gated quadratic).  Its step is 0.841, so its 6-9 kHz is genuine
@@ -207,8 +224,11 @@ which no filter response can do.  It is still doing work we do not understand, s
 spectral side is not finished.
 
 **We may now be quieter than the hardware above 10 kHz.**  Hardware's peak-to-median there
-is 8.0 dB -- its own noise floor -- while ours is dither. Some of "sounds better than the
-hardware" is the absence of their hiss, and that is a fidelity question, not a win.
+is 8.0 dB -- its own noise floor -- while ours is dither.  After A/B-ing the two the user's
+verdict was *"I think the Piano might sound better on the emulator, which I'm just fine
+with"*, and that is probably what is happening: no analog hiss, and the images that used to
+sit on top of the piano are gone.  Recorded as a fidelity question rather than a defect --
+if strict hardware fidelity ever matters more than sounding good, this is the knob.
 
 ---
 
