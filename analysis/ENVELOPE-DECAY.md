@@ -2,6 +2,9 @@
 
 State as of 2026-08-31.  What is settled, what is eliminated, and what to try next.
 
+**The A. Piano 1 fault is SOLVED** -- see section 5.  The rest of the document is the
+trail that led there and is kept because the eliminated hypotheses are the expensive part.
+
 The audible symptom, in the user's words: *"Both clearly have some of those high frequency
 partials hanging out longer than they should and longer than the hardware. All other
 instruments that I tried sound great."*  Ac.Piano only.
@@ -119,6 +122,10 @@ programs the next rung.  It creeps down and effectively holds.
 **The emulator is executing this faithfully**: layer A's first segment predicts 2.37 s under
 the same arithmetic and the log measures 2.375 s.  The ramp is not the fault.
 
+The open question at this point was why the firmware writes layer B's second segment
+0.34 ms after its first, with nothing having arrived in between.  **Section 5 answers it:
+it does so because we asked it to.**
+
 ---
 
 ## 4. Eliminated, with evidence `[C]`
@@ -132,43 +139,122 @@ the same arithmetic and the log measures 2.375 s.  The ramp is not the fault.
 | `0x16` low byte (rate) feeding `C0C4` | Returning the pre-zero-length rate changed nothing at all. |
 | Ramp overshoot past target | Implemented properly (announce once, keep ramping): 45% -> 44%.  At a 32 kHz interrupt ceiling the CPU answers within a sample or two, so the term is ~0 on both sides. |
 | Level readback / `3986[voice]` | **No `0x10`/`0x12` read happens anywhere near the note-on.**  The firmware does not consult it there. |
-| Spurious arrival causing layer B's extra segment | Arrival log shows **no arrival between** layer B's two writes, 0.34 ms apart.  The firmware issues both itself. |
+| Spurious ARRIVAL causing layer B's extra segment | Arrival log shows **no arrival between** layer B's two writes, 0.34 ms apart.  Correct as far as it went, and it pointed the wrong way: the extra segment came from a spurious **service**, not a spurious arrival -- an interrupt with nothing behind it.  See section 5. |
 | Stale-object layout mismatch from editing `sound.h` | All 18 objects that depend on it were rebuilt; zero stale. |
 
 ---
 
-## 5. The current idea `[I]`
+## 5. SOLVED: the chip was interrupting the CPU more often than it meant to `[C]`
 
-Identical ROM, identical writes, identical starting level, identical ramp law -- yet
-hardware's layer B decays 4.63 dB/s and ours 1.71.  Something upstream of the writes still
-differs, and one input is demonstrably wrong: **we collapse the attack ramp to zero time.**
+Not the ramp, not the rate law, not the readback.  **The offer on the INT line was being
+made more than once per arrival**, and the firmware answers every offer it is given.
 
-    -96.63   v13 attack written
-    -96.14   v14 attack written        (0.49 ms later)
-    -95.90   v13 ARRIVE
-    -95.90   v14 ARRIVE                (same instant)
+### What the firmware does
 
-At rate +118 our rising ramp completes in about **0.6 microseconds**, so both voices arrive
-simultaneously however far apart they were started.  On hardware that ramp takes real time
-and the two voices would arrive *separately, in the order started*, giving the phase machine
-one interrupt each in sequence -- a plausible route to a different segment sequence for the
-second voice.
+    41C4: orb int_mask, #40      handler entry -- and it RE-ENABLES EXTINT
+    41C7: ei
+    ...
+    41D0: ldbze 54, 1400         read register 00: which slot am I being offered?
+    41D5: cmpb  54, #20          0x20 / 0x21 are the two chorus-tremolo slots
+    ...
+    41F5: ldb   56, 3700[54]     that voice's phase
+    41FF: andb  57, 56, #07      -> lcall B932 / BAF4 / BD42 / BE7F / BEBD
 
-It also fits the pattern of the whole investigation: **every tone that is wrong is one where
-segments arrive instantly** (marimba and fbass's zero-length segments, layer B's attack), and
-every tone that is right has segments with real duration.
+Register 00 is read **exactly once per interrupt**, and nothing in the handler checks that
+the named voice has actually arrived.  It trusts the offer and steps that voice's phase
+machine.  So an interrupt the chip did not mean to give **is** an envelope segment the
+voice did not ask for.
 
-**Constraint on any attempt**: the rising scale is pinned hard by hardware attack times
-(Vib 1 at 2.164 / 0.540 / 0.122 s).  Those must not move.  Score any change with
-`tools/scratch_analyse.py` over all 76 trials, not on piano alone.
+### What our chip was doing
 
-`[I]` This is the fourth mechanism proposed for this fault; three died on measurement.  Treat
-it as a lead, not a conclusion.
+`env_scan()` ran on a timer and **toggled** INT on every tick for as long as *any* voice
+was pending.  The tick is 62.5 us; the firmware's handler measures about 300 us.  So four
+or five rising edges landed while the CPU was still inside the handler, the 8x9x latched
+one of them, and it was answered *after* the read of register 00 that acknowledged the real
+offer -- by which time `m_env_pending` was empty and `m_env_service` still named the voice
+just serviced.
+
+Traced directly (`U110_ENVTRACE=1`, note 43 velocity 127 on A. Piano 1):
+
+    ENVARR 21.303969 v03                    both voices arrive at the attack target
+    ENVARR 21.303969 v04
+    ENVACK 21.303983 v03 pending=00000018 real     -> BAB8: rate -50 target 212
+    ENVACK 21.304283 v04 pending=00000010 real     -> BAB8: rate -51 target 212
+    ENVACK 21.304582 v04 pending=00000000 STALE    -> BD06: rate -33 target 196
+    ENVRD  21.304582 -> v04  @':maincpu' (41D5)    ...from the handler, so a real interrupt
+
+That third line is the whole fault.  All three reads come from 41D5, so the CPU really did
+take three interrupts for two arrivals.  The spare one lands on the **last voice serviced**,
+which on a two-voice tone is always the second layer.  Layer B is handed its phase-3 rung
+0.3 ms after its phase-2 rung, while its level is still at the attack peak rather than at
+212, so the rung spans 43 log units instead of 16 and needs **12.7 s** inside a 7 s note.
+It never arrives, never interrupts, and the ladder stops there.
+
+That also answers the three questions this investigation kept circling:
+
+* **Is the decay commanded per layer?**  Yes -- each voice has its own segment registers and
+  its own phase in `3700[voice]`, and the two layers of a V-MIX are two independent voices.
+* **Should layer B decay at the same rate as layer A?**  Nearly, not exactly.  The firmware
+  gives them rates one count apart (-50 / -51, then -32 / -33) because their targets differ.
+  What it does not do is give one of them four times the duration of the other.
+* **Was the CPU reading a bad number out of our output stage?**  No.  The level readback is
+  fine; the fault was in the interrupt *handshake*, one register earlier.
+
+### The fix
+
+One rising edge per offer, and no further edge until the CPU has taken it: `env_scan()`
+asserts, drops the line on the next tick, and does not assert again until the read of
+register 00 clears `m_env_offered`.  A re-pulse after `ENV_OFFER_RETRY` ticks (~2 ms) covers
+an edge lost while the firmware had EXTINT masked -- safe, because the pending bit is still
+set, so a re-offer names the same voice.
+
+### What it bought
+
+Note 43 at velocity 127, decay fitted 0.4-5.5 s after the onset:
+
+| | hardware | before | after |
+|---|---|---|---|
+| broadband | 4.05 dB/s | 2.42 (-40%) | 4.56 (+13%) |
+| 2.5-8 kHz | 4.17 dB/s | 1.89 (-55%) | **4.80 (+15%)** |
+
+Across the 76-trial scratch set, `tools/scratch_analyse.py --hw listen/hardware/env3 --emu
+listen/emulated/env3-emu-D`:
+
+| | before | after |
+|---|---|---|
+| mean absolute error, 76 trials | 15.7% | **8.6%** |
+| worst segment | 34% | 24% |
+| piano (`scratch_tones`) | 1.98 vs 17.79 dB/s, **-89%** | 17.02, **-4%** |
+| marimba | -25% | -9% |
+| fretless bass | -10% | -4% |
+
+**The attack scale is untouched**, which was the constraint: the six-setting ENV ATTACK
+sweep measures 0.120 / 0.035 / 0.040 / 0.045 / 0.050 / 0.050 s against hardware's 0.115 /
+0.040 / 0.045 / 0.045 / 0.045 / 0.050, the same as before the change to within the 5 ms
+analysis step.  Nothing in the ramp arithmetic moved; only the delivery of the interrupt.
+
+Listen: `listen/comparisons/piano-offer-fix/`.
+
+### Tracing it again
+
+`U110_ENVTRACE=1` on the emulator binary logs `ENVARR` (a ramp arrived), `ENVACK` (the CPU
+read register 00, with the pending mask and whether the offer was real or `STALE`) and
+`ENVRD` (the same read from the driver side, with the CPU's PC).  Costs one predictable
+branch when unset.
 
 ### Also still open
 
-**Bell 1 decays 62% too FAST**, has no zero-length segment, and nothing found here explains
-it.  It is the only tone wrong in the other direction and may be a separate fault.
+**Bell 1 decays 62% too FAST** (5.56 dB/s on hardware, 9.14 here), has no zero-length
+segment, and is **completely untouched by the interrupt fix** -- 62% before, 64% after.  It
+is the only tone wrong in the other direction and is a separate fault.
+
+**VELO SENS** is the worst segment left at 24%, almost all of it one trial (`s0/v100`,
++94%).  Also unmoved by the fix.
+
+**Layer A's high partials at low velocity.**  At velocity 57, where layer A plays alone,
+broadband matches (hardware 3.71 vs 3.60 dB/s) but 2.5-8 kHz does not (2.18 vs 3.60): our
+layer A sheds its top end faster than the hardware does.  That is a spectral-tilt question,
+not an envelope one, and belongs with the output-filter fit rather than here.
 
 ---
 
