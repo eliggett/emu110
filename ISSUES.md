@@ -11,7 +11,8 @@ There might still be some discrepancies in the envelope, but they are quite smal
 There is an unexplained decrease in legit harmonic content at around 10 KHz. Since I don't hear there that well, I'm ok to let it go. 
 
 ## Chorus and Tremolo (see analysis/EFFECTS.md)
-Not implemented yet, but fully specified.  The device now carries the two LFO slots and runs them correctly against the real firmware.
+**Implemented.**  The device now carries the two LFO slots, runs them against the real
+firmware, and renders both effects on Voice Group 1.
 `listen/hardware/effects` is the first recording of either effect that exists -- no factory
 patch enables them, so hearing one at all needs `PATCH:COM:OUT #` set to an odd mode 21-49.
 The specification is now complete and measured:
@@ -24,12 +25,17 @@ The specification is now complete and measured:
 - **Chorus** is a delay tapped at `level >> 14` samples, 1 to 32 ms, with a tap in EACH
   channel half an LFO period apart and a roughly 50/50 wet/dry mix.
 
-What is left is the audio half: a 2048-sample delay line and the pan multiply, applied to
-Voice Group 1.  Sections 4 and 8.
+Rendered against the hardware capture the two agree closely -- LFO rates within 1%, the pan
+ratio at depth 15 measuring 0.040..0.960 against the hardware's 0.039..0.961, and the wet
+level within 0.4 dB.  Sections 8 and 9.
+
+Left undone, and none of it measured: the delay line holds floats where IC17 is eight bits
+wide; the wet/dry mix is a flat 0.5 fitted from three readings that bracket 0.45-0.55; and
+the order of the two effects when both are on is a guess.
 
 Still open: why these slots ramp symmetrically when the voices are 16:1 asymmetric.  That is
 not just an effects question -- if the voices' asymmetry is not really about ramp direction,
-`ENV_FALL_DIVISOR` is modelling the wrong thing.  Section 9.
+`ENV_FALL_DIVISOR` is modelling the wrong thing.  Section 10.
 
 ## MIDI output:
 There is not any MIDI output right now. MIDI through need not be implemented -- the OS or DAW can handle that.

@@ -337,10 +337,16 @@ The **chorus is a delay line tapped at `level >> 14` samples** -- 1 to 32 ms of 
 Not a polarity flip: `L - R` cancels the dry by 32 dB while `L + R` leaves the wet almost
 untouched.
 
-`[I]` **Emulation gap.** The two LFO slots exist in the device and run correctly against the
-real firmware, but nothing consumes them yet: there is no delay line and no pan multiply, so
-an effect mode still renders dry. That audio half is all that remains, and it is now fully
-specified (`analysis/EFFECTS.md` §4, §8).
+`[C]` **Implemented.** `roland_lp.cpp`'s `fx_render()` carries a 2048-sample delay line and
+the pan multiply, on Voice Group 1, driven from the two ramp slots. Rendered against the
+hardware capture the LFO rates agree within 1% and the pan ratio at depth 15 measures
+0.040..0.960 against 0.039..0.961. See `analysis/EFFECTS.md` §9 for what is *not* modelled.
+
+`[C]` One detail worth recording as system design rather than emulation: with the tremolo on,
+the **firmware asks for a voice level 16 log units higher** — volume word `F278` instead of
+`E270`, exactly one octave. The pan divides the signal between two outputs and the CPU puts
+the missing 6 dB back, which is independent confirmation that the pan really is a division
+rather than a modulation about unity.
 
 ---
 

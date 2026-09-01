@@ -1,0 +1,2 @@
+Emulator render of the same sequence as listen/hardware/effects, for comparing the chorus and
+tremolo implementation against the hardware.  Compare with tools/fx_analyse.py.

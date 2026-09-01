@@ -351,6 +351,19 @@ Converting the slope to a delay swing and dividing into the level swing:
 4% spread of the scale fit.  It is corroborated by the targets themselves being powers of
 two once shifted: 32, 512 and 1024 samples.
 
+### The firmware pre-compensates for the pan `[C]`
+
+With the tremolo enabled the firmware asks the chip for a **different voice level**: volume
+word `F278` instead of `E270`, i.e. log target 242 against 226.  Sixteen units is exactly one
+octave, 6.02 dB.
+
+That is an independent confirmation of the pan model, and it fixes the gain law.  The pan
+gains are `g/C` and `(C-g)/C` -- they add to one, so each channel sits at HALF the signal in
+the middle of the sweep -- and the firmware puts the missing 6 dB back by raising the voice.
+Normalising the pan to unity at its centre instead (gains `2g/C`) double-counts the
+correction and makes every tremolo patch 6 dB loud, which is exactly the error the first
+build of this made.  Nothing is done for the chorus, whose 1 dB the firmware ignores.
+
 ### The chorus is two taps, not a polarity flip
 
 `L - R` kills the unshifted carrier by 32 dB, so the dry signal is common to both channels.
@@ -375,7 +388,46 @@ is near enough 50/50.
 sideband clusters are clean and no second-order lines appear at 2x the offset, so there is no
 obvious regeneration.
 
-## 9. Open questions, in the order they should be settled
+## 9. What the emulator does now `[C]`
+
+`roland_lp.cpp`, `fx_render()`.  It runs whenever register `0x1D` says an effect is on, on
+Voice Group 1 only -- exactly the voices the driver has given mask `0x03` -- which are summed
+onto one bus instead of reaching Multi Outputs 1 and 2 directly.
+
+```
+  delay line   2048 samples of the group sum, IC17's size at the engine rate
+  chorus       tap_L = level >> 14, tap_R = (endpoints - level) >> 14, integer, no
+               interpolation; out = dry + 0.5 * tap
+  tremolo      gain_L = level / endpoints, gain_R = 1 - gain_L
+  LFO          the ramp generator's own slots, ramping at 2^(rate/8) * 4 per sample in
+               both directions
+```
+
+`endpoints` is the sum of the segment's two ends, captured in `env_segment()` as the ramp is
+programmed: the chip has both in front of it, this device sees one at a time.
+
+Rendered against the same capture (`tools/fx_analyse.py --hw ... --emu ...`):
+
+```
+                          hardware            emulator
+  chorus rate 3/7/11/15   0.606 0.872 1.211 1.744    0.614 0.872 1.223 1.721 Hz
+  tremolo rate 0/3/7/11   1.869 2.469 3.443 4.845    1.869 2.469 3.443 4.845 Hz
+  pan ratio, depth 7      0.2823 .. 0.7273           0.2827 .. 0.7170
+  pan ratio, depth 15     0.0390 .. 0.9611           0.0401 .. 0.9598
+  L alone / sum, depth 15   30.9 / 8.9 dB              30.8 / 8.9 dB
+  chorus sideband/carrier  -2.9 dB                    -3.2 dB
+  wet level vs dry         chorus +1.1, trem +0.5     chorus +0.7, trem +0.2 dB
+  chorus L-vs-R sideband    -1.000                     -0.993
+```
+
+`[I]` **Not modelled, and not measured either.** The delay line holds floats, where IC17 is
+eight bits wide; the tap does not interpolate, which is what an eleven-wire address does but
+means the sweep steps; the wet/dry mix is a flat 0.5 from three readings that bracket
+0.45-0.55; and the order of the two effects when both are on is a guess -- chorus first,
+then the pan.  The last of those is the only one likely to be audible, and `both_wet` in the
+capture can probably settle it.
+
+## 10. Open questions, in the order they should be settled
 
 1. **`[open]` Why the LFO slots ramp symmetrically and the voices do not.**  Section 4.  The
    mode register is the lead.  This matters beyond the effects: if the voices' 16:1 asymmetry
