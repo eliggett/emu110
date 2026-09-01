@@ -158,13 +158,13 @@ int main(int argc, char **argv)
     {
         const uint32_t n = std::min(block, total - done);
 
+        // Exact times, not sample offsets: rounding an arrival to the nearest sample can
+        // start a voice one sample early, which against another emulator is a large error.
         while (inject_pos < injected.size())
         {
             const double start = injected[inject_pos].t - byte_time;
-            const double blk0 = double(done) / rate, blk1 = double(done + n) / rate;
-            if (start >= blk1) break;
-            const uint32_t off = uint32_t(start <= blk0 ? 0 : (start - blk0) * rate);
-            core.midiIn(&injected[inject_pos].b, 1, off);
+            if (start >= double(done + n) / rate) break;
+            core.midiInAtTime(&injected[inject_pos].b, 1, start);
             inject_pos ++;
         }
 

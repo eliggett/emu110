@@ -310,6 +310,30 @@ u64 device_execute_interface::attotime_to_cycles(attotime t) const
 	return clk ? execute_clocks_to_cycles(t.as_ticks(clk)) : 0;
 }
 
+void device_execute_interface::set_input_line(int line, int state)
+{
+	m_pending_inputs.push_back({ line, state });
+	if (m_pending_inputs.size() != 1)
+		return;                      // a sync is already armed for this batch
+
+	if (!m_sync_timer)
+		m_sync_timer = device().machine().scheduler().alloc(
+				[this](s32 p) { apply_pending_inputs(p); });
+
+	// Zero delay: fires at the current instant, but from the scheduler, which means after
+	// the instruction in flight has finished.  adjust() aborts the running slice for us.
+	m_sync_timer->adjust(attotime::zero());
+}
+
+void device_execute_interface::apply_pending_inputs(s32)
+{
+	// Copy first: a handler may queue more.
+	std::vector<pending_input> batch;
+	batch.swap(m_pending_inputs);
+	for (const auto &p : batch)
+		execute_set_input(p.line, p.state);
+}
+
 void device_execute_interface::steal_remaining_cycles()
 {
 	if (!m_running || !m_icountptr)

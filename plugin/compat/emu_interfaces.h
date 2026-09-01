@@ -324,6 +324,16 @@ public:
 
 	int standard_irq_callback(int irqline, offs_t pc) { return 0; }
 
+	/// Change an interrupt line.
+	///
+	/// MAME does NOT apply this where it is called.  It queues the change and applies it
+	/// from a scheduler synchronize() callback, so the CPU always sees a line change
+	/// BETWEEN instructions.  That matters here because the tone generator raises its
+	/// envelope interrupt from inside sound_stream_update(), which runs inside a CPU
+	/// instruction: applying it immediately puts the interrupt a few hundred cycles from
+	/// where MAME puts it, and the two drift apart while running identical code.
+	void set_input_line(int line, int state);
+
 	// There is no debugger here, so these compile to nothing and the CPU's inner loop
 	// keeps its shape.  The ImGui debug window (PLUGIN-PLAN.md section 5) reads state
 	// through the core's own accessors instead.
@@ -331,7 +341,6 @@ public:
 	void debugger_instruction_hook(offs_t pc) { }
 	void debugger_exception_hook(int exception) { }
 	void debugger_privilege_hook() { }
-	void set_input_line(int line, int state) { execute_set_input(line, state); }
 
 	// --- what the core calls -------------------------------------------------------
 	/// Run for `cycles`, returning how many were actually consumed.
@@ -344,6 +353,12 @@ public:
 	void steal_remaining_cycles();
 
 private:
+	void apply_pending_inputs(s32);
+
+	struct pending_input { int line, state; };
+	std::vector<pending_input> m_pending_inputs;
+	emu_timer *m_sync_timer = nullptr;
+
 	int *m_icountptr = nullptr;
 	u64 m_totalcycles = 0;
 	int m_cycles_this_slice = 0;

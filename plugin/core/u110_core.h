@@ -156,6 +156,15 @@ public:
 	/// timing here is sample-accurate rather than block-quantised.
 	void midiIn(const uint8_t *bytes, size_t n, uint32_t sampleOffset);
 
+	/// Deliver bytes at an exact emulated time, in seconds since reset.
+	///
+	/// For offline rendering and for the null test.  A host's MIDI is inherently
+	/// sample-quantised, so midiIn() above is the right interface for one; but a byte
+	/// whose arrival is rounded to the nearest sample can start a voice one sample early,
+	/// and one sample is a large error when compared against another emulator rather than
+	/// against an ear.
+	void midiInAtTime(const uint8_t *bytes, size_t n, double seconds);
+
 	/// Collect bytes the firmware sent during the last render().  Returns how many were
 	/// written; offsets, if non-null, receives one sample offset per byte.
 	///

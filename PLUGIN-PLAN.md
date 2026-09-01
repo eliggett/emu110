@@ -318,32 +318,61 @@ Nearly all the harness exists: `-wavwrite`, `listen/`, `tools/render_u110.py`,
 ### Where the core actually is
 
 **It boots and it plays.** `plugin/build/u110_render` loads the ROMs, runs the real
-firmware, and reaches `P-01:Ac.Piano | MIDI.1.*.*.*.*.*` — the play screen — then
-sounds notes over MIDI.
+firmware, reaches `P-01:Ac.Piano | MIDI.1.*.*.*.*.*`, and sounds notes.
 
-Measured against MAME, dither off at both ends:
+Measured against MAME, dither off at both ends, **over sounding frames only** and
+with the constant output offset removed:
 
-| | Result |
-|---|---|
-| **Boot, 12 s** | **bit-identical.** All 542 LCD control and data writes match in content *and* time, worst 1.5 ms over 6 s |
-| **One note (C4, vel 100)** | correlation **1.000000**; **98.6% of frames bit-identical**, worst 2 LSB; everything before 13.40 s exact |
-| **Block-size independence** | **exact.** 64, 512 and 4096 samples per block give byte-identical output, with and without MIDI |
-| **Full sequence** (chords, velocities, bender, CC7) | 59.8% of frames identical — **the remaining work** |
+| Case | Frames identical | Worst error |
+|---|---|---|
+| single note, C2 / C4 / C6 | 91.9% / 91.6% / 65.5% | 17 / 2 / 5 LSB |
+| five-note chord | 67.1% | 44 LSB |
+| two notes, second entering later | 27.7% | 3640 LSB |
+| pitch bend | 15.8% | 760 LSB |
+| CC7 | 75.3% | 630 LSB |
 
-Two known differences, both characterised:
+`[!]` **An earlier revision of this section claimed the 12 s boot was
+"bit-identical". That was silence matching silence** — the U-110 makes no sound
+until a note arrives, so comparing boot audio proves nothing. It is exactly the
+failure the harness guards against, and it slipped into the *reporting* rather than
+the test. The real boot evidence is the LCD trace, and that shows a small drift
+(below).
 
-- **A constant output offset** of ~18 samples (0.6 ms). MAME's sound manager has its
-  own output phase and the core has no reason to reproduce it. The harness measures
-  and removes it before comparing, and reports it.
-- **±1 LSB on a small fraction of frames**, starting well into a note's decay.
-  Consistent with float summation order in the mixing, not with an emulation
-  difference — the correlation is exactly 1.000000.
+Two differences are understood and are not defects:
 
-`[?]` **The full sequence is the open item.** A single constant lag does not fit it,
-which points at per-byte MIDI *delivery* timing rather than at the emulation: each
-note's onset lands a few samples out, differently. The single-note case being
-near-exact supports that reading. Next step is to compare arrival times byte by byte
-rather than trusting the replay.
+- **A constant output offset** of ~18 samples. MAME's sound manager has its own
+  output phase; the harness measures and removes it.
+- **±1–2 LSB** on part of a decay. Correlation is exactly 1.000000, so this is
+  float summation order, not emulation.
+
+### The one real defect: a sub-0.1% timing drift
+
+The core and MAME execute **identical instruction streams** — all 542 LCD writes and
+the first 62,055 sound-register writes match in content and order — but reach them at
+slightly different cycle counts. The drift accumulates in bursts, reaching about
+3.5 ms by t = 12 s.
+
+That is why single notes are close and everything else is not: MIDI arrives at the
+same *absolute* instant in both, but into a firmware that is a few milliseconds out
+of step, so it is processed at a different point in the main loop.
+
+**The largest single contributor is one 1.53 s idle wait during boot, which the core
+completes 1.169 ms (0.076%) sooner.**
+
+Ruled out by measurement, each with the drift unchanged to the microsecond:
+
+- MIDI delivery timing — exact to <1 µs once `midiInAtTime()` existed
+- envelope interrupt count and order — 37 in both, same voices
+- interrupt-line timing — deferring through the scheduler, as MAME does, changed nothing
+- stream update cadence — adding MAME's 50 Hz `sound_manager` flush changed nothing
+- block size — output is byte-identical at 64, 512 and 4096
+- the core's own time-versus-cycles mapping — exact to ±6 cycles
+
+`[?]` What is left is the i8x9x's **internal** timer and interrupt model: Timer1/Timer2
+off `total_cycles()`, the HSO deadlines, and `internal_update` scheduling via `bcount`.
+Only EXTINT and HSI.0 reach the CPU through `set_input_line`; everything else the
+firmware waits on is internal to the CPU core, which is precisely the part of the
+shim that was written to a signature rather than to a behaviour.
 
 ### Six bugs the null test found, that listening would not have
 

@@ -103,13 +103,24 @@ struct U110Core::Impl
 
 	emu_timer *lcd_timer = nullptr;
 
+	// MAME's sound_manager flushes every stream on a 50 Hz periodic timer
+	// (STREAMS_UPDATE_FREQUENCY), on top of the updates a device forces for itself.  That
+	// cadence is not cosmetic: roland_lp sets its envelope-arrival PENDING bit from inside
+	// sound_stream_update(), and the 64 kHz env_tick then offers the interrupt.  So HOW
+	// FAR the stream has been rendered decides which tick raises the interrupt, and a core
+	// that flushes on a different schedule puts the interrupt on a different tick.
+	emu_timer *stream_timer = nullptr;
+	void stream_tick(s32);
+
 	// MIDI.  The CPU core takes whole bytes through serial_w(), so unlike the MAME driver
 	// there is no bit clock here -- but the SPACING still has to be the wire's, or the
 	// firmware sees a burst it could never receive.  A byte is delivered when its stop bit
 	// would have arrived, and consecutive bytes are held at least one byte time apart.
 	static constexpr double MIDI_BYTE_SECONDS = 10.0 / double(MIDI_BAUD);
+	// Queued in ABSOLUTE emulated time.  Block-relative offsets were rebased every block,
+	// which was both fragile and one rounding step more than necessary.
 	std::vector<u8> midi_in_queue;
-	std::vector<u32> midi_in_at;
+	std::vector<attotime> midi_in_at;
 	size_t midi_in_pos = 0;
 	attotime midi_next_deliverable;
 
@@ -228,6 +239,7 @@ void U110Core::Impl::build()
 	}
 
 	lcd_timer = machine.scheduler().alloc([this](s32 p) { lcd_int_cb(p); });
+	stream_timer = machine.scheduler().alloc([this](s32 p) { stream_tick(p); });
 
 	pcm.start();
 	cpu.start();
@@ -238,6 +250,10 @@ void U110Core::Impl::build()
 	}
 
 	wire_audio();
+
+	const attotime streams_update = attotime::from_hz(u32(50));
+	stream_timer->adjust(streams_update, 0, streams_update);
+
 	started = true;
 }
 
@@ -430,7 +446,12 @@ u16 U110Core::Impl::snd_r(offs_t offset, u16 mem_mask)
 		if (offset == 0x01)
 			{ rom_reads ++; result |= pcm_data_r(); }   // the CPU's wave-ROM read port
 		else if (offset == 0x00)
-			return pcm.read(0x00);                  // NOT offset+1: 01 is the read port
+		{
+			const u8 v = pcm.read(0x00);
+			if (getenv("U110_ENVTRACE"))
+				std::fprintf(stderr, "ENVRD %f -> v%02X\n", machine.time().as_double(), v);
+			return v;                               // NOT offset+1: 01 is the read port
+		}
 		else if (offset == 0x02)
 			return u16(pcm.read(0x02)) | (u16(pcm.read(0x03)) << 8);
 		else
@@ -449,9 +470,10 @@ void U110Core::Impl::snd_w(offs_t offset, u16 data, u16 mem_mask)
 		snd_regs[offset] = data & 0xff;
 		tg_writes ++;
 		if (getenv("U110_TGTRACE"))
-			std::fprintf(stderr, "TG %f v%02X reg %02X = %02X\n",
+			std::fprintf(stderr, "TG %f v%02X reg %02X = %02X cyc %llu\n",
 					machine.time().as_double(), snd_regs[0x1f] & 0x1f,
-					unsigned(offset), data & 0xff);
+					unsigned(offset), data & 0xff,
+					(unsigned long long)cpu.total_cycles());
 		pcm.write(offset, data & 0xff);
 	}
 
@@ -464,9 +486,10 @@ void U110Core::Impl::snd_w(offs_t offset, u16 data, u16 mem_mask)
 		offs_t const hi = (offset == 0x11 || offset == 0x15) ? offset + 2 : offset + 1;
 		snd_regs[offset + 1] = data >> 8;
 		if (getenv("U110_TGTRACE"))
-			std::fprintf(stderr, "TG %f v%02X reg %02X = %02X\n",
+			std::fprintf(stderr, "TG %f v%02X reg %02X = %02X cyc %llu\n",
 					machine.time().as_double(), snd_regs[0x1f] & 0x1f,
-					unsigned(offset + 1), data >> 8);
+					unsigned(offset + 1), data >> 8,
+					(unsigned long long)cpu.total_cycles());
 		pcm.write(hi, data >> 8);
 	}
 }
@@ -487,8 +510,7 @@ attotime U110Core::Impl::midi_due() const
 {
 	if (midi_in_pos >= midi_in_queue.size())
 		return attotime::never();
-	attotime const arrival = block_start
-			+ attotime::from_ticks(midi_in_at[midi_in_pos], kCoreSampleRate)
+	attotime const arrival = midi_in_at[midi_in_pos]
 			+ attotime::from_double(MIDI_BYTE_SECONDS);
 	return (midi_next_deliverable > arrival) ? midi_next_deliverable : arrival;
 }
@@ -502,7 +524,11 @@ void U110Core::Impl::midi_deliver_due()
 		// delivery depend on the audio block size -- which broke the "identical at any
 		// block size" property the null test rests on.
 		const attotime due = midi_due();
-		cpu.serial_w(midi_in_queue[midi_in_pos ++]);
+		const u8 byte = midi_in_queue[midi_in_pos ++];
+		if (getenv("U110_MIDITRACE"))
+			std::fprintf(stderr, "MIDI IN %f %02X   (due %f)\n",
+					machine.time().as_double(), byte, due.as_double());
+		cpu.serial_w(byte);
 		midi_next_deliverable = due + attotime::from_double(MIDI_BYTE_SECONDS);
 	}
 }
@@ -513,13 +539,26 @@ void U110Core::Impl::midi_tx_w(u8 data)
 	// clock here -- serialising and immediately deserialising would only lose timing.
 	midi_out_bytes.push_back(data);
 	const double into_block = (machine.time() - block_start).as_double();
-	midi_out_at.push_back(u32(into_block * kCoreSampleRate));
+	midi_out_at.push_back(u32(into_block > 0.0 ? into_block * kCoreSampleRate : 0.0));
 }
 
 
 /***************************************************************************************
     Rendering
 ***************************************************************************************/
+
+// The 50 Hz flush.  Same set of streams MAME's sound_manager walks.
+void U110Core::Impl::stream_tick(s32)
+{
+	pcm.stream()->update();
+	for (int ch = 0; ch < 2; ch ++)
+	{
+		sk1[ch].stream()->update();
+		sk2[ch].stream()->update();
+		rc[ch].stream()->update();
+		eq[ch].stream()->update();
+	}
+}
 
 void U110Core::Impl::run_block(u32 frames)
 {
@@ -579,15 +618,13 @@ void U110Core::Impl::run_block(u32 frames)
 	midi_deliver_due();
 	frames_done += frames;
 
-	// Anything left over belongs to the next block; rebase its offsets onto it.
+	// Drop what has been delivered.  Times are absolute, so nothing needs rebasing.
 	if (midi_in_pos)
 	{
 		midi_in_queue.erase(midi_in_queue.begin(), midi_in_queue.begin() + midi_in_pos);
 		midi_in_at.erase(midi_in_at.begin(), midi_in_at.begin() + midi_in_pos);
 		midi_in_pos = 0;
 	}
-	for (auto &t : midi_in_at)
-		t = (t > frames) ? (t - frames) : 0;
 
 	if (getenv("U110_CYCLES"))
 	{
@@ -721,10 +758,22 @@ void U110Core::renderStereo(float *left, float *right, uint32_t nframes)
 
 void U110Core::midiIn(const uint8_t *bytes, size_t n, uint32_t sampleOffset)
 {
+	const attotime when = attotime::from_ticks(m_impl->frames_done + sampleOffset,
+			kCoreSampleRate);
 	for (size_t i = 0; i < n; i ++)
 	{
 		m_impl->midi_in_queue.push_back(bytes[i]);
-		m_impl->midi_in_at.push_back(sampleOffset);
+		m_impl->midi_in_at.push_back(when);
+	}
+}
+
+void U110Core::midiInAtTime(const uint8_t *bytes, size_t n, double seconds)
+{
+	const attotime when = attotime::from_double(seconds);
+	for (size_t i = 0; i < n; i ++)
+	{
+		m_impl->midi_in_queue.push_back(bytes[i]);
+		m_impl->midi_in_at.push_back(when);
 	}
 }
 
