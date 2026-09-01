@@ -1,0 +1,3 @@
+Audio regression check for the MIDI OUT work: confirms serialising the CPU's TXD to a
+midi_port leaves the audio path alone.  All 13 files are byte-identical to
+listen/emulated/refactor-new.  Safe to delete.

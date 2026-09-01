@@ -819,17 +819,25 @@ project.
 `roland_u110.cpp:754`. SysEx in is already handled by the firmware — the dispatch
 table at `0x56C3` routes `0xF0` to `0x5B94` and `0xF7` to `0x5B9F`.
 
-**Output is not wired.** `midi_tx_w` at `roland_u110.cpp:745` only calls
-`logerror`. The hardware is real (TXD on pin 17, IOC1 bit 5, ring buffer at
-`0x2200`), so this is a genuine gap, not an absence.
+**Output works.** `midi_tx_w` serialises the CPU's TXD to a `midi_port` at 31250
+baud 8N1 — the mirror image of the rx deserialiser — with a 16-byte FIFO between
+the CPU's byte-at-a-time model and the bit clock.
 
-To implement: a bit-level transmitter mirroring the rx deserialiser — 31250 baud,
-8N1, shifting out on the same clock — feeding a byte queue the core exposes via
-`midiOut()`. About 30 lines. **Do this in the MAME driver first**, where it can be
-tested against `-mout`, and it arrives in the plugin for free via §3.
+The firmware **sends nothing unprompted**: no active sensing, and there is no
+keyboard. So MIDI OUT carries SysEx replies and bulk dumps only, and a host
+should not wait for traffic that will never come.
 
-With MIDI out in place, SysEx out follows — which is what makes `Bulk Dump` and
-`Tone Bulk Rceiv.` reachable, and therefore `.syx` interop (§10.5).
+Verified against a real ALSA port, not just the driver's own log — MAME's
+`midiout_device` decodes the bit stream with an independent 31250 8N1 receiver,
+so the timing is proven rather than assumed:
+
+| Request | Result |
+|---|---|
+| `RQ1 00 01 1A` (chorus depth) | `F0 41 0F 23 12 00 01 1A 07 5E F7` |
+| `RQ1 02 00 00 / 01 00 00` (patches 1-64) | **129 packets, 17706 bytes**, byte-identical to the driver's trace, 0 malformed, 0 bad checksums, addressed `010000` then `020000`..`027F00` |
+
+A 1005 s audio render is byte-identical before and after, so nothing leaked into
+the audio path.
 
 `[?]` **MIDI THRU** is a separate jack on the real unit and is often a hardware
 pass-through rather than CPU-generated. Check the schematic before emulating it.
@@ -973,7 +981,9 @@ Extracted and headless should be a few percent — comfortable for many instance
    path. Verified two ways: the reimplemented `bitswap` matches MAME's over the whole
    2^19 address domain and all 256 data bytes (and is bijective), and a 1005 s render
    is byte-identical before and after, 13/13 files.
-2. Wire MIDI OUT in the MAME driver, testable against `-mout` (§10.3).
+2. ~~Wire MIDI OUT in the MAME driver, testable against `-mout` (§10.3).~~ **Done.**
+   Serialised to a `midi_port`, verified end-to-end over ALSA with a 17706-byte,
+   129-packet bulk dump. MIDI THRU deliberately not emulated — see below.
 3. Define `U110Core` (§4) and stand up the null-test harness against MAME.
 4. Write `plugin/compat/emu.h`; compile MAME's four device sources against it;
    drive the null test to green and put it in CI (§3).
@@ -1011,8 +1021,18 @@ that subsystem, so the hook point is known.
 - `[?]` DPF standalone audio backends on Windows and macOS.
 - `[?]` DPF / LV2 SysEx size limits — does a bank dump need chunking?
 - `[?]` FL Studio version on the target machine — does it host CLAP?
-- `[?]` U-110 SysEx model ID and address map (gates `.syx` interop).
-- `[?]` MIDI THRU — hardware pass-through or CPU-generated?
+- ~~`[?]` U-110 SysEx model ID and address map (gates `.syx` interop).~~ **Largely
+  resolved.** Model ID `0x23`, framing checked against the firmware's own parser in
+  `tools/u110_sysex.py`, and the bulk-dump map confirmed empirically now that MIDI
+  OUT works: `010000` SETUP (1 packet), `020000`..`027F00` patches 1-64 (128
+  packets). Reading a bank out is proven; writing one back is untested.
+- `[?]` **MIDI THRU — hardware pass-through or CPU-generated?** Still open, and now
+  the *only* thing blocking the third jack. `analysis/SYSTEM-DESIGN.md` §6 claimed
+  THRU comes off `TXD` alongside OUT; the owner's manual contradicts that ("the MIDI
+  messages fed into the MIDI IN connector are output through the MIDI THRU
+  connector"), and if it were `TXD` then THRU would carry OUT's data rather than
+  IN's. The doc is now marked unverified. **This needs an eye on the schematic** —
+  the service notes PDF is not OCR'd, so it cannot be grepped.
 - `[?]` Per-patch record size in `patchram` — is 8192/64 = 128 exact?
 - `[?]` CGROM: baked MatrixSans vs a published HD44780 A00 table — compare.
 - `[?]` What CGRAM chars 0, 1 and 2 are for after boot. They are redefined at

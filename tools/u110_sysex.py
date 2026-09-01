@@ -103,6 +103,31 @@ def rq1(addr, size, device_id=0x0F):
                  + [checksum(body), 0xF7])
 
 
+# Bulk dump, Owner's Manual section 4.3.  Confirmed empirically now that the emulator has
+# MIDI OUT: each RQ1 below was sent and the replies counted, framed and checksummed.
+#
+#   RQ1 01 00 00 / 00 00 20  ->    1 packet  at 010000            (SETUP)
+#   RQ1 02 00 00 / 01 00 00  ->  128 packets at 020000..027F00    (patches 1-64)
+#
+# The 128-packet dump is 17706 bytes and comes out clean -- 0 malformed, 0 bad checksums.
+# Note the size field is 7-bit packed like the address, so 01 00 00 is 1 << 14, not 0x10000.
+BULK_SETUP        = ((0x01, 0x00, 0x00), (0x00, 0x00, 0x20))
+BULK_TEMP_PATCH   = ((0x00, 0x02, 0x00), (0x00, 0x01, 0x00))
+BULK_PATCH_1_64   = ((0x02, 0x00, 0x00), (0x01, 0x00, 0x00))
+
+
+def rq1_raw(addr, size_bytes, device_id=0x0F):
+    """RQ1 with the size given as three 7-bit bytes, as the manual's tables print it."""
+    body = list(addr) + list(size_bytes)
+    return bytes([0xF0, ROLAND, device_id & 0x7F, MODEL_ID, RQ1] + body
+                 + [checksum(body), 0xF7])
+
+
+def bulk_request(which, device_id=0x0F):
+    """RQ1 for one of the BULK_* blocks above."""
+    return rq1_raw(which[0], which[1], device_id)
+
+
 def patch_common(offset, value, device_id=0x0F):
     return dt1((PATCH_COMMON[0], PATCH_COMMON[1], offset), [value], device_id)
 
@@ -129,3 +154,5 @@ if __name__ == '__main__':
     print('part 0 tone  =62 :', show(part_param(0, PART_TONE_NUMBER, 62)))
     print('part 0 level =127:', show(part_param(0, PART_LEVEL, 127)))
     print('RQ1 patch common :', show(rq1((0x00, 0x01, 0x00), 0x20)))
+    print('RQ1 bulk 1-64    :', show(bulk_request(BULK_PATCH_1_64)))
+    print('RQ1 bulk SETUP   :', show(bulk_request(BULK_SETUP)))

@@ -45,7 +45,19 @@ not just an effects question -- if the voices' asymmetry is not really about ram
 `ENV_FALL_DIVISOR` is modelling the wrong thing.  Section 10.
 
 ## MIDI output:
-There is not any MIDI output right now. MIDI through need not be implemented -- the OS or DAW can handle that.
+**Implemented.**  The CPU's TXD is serialised to a `midi_port` at 31250 baud 8N1, mirroring
+the receiver, with a 16-byte FIFO between the CPU's byte-at-a-time model and the bit clock.
+
+The firmware sends nothing unprompted -- no active sensing, and there is no keyboard -- so
+this carries SysEx replies and bulk dumps only.  Verified end to end against a real ALSA
+port: an RQ1 for chorus depth comes back as `F0 41 0F 23 12 00 01 1A 07 5E F7`, and a full
+`RQ1 02 00 00 / 01 00 00` produces **129 packets, 17706 bytes, byte-identical to the driver's
+own trace, 0 malformed and 0 bad checksums**, addressed `010000` then `020000`..`027F00`.
+
+That unblocks `.syx` interop (PLUGIN-PLAN 10.5): a whole bank can now be read out of the
+machine.  Writing one back is untested.
+
+MIDI THRU is a separate jack and is deliberately NOT emulated -- see below.
 
 ## Spectral / reconstruction (see analysis/RECONSTRUCTION.md)
 
