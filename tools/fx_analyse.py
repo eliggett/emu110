@@ -30,6 +30,14 @@ The four measurements, and why each is done the way it is:
             1+s and 1-s, unequal by the curvature of the log -- and that inequality is what
             distinguishes a delay from a pair of detuned voices.
 
+  ORDER     whether the delay runs before or after the pan.  With both effects on, track the
+            carrier's energy and the sidebands' energy separately and band-pass both at the
+            tremolo rate: if the pan multiplies the delayed copy as well as the dry one, the
+            two move together and S/C is 1.  If only the dry were panned the sidebands would
+            carry no tremolo at all.  Measured 0.977 with a correlation of +1.000, so the
+            delay comes first -- which is also the only arrangement one 2K x 8 SRAM can
+            support, since it can hold a mono signal and nothing else.
+
   STEREO    whether the wet signal is a polarity flip or a second tap.  Track which sideband
             is the stronger one over time in each channel: opposite (correlation -1) means
             two taps sweeping in opposite directions.
@@ -271,6 +279,44 @@ def analyse(root, label):
             print("  correlation %+.3f   (-1 = two taps sweeping opposite ways,"
                   % np.corrcoef(tL, tR)[0, 1])
             print("                        +1 = one tap offset from the other)")
+
+    # effect order, from the both-on trial
+    path = os.path.join(root, '06_fx_stereo.wav')
+    if os.path.exists(path):
+        from scipy.signal import butter, sosfiltfilt
+        sr, d = load(path)
+        on = onsets(d[:, 0], sr)
+        if len(on) >= 5:
+            print("\nEFFECT ORDER: is the delayed copy panned too?")
+            print("  %-12s %9s %10s %7s %7s" % ('trial', 'carrier', 'sidebands', 'S/C', 'corr'))
+            for idx, nm in ((4, 'both_wet'), (0, 'chorus_wet')):
+                seg = d[int((on[idx] + 2) * sr):int((on[idx] + 13) * sr), 0]
+                W, hop = int(0.15 * sr), int(0.02 * sr)
+                win = np.hanning(W)
+                ff = np.fft.rfftfreq(W, 1 / sr)
+                masks = []
+                for h in (6, 8, 10):
+                    fc = NOTE60 * h
+                    masks.append(((ff > fc * 2 ** -0.0060) & (ff < fc * 2 ** 0.0060),
+                                  ((ff > fc * 2 ** -0.070) & (ff < fc * 2 ** -0.011))
+                                  | ((ff > fc * 2 ** 0.011) & (ff < fc * 2 ** 0.070))))
+                nf = (len(seg) - W) // hop
+                C, S = np.zeros(nf), np.zeros(nf)
+                for i in range(nf):
+                    P = np.abs(np.fft.rfft(seg[i * hop:i * hop + W] * win)) ** 2
+                    for cm, sm in masks:
+                        C[i] += P[cm].sum()
+                        S[i] += P[sm].sum()
+                C, S = 10 * np.log10(C + 1e-30), 10 * np.log10(S + 1e-30)
+                fr = sr / hop
+                sos = butter(3, [2.5, 4.5], 'bandpass', fs=fr, output='sos')
+                cb, sb = sosfiltfilt(sos, C - C.mean()), sosfiltfilt(sos, S - S.mean())
+                print("  %-12s %9.3f %10.3f %7.3f %+7.3f"
+                      % (nm, cb.std(), sb.std(), sb.std() / cb.std(),
+                         np.corrcoef(cb, sb)[0, 1]))
+            print("  S/C ~1 with corr +1: the pan multiplies the delayed copy as well as the")
+            print("  dry one, so the DELAY RUNS FIRST.  ~0 would mean only the dry is panned.")
+            print("  chorus_wet is the control -- no tremolo, so nothing in that band.")
 
 
 def main():

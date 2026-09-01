@@ -351,6 +351,27 @@ Converting the slope to a delay swing and dividing into the level swing:
 4% spread of the scale fit.  It is corroborated by the targets themselves being powers of
 two once shifted: 32, 512 and 1024 samples.
 
+### The delay runs first, the pan is the output stage `[C]`
+
+With both effects on, does the pan multiply the delayed copy as well as the dry one, or only
+the dry?  The answer is visible in one channel: track the carrier's energy and the
+sidebands' energy separately over time, band-pass both at the tremolo rate, and compare.
+
+```
+                          carrier   sidebands     S/C     corr
+  HARDWARE both_wet         2.044      1.996    0.977   +1.000
+  HARDWARE chorus_wet       0.048      0.059    1.251   +0.178      (control: no tremolo)
+  EMULATOR both_wet         2.011      2.011    1.000   +1.000
+```
+
+The sidebands carry the tremolo just as strongly as the carrier does, in lockstep.  So the
+pan multiplies the delayed copy and the dry one alike: **the delay comes first and the pan is
+the output stage.**  Had the pan run first, the sidebands would carry no tremolo at all.
+
+That is also the only arrangement IC17 can support.  It is one 2K x 8 SRAM, so the delay line
+holds a mono signal -- there is nowhere to put a second, already-panned one.  The chorus has
+to act on the group's mono sum, and the stereo split has to come after it.
+
 ### The firmware pre-compensates for the pan `[C]`
 
 With the tremolo enabled the firmware asks the chip for a **different voice level**: volume
@@ -420,14 +441,26 @@ Rendered against the same capture (`tools/fx_analyse.py --hw ... --emu ...`):
   chorus L-vs-R sideband    -1.000                     -0.993
 ```
 
+The **order is measured**, not assumed: delay first, pan last (section 8).
+
 `[I]` **Not modelled, and not measured either.** The delay line holds floats, where IC17 is
 eight bits wide; the tap does not interpolate, which is what an eleven-wire address does but
-means the sweep steps; the wet/dry mix is a flat 0.5 from three readings that bracket
-0.45-0.55; and the order of the two effects when both are on is a guess -- chorus first,
-then the pan.  The last of those is the only one likely to be audible, and `both_wet` in the
-capture can probably settle it.
+means the sweep steps; and the wet/dry mix is a flat 0.5 from three readings that bracket
+0.45-0.55.
 
 ## 10. Open questions, in the order they should be settled
+
+0. **`[open]` The step when the tremolo is switched on under a sounding note.**  The
+   compensation in the previous section is written at NOTE-ON and never again, so a note
+   already playing when the depth goes from 0 to 1 keeps its uncompensated level and loses
+   the whole 6.02 dB the pan costs.  The emulator measures exactly that, 6.02 dB, flipping
+   the depth under a 20 s held note.  **Owner measured 3 dB on hardware.**  The note-on path
+   is not in doubt -- across the whole depth sweep the emulator tracks hardware to 0.01 dB,
+   and the +1.13 dB rise at depth 15 is a signature only a linear-amplitude pan produces (a
+   constant-power pan would hold the power sum flat) -- so the disagreement is specifically
+   about what happens to a note that is already sounding.  Worth a deliberate measurement if
+   it ever matters; recorded here rather than resolved.
+
 
 1. **`[open]` Why the LFO slots ramp symmetrically and the voices do not.**  Section 4.  The
    mode register is the lead.  This matters beyond the effects: if the voices' 16:1 asymmetry

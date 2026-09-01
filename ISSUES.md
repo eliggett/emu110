@@ -29,9 +29,16 @@ Rendered against the hardware capture the two agree closely -- LFO rates within 
 ratio at depth 15 measuring 0.040..0.960 against the hardware's 0.039..0.961, and the wet
 level within 0.4 dB.  Sections 8 and 9.
 
-Left undone, and none of it measured: the delay line holds floats where IC17 is eight bits
-wide; the wet/dry mix is a flat 0.5 fitted from three readings that bracket 0.45-0.55; and
-the order of the two effects when both are on is a guess.
+The order of the two is now measured too -- delay first, pan last, which is also the only
+arrangement one 2K x 8 SRAM can support.
+
+Left undone, and neither part measured: the delay line holds floats where IC17 is eight bits
+wide, and the wet/dry mix is a flat 0.5 fitted from three readings that bracket 0.45-0.55.
+
+One open discrepancy: switching the tremolo on UNDER a sounding note drops it 6.02 dB in the
+emulator, because the firmware's compensation is written at note-on and never again; the
+owner measures 3 dB on hardware.  New notes are not affected and match hardware to 0.01 dB.
+Section 10.
 
 Still open: why these slots ramp symmetrically when the voices are 16:1 asymmetric.  That is
 not just an effects question -- if the voices' asymmetry is not really about ramp direction,
