@@ -315,66 +315,40 @@ resampler is in the path.
 Nearly all the harness exists: `-wavwrite`, `listen/`, `tools/render_u110.py`,
 `tools/select_patch.lua`, `tools/capture_u110.py`.
 
-### Where the core actually is
+### The null test is green
 
-**It boots and it plays.** `plugin/build/u110_render` loads the ROMs, runs the real
-firmware, reaches `P-01:Ac.Piano | MIDI.1.*.*.*.*.*`, and sounds notes.
+**`U110Core` is bit-identical to MAME.** On a 27-second sequence exercising single
+notes across the keyboard, velocities, a five-note chord, notes entering over
+sustained ones, pitch bend and CC7:
 
-Measured against MAME, dither off at both ends, **over sounding frames only** and
-with the constant output offset removed:
+```
+-- block-size independence --
+  block 512 vs 64 : identical (0 of 870400 frames differ)
+-- MAME vs U110Core --
+  constant offset  : -1 samples (-0.031 ms)
+  frames identical : 864000 of 864000 (100.0000%)
+PASS  bit-identical once the constant output offset is removed.
+```
 
-| Case | Frames identical | Worst error |
-|---|---|---|
-| single note, C2 / C4 / C6 | 91.9% / 91.6% / 65.5% | 17 / 2 / 5 LSB |
-| five-note chord | 67.1% | 44 LSB |
-| two notes, second entering later | 27.7% | 3640 LSB |
-| pitch bend | 15.8% | 760 LSB |
-| CC7 | 75.3% | 630 LSB |
+Worst sample error **0 LSB**. Seven separate single-case renders agree the same way.
 
-`[!]` **An earlier revision of this section claimed the 12 s boot was
-"bit-identical". That was silence matching silence** — the U-110 makes no sound
-until a note arrives, so comparing boot audio proves nothing. It is exactly the
-failure the harness guards against, and it slipped into the *reporting* rather than
-the test. The real boot evidence is the LCD trace, and that shows a small drift
-(below).
+Two conditions the test needs, both of them the plan's own:
 
-Two differences are understood and are not defects:
+- **Dither off at both ends** (`U110_DITHER=0`). It is deterministic, but the core has
+  no reason to reproduce MAME's exact call sequence into it. `emu/sound.h` said so.
+- **MIDI replayed at MAME's own arrival times**, via `midiInAtTime()`. Otherwise the
+  test measures MAME's `-min` delivery lag and bit clock — transport details the
+  plugin deliberately does not copy.
 
-- **A constant output offset** of ~18 samples. MAME's sound manager has its own
-  output phase; the harness measures and removes it.
-- **±1–2 LSB** on part of a decay. Correlation is exactly 1.000000, so this is
-  float summation order, not emulation.
+The remaining **−1 sample constant offset** is MAME's sound-manager output phase. It
+is measured and removed, not ignored, and it is not an emulation difference: at that
+offset the two agree exactly, sample for sample, for the whole render.
 
-### The one real defect: a sub-0.1% timing drift
+`[!]` An earlier revision of this section reported the boot as "bit-identical". That
+was silence matching silence — the U-110 makes no sound until a note arrives. The
+harness guards against exactly that; the claim got into the *reporting*, not the test.
 
-The core and MAME execute **identical instruction streams** — all 542 LCD writes and
-the first 62,055 sound-register writes match in content and order — but reach them at
-slightly different cycle counts. The drift accumulates in bursts, reaching about
-3.5 ms by t = 12 s.
-
-That is why single notes are close and everything else is not: MIDI arrives at the
-same *absolute* instant in both, but into a firmware that is a few milliseconds out
-of step, so it is processed at a different point in the main loop.
-
-**The largest single contributor is one 1.53 s idle wait during boot, which the core
-completes 1.169 ms (0.076%) sooner.**
-
-Ruled out by measurement, each with the drift unchanged to the microsecond:
-
-- MIDI delivery timing — exact to <1 µs once `midiInAtTime()` existed
-- envelope interrupt count and order — 37 in both, same voices
-- interrupt-line timing — deferring through the scheduler, as MAME does, changed nothing
-- stream update cadence — adding MAME's 50 Hz `sound_manager` flush changed nothing
-- block size — output is byte-identical at 64, 512 and 4096
-- the core's own time-versus-cycles mapping — exact to ±6 cycles
-
-`[?]` What is left is the i8x9x's **internal** timer and interrupt model: Timer1/Timer2
-off `total_cycles()`, the HSO deadlines, and `internal_update` scheduling via `bcount`.
-Only EXTINT and HSI.0 reach the CPU through `set_input_line`; everything else the
-firmware waits on is internal to the CPU core, which is precisely the part of the
-shim that was written to a signature rather than to a behaviour.
-
-### Six bugs the null test found, that listening would not have
+### Seven bugs the null test found, that listening would not have
 
 Each of these produced a machine that booted and made plausible noise:
 
@@ -396,9 +370,25 @@ Each of these produced a machine that booted and made plausible noise:
    `machine.time()` let the CPU's end-of-slice overshoot accumulate, at a rate that
    depended on the block size. Anchoring to the absolute sample count fixed
    block-size independence outright.
+7. **Two phantom buttons held down for the life of the machine.** The panel port is
+   active low, and MAME's `SW` carries `PORT_BIT(0xc0, IP_ACTIVE_LOW, IPT_UNUSED)`, so
+   it reads **0xFF** with nothing pressed. The core returned `0x3F` — and a clear bit
+   means *pressed*, so the firmware believed two buttons had been held since power-on.
+   It booted, showed the right screen and played the right notes; it simply ran
+   different code, scanning the panel at 39 Hz instead of 200 Hz and entering a branch
+   at `0x7Bxx`–`0x7Exx` that MAME never reaches. **This was the whole of the
+   "sub-0.1% timing drift"** — which was therefore never a timing problem at all.
 
-None of these are exotic. They are the difference between "an emulator that works"
-and "the same emulator", which is exactly what the null test exists to tell apart.
+None of these are exotic, and every one produced an emulator that *worked*. They are
+the difference between "an emulator that works" and "the same emulator" — exactly what
+the null test exists to tell apart.
+
+**The method that found the last one is worth keeping.** `mcs96.cpp` is compiled into
+both emulators, so a temporary PC histogram in the shared source instruments the two
+identically. Over one 1.53-second idle window they executed 1,375,316 instructions
+each — but MAME visited **94** distinct program counters and the core **189**. The 95
+extra were the tell. When two emulators disagree and both look right, instrument the
+code they share.
 
 ### What this buys
 
@@ -1149,9 +1139,10 @@ Extracted and headless should be a few percent — comfortable for many instance
    `plugin/core/u110_core.h` (BSD, compiles standalone) and
    `plugin/tools/null_test.py`. `--self` proves the oracle: MAME renders
    bit-identically run to run, 864001 frames at 32 kHz native.
-4. **Mostly done.** The shim is written, MAME's sources compile against it
-   unmodified, and the core **boots the real firmware and plays notes**. The null
-   test runs end to end. It is not green yet — see §4 for exactly how close.
+4. ~~Write `plugin/compat/emu.h`; compile MAME's device sources against it; drive the
+   null test to green and put it in CI (§3).~~ **Done except CI.** The core is
+   **bit-identical to MAME**, 864000 of 864000 frames, and block-size independent.
+   Only "put it in CI" remains.
 5. DPF standalone, no UI, plus the ImGui debug window (§2.1, §5).
 6. Panel snapshot protocol and command queue (§8).
 7. Bake the CGROM from MatrixSans Screen; hand-fix the mangled glyphs (§7).

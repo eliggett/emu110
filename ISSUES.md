@@ -74,30 +74,17 @@ MIDI IN line state off the opto-isolator, with no CPU involvement.
 
 ## Plugin core (see PLUGIN-PLAN.md sections 3 and 4)
 
-**The core boots and plays.**  MAME's device sources compile unmodified against
-`plugin/compat/emu.h`, and `plugin/build/u110_render` runs the real firmware to the play
-screen and sounds notes.  It is exactly block-size independent (64 / 512 / 4096 give
-byte-identical output).
+**The null test is green.**  MAME's device sources compile unmodified against
+`plugin/compat/emu.h`, and `U110Core` renders **bit-identically to MAME** -- 864000 of
+864000 frames, worst error 0 LSB -- over a sequence with single notes across the keyboard,
+velocities, a chord, notes entering over sustained ones, pitch bend and CC7.  It is also
+exactly block-size independent (512 vs 64: 0 frames differ).
 
-**The null test is not green.**  Over sounding frames, with the constant output offset
-removed: single notes 65-92% of frames identical, a chord 67%, a second note entering
-later 28%, pitch bend 16%.
+Two conditions, both of them the plan's own: dither off at both ends (`U110_DITHER=0`), and
+MIDI replayed at MAME's own arrival times through `midiInAtTime()`.
 
-The cause is understood but not fixed: the core and MAME execute **identical instruction
-streams** -- all 542 LCD writes and the first 62,055 sound-register writes match in content
-and order -- but reach them at slightly different cycle counts, drifting about 3.5 ms by
-t = 12 s.  MIDI then arrives at the right absolute time into a firmware that is out of
-step.  The largest single contributor is one 1.53 s idle wait the core finishes 0.076%
-sooner.
+One constant difference remains and is not a defect: a **-1 sample output offset**, which
+is MAME's sound-manager output phase.  The harness measures and removes it; at that offset
+the two agree exactly for the whole render.
 
-Ruled out by measurement (drift unchanged to the microsecond in each case): MIDI delivery
-timing, envelope interrupt count and order, interrupt-line deferral, stream update cadence,
-block size, and the core's own time-versus-cycles mapping.  What remains is the i8x9x's
-INTERNAL timer and interrupt model -- Timer1/Timer2 off `total_cycles()`, HSO deadlines,
-and `internal_update` scheduling via `bcount`.
-
-Not defects, but worth knowing: a constant ~18-sample output offset against MAME (MAME's
-sound manager has its own output phase), and +/-1-2 LSB on part of a decay (float summation
-order; the correlation is exactly 1.000000).
-
-`saveState` / `loadState` are stubs.
+Left to do: put the null test in CI, and implement `saveState` / `loadState` (stubs).

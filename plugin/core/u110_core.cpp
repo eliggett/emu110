@@ -97,7 +97,12 @@ struct U110Core::Impl
 	u8  card_present = 0x0f;        // bit per slot, 1 = empty (PORT1 is active low)
 	u8  port2 = 0;
 	u16 leds = 0;
-	u8  switches = 0x3f;            // active low: all released
+	// ACTIVE LOW, and all EIGHT bits read high when nothing is pressed.  Bits 6 and 7 are
+	// unused inputs, not zeros: the firmware's edge detector at 0x4118 keeps ~raw as
+	// "previously pressed", so a clear bit is a HELD KEY.  Returning 0x3F here meant two
+	// phantom buttons held down for the life of the machine, which sent the firmware down
+	// branches MAME never takes.
+	u8  switches = 0xff;
 	u64 tg_writes = 0, rom_reads = 0, extints = 0;
 	bool patch_view_rom = false;
 
@@ -794,8 +799,8 @@ void U110Core::setButton(Button sw, bool down)
 {
 	if (sw < 0 || sw >= kButtonCount)
 		return;
-	if (down) m_impl->switches &= ~(1 << sw);
-	else      m_impl->switches |=  (1 << sw);
+	if (down) m_impl->switches &= u8(~(1 << sw));
+	else      m_impl->switches |=  u8(1 << sw);
 }
 
 uint8_t U110Core::readMem(uint16_t addr) const

@@ -280,6 +280,8 @@ def main():
     ap.add_argument('--patch', type=int, default=1)
     ap.add_argument('--block', type=int, default=512,
                     help='core render block size; the output must not depend on it')
+    ap.add_argument('--check-blocks', action='store_true',
+                    help='also render at a second block size and require identical output')
     ap.add_argument('--keep', default=None, metavar='DIR',
                     help='keep the rendered wavs in DIR instead of a temp dir')
     args = ap.parse_args()
@@ -328,6 +330,23 @@ def main():
         print('\nThe core renderer (plugin/build/u110_render) does not exist yet.')
         print('Run plugin/tools/build_core.sh.  Built the reference only.')
         return 2
+
+    # Section 4 requires the core to render identically at any block size.  It is checked
+    # here rather than by hand because it is easy to lose and invisible by ear: the failure
+    # is a fraction of a sample of drift per block, which only shows up against a reference.
+    if args.check_blocks:
+        print('\n-- block-size independence --')
+        alt = render_core(csv if nbytes else None,
+                          os.path.join(out, 'core_alt.wav'), seconds, block=64)
+        x, y = read_wav(core), read_wav(alt)
+        n = min(len(x), len(y))
+        d = x[:n].astype(np.int64) - y[:n].astype(np.int64)
+        nbad = int((np.abs(d).sum(axis=1) > 0).sum())
+        print('  block %d vs 64 : %s (%d of %d frames differ)'
+              % (args.block, 'identical' if nbad == 0 else 'DIFFERS', nbad, n))
+        if nbad:
+            print('  The core must be independent of block size; it is not.')
+            return 1
 
     print('\n-- MAME vs U110Core --')
     a, b = read_wav(ref), read_wav(core)
