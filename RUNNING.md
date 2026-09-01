@@ -540,6 +540,92 @@ recompile.
 
 ---
 
+## No sound at all, and no error either
+
+If the machine runs, the LCD works, MIDI arrives, but **nothing comes out of any device**,
+check this before anything else:
+
+```sh
+grep -A3 sound_map mame/cfg/u110.cfg
+```
+
+A healthy config names an output:
+
+```xml
+<sound_map tag=":speaker">
+    <node_mapping node="o:UMC202HD 192k Analog Stereo" db="0.000000" />
+</sound_map>
+```
+
+A broken one is an empty element:
+
+```xml
+<sound_map tag=":speaker" />
+```
+
+That is silence, permanently, with **no warning and no diagnostic**. `-verbose` still reports
+`Audio: Driver is pulseaudio` and `Starting Speaker ':speaker'`, because the audio system
+really did start — it just has nowhere to send anything.
+
+**The fix is Tab → Sound Mixer**, and assign the speaker to a device by name. Do not try to
+hand-edit the node in: MAME uses its *own* node names with an `o:` prefix for outputs
+(`o:UMC202HD 192k Analog Stereo`), not the PulseAudio sink name
+(`alsa_output.usb-BEHRINGER_UMC202HD_192k_...`), and a name it cannot resolve is silently
+discarded. The menu is the only place that writes a name MAME will accept.
+
+### Why it happens, and why it stays broken
+
+Three pieces of `src/emu/sound.cpp`, in order:
+
+1. **A named node that no longer exists is deleted from the config.** When the mapping is
+   resolved, `find_node()` returns 0 for a name it cannot match and the entry is queued into
+   `node_to_remove`; the mapping is erased and the now-empty `<sound_map>` is written back on
+   exit. Renumbering your audio hardware is enough to trigger this — a USB interface that was
+   `hw:0,0` before a reboot and `hw:1,0` after will not match the saved name.
+
+2. **An empty entry is not the same as no entry.** `startup_cleanups()` adds a default
+   mapping only for a speaker with *no configuration entry at all*:
+
+   ```cpp
+   auto default_one = [this](sound_io_device &dev) {
+       for(const auto &config : m_configs)
+           if(config.m_name == dev.tag())
+               return;                    // an entry exists, even an empty one -> leave it
+       m_configs.emplace_back(config_mapping{ dev.tag() });
+       m_configs.back().m_node_mappings.emplace_back("", 0.0);
+   };
+   ```
+
+   An entry with zero mappings satisfies that test, so the default is never restored.
+
+3. **`node=""` means "follow the system default sink"**, and is honoured only
+   `if(m_osd_info.m_default_sink)`. So even a config that looks recovered can be inaudible if
+   the desktop's default sink is an output with nothing plugged into it — which is easy to
+   end up with on a machine with several HDA outputs plus an interface.
+
+Deleting `mame/cfg/u110.cfg` does restore a `node=""` mapping, and that is worth trying, but
+it only helps if your default sink is the device you are actually listening to. **A named
+mapping from the menu is the durable answer**, and it survives the default sink moving.
+
+`[I]` A named mapping does *not* survive the node name itself changing. If the interface is
+renumbered again, expect the same silent failure and the same fix.
+
+### Keep experiments away from it
+
+Any run that writes `mame/cfg/` can rewrite that mapping. Use a scratch config directory for
+anything experimental:
+
+```sh
+./u110 u110 -cfg_directory "$(mktemp -d)" ...
+```
+
+`tools/u110run.sh` already does this for every render, which is why batch work never disturbs
+the interactive setup. Renders through `-wavwrite` are also no test of this fault: that path
+is the pre-effects record buffer and never touches the output mapping, so a machine that
+writes perfect WAV files can still be completely silent live.
+
+---
+
 ## Audio and latency
 
 The machine holds exactly real time — measured at 100.00% both windowed and headless, at
