@@ -323,12 +323,24 @@ odd `<L>/<R>` modes 21-49.
 output count; `roland_u110.cpp` derives the mask from the Output Mode at RAM `0x280E` and sums
 the six buses to the MIX pair at the measured pan gains. See `IMPLEMENTATION-PLAN.md` §4.7b.
 
-`[I]` **Emulation gap.** The two LFO slots now exist in the device and run correctly against
-the real firmware, but nothing consumes them yet: there is no delay line and no tremolo
-multiply, so an effect mode still renders dry. What remains is the audio half -- a 2048-sample
-delay line tapped from slot `0x20`'s level, a gain from slot `0x21`'s, applied to Voice
-Group 1 -- and the three measurements a hardware capture has to supply first
-(`analysis/EFFECTS.md` §8).
+`[C]` **What the two LFOs do, measured** (`listen/hardware/effects`, the first capture of
+either effect). Both are **symmetric triangles**, advancing `2^(rate/8) * 4` per 32 kHz sample
+in each direction -- the *falling* constant both ways, which is not what a voice does and is
+the one open question left here. Chorus runs 0.42-1.73 Hz, tremolo 1.67-6.93 Hz.
+
+The **tremolo is an auto-pan**: one output takes the slot's level and the other its
+complement, so the pair sums to a constant. Depth 0-15 spans 0.4 to 30.1 dB, matching the
+target table to within the measurement.
+
+The **chorus is a delay line tapped at `level >> 14` samples** -- 1 to 32 ms of IC17's 64 ms
+-- with a tap in *each* output half an LFO period apart, mixed roughly 50/50 with the dry.
+Not a polarity flip: `L - R` cancels the dry by 32 dB while `L + R` leaves the wet almost
+untouched.
+
+`[I]` **Emulation gap.** The two LFO slots exist in the device and run correctly against the
+real firmware, but nothing consumes them yet: there is no delay line and no pan multiply, so
+an effect mode still renders dry. That audio half is all that remains, and it is now fully
+specified (`analysis/EFFECTS.md` §4, §8).
 
 ---
 

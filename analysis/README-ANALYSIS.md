@@ -24,5 +24,5 @@
 
 4. RECONSTRUCTION.md: Why the emulator was brighter than the hardware. Reconstruction images from playing decimated samples well below their stored rate, fixed with a quadratic B-spline interpolator (U110_RECON=1, now the default). Also carries the two spectral items still open, marimba and the output EQ.
 
-5. EFFECTS.md: Chorus and tremolo, decoded from the firmware and the ROM tables. Both are LFOs run on two extra slots of the same envelope ramp generator the voices use, and no factory patch enables either -- which is why no recording we had contained them. Written before any hardware capture existed, so the open questions at the end are the ones a capture has to answer. 
+5. EFFECTS.md: Chorus and tremolo, decoded from the firmware and the ROM tables. Both are LFOs run on two extra slots of the same envelope ramp generator the voices use, and no factory patch enables either -- which is why no recording we had contained them. The capture in listen/hardware/effects then settled all three of its open questions -- including one that came out against the prediction: the LFO is a symmetric triangle, not the sawtooth the voice ramp law implied. 
 

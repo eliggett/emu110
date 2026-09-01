@@ -1,0 +1,94 @@
+U-110 ENVELOPE capture (tools/capture_env.py)
+sample rate 48000, channels 2, duration 863.80 s, peak -7.4 dBFS
+notes on ch 1, patch changes on ch 16, part 0, device ID 15
+parameters saved before the run: level=127, velo_sens=15, env_attack=8, env_release=8
+
+Times are send times.  Measure real onsets from the audio.
+
+   3.667  -- scratch patch written (30 parameters) --
+   3.003  == fx_chorus_rate : CHORUS RATE 0-15, depth 7, tremolo off, organ ==
+   5.129  crate=0                      note  60 vel 100 hold 10.00s
+  17.852  crate=3                      note  60 vel 100 hold 10.00s
+  30.575  crate=7                      note  60 vel 100 hold 10.00s
+  43.298  crate=11                     note  60 vel 100 hold 10.00s
+  56.021  crate=15                     note  60 vel 100 hold 10.00s
+  71.701  -- scratch patch written (30 parameters) --
+  71.036  == fx_chorus_depth : CHORUS DEPTH 0-15, rate 7, tremolo off, organ ==
+  73.163  cdepth=0                     note  60 vel 100 hold 10.00s
+  85.886  cdepth=1                     note  60 vel 100 hold 10.00s
+  98.609  cdepth=4                     note  60 vel 100 hold 10.00s
+ 111.332  cdepth=7                     note  60 vel 100 hold 10.00s
+ 124.055  cdepth=11                    note  60 vel 100 hold 10.00s
+ 136.778  cdepth=15                    note  60 vel 100 hold 10.00s
+ 152.457  -- scratch patch written (30 parameters) --
+ 151.792  == fx_tremolo_rate : TREMO. RATE 0-15, depth 7, chorus off, organ ==
+ 153.919  trate=0                      note  60 vel 100 hold 10.00s
+ 166.642  trate=3                      note  60 vel 100 hold 10.00s
+ 179.365  trate=7                      note  60 vel 100 hold 10.00s
+ 192.088  trate=11                     note  60 vel 100 hold 10.00s
+ 204.812  trate=15                     note  60 vel 100 hold 10.00s
+ 220.491  -- scratch patch written (30 parameters) --
+ 219.826  == fx_tremolo_depth : TREMO. DEPTH 0-15, rate 7, chorus off, organ ==
+ 221.952  tdepth=0                     note  60 vel 100 hold 10.00s
+ 234.675  tdepth=1                     note  60 vel 100 hold 10.00s
+ 247.398  tdepth=4                     note  60 vel 100 hold 10.00s
+ 260.121  tdepth=7                     note  60 vel 100 hold 10.00s
+ 272.844  tdepth=11                    note  60 vel 100 hold 10.00s
+ 285.567  tdepth=15                    note  60 vel 100 hold 10.00s
+ 301.246  -- scratch patch written (30 parameters) --
+ 300.581  == fx_shape : sawtooth-or-triangle: long holds, one effect at a time, organ ==
+ 302.708  shape/chorus_7_7             note  60 vel 100 hold 25.00s
+ 330.446  shape/chorus_7_15            note  60 vel 100 hold 25.00s
+ 358.184  shape/chorus_0_7             note  60 vel 100 hold 25.00s
+ 385.922  shape/tremolo_7_7            note  60 vel 100 hold 25.00s
+ 413.660  shape/tremolo_7_15           note  60 vel 100 hold 25.00s
+ 441.398  shape/dry                    note  60 vel 100 hold 25.00s
+ 472.092  -- scratch patch written (30 parameters) --
+ 471.427  == fx_stereo : mode 21 <L31><R31> against mode 22 M31, same settings, organ ==
+ 473.553  stereo/chorus_wet            note  60 vel 100 hold 15.00s
+ 491.281  stereo/chorus_dry            note  60 vel 100 hold 15.00s
+ 509.009  stereo/tremolo_wet           note  60 vel 100 hold 15.00s
+ 526.737  stereo/tremolo_dry           note  60 vel 100 hold 15.00s
+ 544.465  stereo/both_wet              note  60 vel 100 hold 15.00s
+ 562.193  stereo/both_dry              note  60 vel 100 hold 15.00s
+ 582.877  -- scratch patch written (30 parameters) --
+ 582.212  == fx_tones_strings : wet against dry at 7/7/7/7, strings ==
+ 584.338  strings/dry                  note  60 vel 100 hold 12.00s
+ 599.063  strings/wet                  note  60 vel 100 hold 12.00s
+ 616.744  -- scratch patch written (30 parameters) --
+ 616.079  == fx_tones_choir : wet against dry at 7/7/7/7, choir ==
+ 618.206  choir/dry                    note  60 vel 100 hold 12.00s
+ 632.931  choir/wet                    note  60 vel 100 hold 12.00s
+ 650.614  -- scratch patch written (30 parameters) --
+ 649.947  == fx_tones_vib : wet against dry at 7/7/7/7, vib ==
+ 652.076  vib/dry                      note  60 vel 100 hold 12.00s
+ 666.802  vib/wet                      note  60 vel 100 hold 12.00s
+ 683.820  == fx_factory_p01 : P-01 Ac.Piano, stored 7/7/7/7, dry then wet ==
+ 685.332  P-01/n48/dry                 note  48 vel 100 hold 12.00s
+ 700.059  P-01/n60/dry                 note  60 vel 100 hold 12.00s
+ 714.785  P-01/n48/wet                 note  48 vel 100 hold 12.00s
+ 729.502  P-01/n60/wet                 note  60 vel 100 hold 12.00s
+ 746.518  == fx_factory_p31 : P-31 Strings, stored 4/6/5/0, dry then wet ==
+ 748.030  P-31/n48/dry                 note  48 vel 100 hold 12.00s
+ 762.755  P-31/n60/dry                 note  60 vel 100 hold 12.00s
+ 777.480  P-31/n48/wet                 note  48 vel 100 hold 12.00s
+ 792.205  P-31/n60/wet                 note  60 vel 100 hold 12.00s
+ 809.221  == fx_factory_p14 : P-14 Marimba, stored 4/3/5/4, dry then wet ==
+ 810.733  P-14/n48/dry                 note  48 vel 100 hold 12.00s
+ 825.458  P-14/n60/dry                 note  60 vel 100 hold 12.00s
+ 840.183  P-14/n48/wet                 note  48 vel 100 hold 12.00s
+ 854.909  P-14/n60/wet                 note  60 vel 100 hold 12.00s
+
+segments
+  01_fx_chorus_rate.wav            3.003 ..   68.534
+  02_fx_chorus_depth.wav          71.036 ..  149.290
+  03_fx_tremolo_rate.wav         151.792 ..  217.324
+  04_fx_tremolo_depth.wav        219.826 ..  298.079
+  05_fx_shape.wav                300.581 ..  468.925
+  06_fx_stereo.wav               471.427 ..  579.710
+  07_fx_tones_strings.wav        582.212 ..  613.577
+  08_fx_tones_choir.wav          616.079 ..  647.445
+  09_fx_tones_vib.wav            649.947 ..  681.317
+  10_fx_factory_p01.wav          683.820 ..  744.016
+  11_fx_factory_p31.wav          746.518 ..  806.719
+  12_fx_factory_p14.wav          809.221 ..  869.423

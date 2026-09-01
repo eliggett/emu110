@@ -124,82 +124,57 @@ the firmware clears the enable bit and never starts the LFO at all.
 
 ---
 
-## 4. What that comes out as `[I]`
+## 4. What that comes out as `[C]`
 
-Applying the ramp law the voices already use — level is **linear amplitude** in a 2^26 scale,
-`level(L) = 2^26 * 2^((L-255)/16)`, a rising ramp adds `2^(rate/8) << 6` per 32 kHz sample and
-a falling one subtracts `2^(rate/8) << 2` (`ENV_FALL_DIVISOR`, measured at 15.0-15.7x on the
-release sweep) — the tables give this:
+The level is linear amplitude on a 2^26 scale, `level(L) = 2^26 * 2^((L-255)/16)`, and the
+ramp advances by `2^(rate/8) * 4` per 32 kHz sample.
 
-```
-LFO frequency, Hz          rate ->
-                 0     1     2     3     4     5     6     7     8     9    10    11    12    13    14    15
-chorus   d= 1  0.79  0.86  0.94  1.02  1.11  1.21  1.32  1.44  1.57  1.72  1.87  2.04  2.23  2.43  2.65  2.89
-chorus   d= 4  0.86  0.94  1.02  1.11  1.22  1.33  1.45  1.58  1.72  1.87  2.04  2.23  2.43  2.65  2.89  3.15
-chorus   d= 7  0.89  0.97  1.06  1.15  1.26  1.37  1.50  1.63  1.78  1.94  2.12  2.31  2.52  2.74  2.99  3.26
-chorus   d=11  0.86  0.94  1.02  1.12  1.22  1.33  1.45  1.58  1.72  1.88  2.05  2.23  2.44  2.66  2.90  3.16
-chorus   d=15  0.87  0.95  1.03  1.13  1.23  1.34  1.46  1.60  1.74  1.90  2.07  2.26  2.46  2.68  2.93  3.19
-tremolo  d= 1  3.15  3.43  3.75  4.08  4.45  4.86  5.30  5.78  6.30  6.87  7.49  8.17  8.91  9.72 10.59 11.55
-tremolo  d= 4  3.44  3.75  4.09  4.46  4.86  5.30  5.78  6.30  6.88  7.50  8.18  8.92  9.72 10.60 11.56 12.61
-tremolo  d= 7  3.56  3.88  4.23  4.61  5.03  5.49  5.98  6.52  7.12  7.76  8.46  9.23 10.06 10.97 11.97 13.05
-tremolo  d=11  3.44  3.76  4.10  4.47  4.87  5.31  5.79  6.32  6.89  7.51  8.19  8.93  9.74 10.62 11.58 12.63
-tremolo  d=15  3.48  3.80  4.14  4.51  4.92  5.37  5.85  6.38  6.96  7.59  8.28  9.03  9.84 10.73 11.71 12.77
+`[C]` **That scale is 4 in BOTH directions, which is not what the voices do.**  A voice's
+rising ramp adds `2^(rate/8) << 6` and its falling one subtracts `2^(rate/8) << 2`, a
+measured 16:1 asymmetry (`ENV_FALL_DIVISOR`).  Carried over to these slots it predicts a
+sawtooth of duty 1/17.  **The hardware makes a symmetric triangle** -- measured duty 0.47 to
+0.54 over the whole tremolo sweep -- and fitting the scale to the measured half-periods gives
+3.95 to 4.29 across eighteen trials spanning a 44:1 range of period.  So the LFO slots ramp
+at the FALLING constant whichever way they are going.  Section 8 has the measurement.
 
-depth ->                  0      1      2      3      4      5      6      7      8      9     10     11     12     13     14     15
-tremolo swing, dB       0.4    1.5    2.6    3.8    4.9    6.0    7.1    8.3    9.4   11.3   13.2   15.1   16.9   20.3   23.7   30.1
-chorus delay, ms    
-   shortest            8.00   7.34   6.73   6.17   5.66   5.19   4.76   4.36   4.00   3.36   2.83   2.38   2.00   1.41   1.00   0.50
-   longest             8.35   8.72   9.11   9.51   9.93  10.37  10.83  11.31  11.81  12.34  12.88  13.45  14.05  14.67  15.32  16.00
-```
-
-`[C]` **Confirmed in the emulator against all four tables.**  With the output mode set to 21
-the firmware programs both slots and turns them round on its own; timing the interval between
-arrivals gives, for the five rate settings of each sweep:
+`[I]` Why the two differ is open.  The obvious lead is the mode register: the firmware writes
+`00`/`01` = 0 for these slots and something quite different for a voice, so a bit there may
+select the rate scale.  It is also possible the voices' asymmetry is not really about
+direction at all and only correlates with it, in which case this is the counter-example that
+says so.
 
 ```
-                 measured  predicted                    measured  predicted
-  chorus rate 0    0.889 Hz    0.889     tremolo rate 0   3.557 Hz    3.558
-              3    1.153       1.153                  3   4.614       4.614
-              7    1.631       1.631                  7   6.523       6.525
-             11    2.307       2.307                 11   9.225       9.228
-             15    3.262       3.262                 15  13.040      13.050
+LFO frequency, Hz                        rate ->
+                    0     1     2     3     4     5     6     7     8     9    10    11    12    13    14    15
+  chorus  depth  1   0.42  0.46  0.50  0.54  0.59  0.65  0.70  0.77  0.84  0.91  0.99  1.09  1.18  1.29  1.41  1.53
+  chorus  depth  4   0.46  0.50  0.54  0.59  0.65  0.70  0.77  0.84  0.91  1.00  1.09  1.18  1.29  1.41  1.54  1.67
+  chorus  depth  7   0.47  0.52  0.56  0.61  0.67  0.73  0.79  0.87  0.95  1.03  1.12  1.23  1.34  1.46  1.59  1.73
+  chorus  depth 11   0.46  0.50  0.54  0.59  0.65  0.71  0.77  0.84  0.91  1.00  1.09  1.19  1.29  1.41  1.54  1.68
+  chorus  depth 15   0.46  0.50  0.55  0.60  0.65  0.71  0.78  0.85  0.92  1.01  1.10  1.20  1.31  1.43  1.55  1.70
+  tremolo depth  1   1.67  1.82  1.99  2.17  2.37  2.58  2.81  3.07  3.35  3.65  3.98  4.34  4.73  5.16  5.63  6.14
+  tremolo depth  4   1.83  1.99  2.17  2.37  2.58  2.82  3.07  3.35  3.65  3.98  4.34  4.74  5.17  5.63  6.14  6.70
+  tremolo depth  7   1.89  2.06  2.25  2.45  2.67  2.91  3.18  3.47  3.78  4.12  4.50  4.90  5.35  5.83  6.36  6.93
+  tremolo depth 11   1.83  2.00  2.18  2.37  2.59  2.82  3.08  3.36  3.66  3.99  4.35  4.75  5.17  5.64  6.15  6.71
+  tremolo depth 15   1.85  2.02  2.20  2.40  2.61  2.85  3.11  3.39  3.70  4.03  4.40  4.80  5.23  5.70  6.22  6.78
+
+depth ->                0      1      2      3      4      5      6      7      8      9     10     11     12     13     14     15
+tremolo pan, dB       0.4    1.5    2.6    3.8    4.9    6.0    7.1    8.3    9.4   11.3   13.2   15.1   16.9   20.3   23.7   30.1
+chorus delay, ms
+   shortest         16.00  14.67  13.45  12.34  11.31  10.37   9.51   8.72   8.00   6.73   5.66   4.76   4.00   2.83   2.00   1.00
+   longest          16.71  17.45  18.22  19.03  19.87  20.75  21.67  22.63  23.63  24.68  25.77  26.91  28.10  29.34  30.64  32.00
 ```
 
-Those frequencies come out of the same ramp law the prediction uses, so that much is
-consistency, not proof.  What is not circular, and is now settled: which slot each effect
-uses, which of the four tables each reads, that the segment words are indexed by DEPTH and
-offset by RATE, that the firmware alternates them into a two-level cycle, that changing depth
-mid-note retargets the running LFO, and that the config byte reaches register `0x1D` carrying
-exactly the bits the `0xA726` table predicts -- `0x1E` for mode 21, `0x00` for mode 22, `0x1C`
-when tremolo depth is zeroed (chorus only) and `0x16` when chorus depth is (tremolo only).
-What hardware still has to settle is the LFO's shape in time, and through it the real
-frequency scale.
+`[C]` **The chorus delay tap is the level shifted right by 14** -- `2^26` maps to 4096
+samples, so the reachable range is 0 to 128 ms and the tables use 1 to 32 ms of it.  Measured
+from the pitch sidebands at five different depth and rate settings, which give 13.90 to 13.96.
+The targets are chosen to land on round sample counts: log level 143 is `2^19` -> 32 samples,
+207 is `2^23` -> 512, and 223 is `2^24` -> 1024.
 
-**Why this is more than a guess.**  At a fixed RATE the frequency barely moves as DEPTH
-changes — tremolo at rate 7 runs 6.15 to 6.90 Hz across depths 2-15, chorus at rate 7 runs
-1.54 to 1.73 Hz.  That is a designer choosing rate bytes so that changing the excursion does
-not change the speed, and it only comes out flat if the level law and the rate law are both
-right.  Substituting a log-domain ramp instead spreads the same numbers over 1.75:1.  The
-resulting ranges are also the right ones: **chorus 0.65-3.2 Hz, tremolo 2.6-12.8 Hz,
-tremolo swing 0.4-30 dB.**
-
-`[I]` **The chorus delay tap.**  The delay column above assumes the tap is the slot's linear
-level shifted right by 15, i.e. `2^26 -> 2048` samples.  That is one free constant and it is
-the one thing here with no evidence behind it.  It is an attractive guess: it puts depth 0 at
-8.00-8.35 ms and depth 15 at exactly 0.50-16.00 ms, which are 256/267 and 16/512 samples,
-round numbers falling out of targets that are exact powers of two (`2^-7` and `2^-2` of full
-scale).  A shift of 14 or 13 would give 1-32 ms or 2-64 ms and use more of the 2048-byte
-SRAM.  **Section 7 has a one-measurement way to settle it.**
-
-`[I]` **The LFO shape is a sawtooth, not a triangle.**  Rising and falling ramps use the same
-rate byte magnitude, but the hardware's falling ramps move 16x slower, so the cycle is 1/17
-rise and 16/17 fall — for chorus at depth 7 rate 7, 36 ms up and 577 ms down.  In delay terms
-that is a slow steady sweep giving a near-constant pitch offset (about +21 cents), punctuated
-by a fast return.  A steady pitch offset over most of the cycle would show up as a **doublet**
-in the spectrum rather than a smear, which is a sharp, falsifiable prediction.  This is the
-biggest single unknown and the first thing a hardware capture should look at.
-
----
+**Why the tables are more than a guess.**  At a fixed RATE the frequency barely moves as
+DEPTH changes -- tremolo at rate 7 runs 3.36 to 3.47 Hz across depths 4-15, chorus at rate 7
+runs 0.84 to 0.87 Hz.  That is a designer choosing rate bytes so that changing the excursion
+does not change the speed, and it only comes out flat if the level law and the rate law are
+both right.  Substituting a log-domain ramp spreads the same numbers over 1.75:1.
 
 ## 5. No factory patch turns them on `[C]`
 
@@ -286,24 +261,132 @@ config byte reaches the intended value at every one of its trials.
 `tools/dump_patch.lua` prints the edit buffer during an emulator run, which is how both of
 those were checked.
 
-## 8. Open questions, in the order they should be settled
+## 8. What the hardware says `[C]`
 
-1. **`[open]` LFO shape — sawtooth or triangle?**  Predicted 1/17 duty.  A sustained tone
-   through mode 21 with chorus depth 7 should show a *doublet* about 21 cents wide if the
-   sawtooth reading is right, and a smeared, symmetrically swept partial if it is a triangle.
-   One capture answers it.
-2. **`[open]` The chorus delay tap shift.**  During the slow phase the delay changes at a
-   constant rate, so the pitch ratio is constant.  Measure that ratio r on a sustained tone;
-   the swing in samples is `(r-1) * 32000 * t_fall`, and `t_fall` is known from the LFO period
-   in the same recording.  That pins the shift with no other assumption.
-3. **`[open]` How the wet signal becomes stereo.**  The manual promises "spacious stereo".
-   The likely arrangement is `L = dry + wet, R = dry - wet` — check whether `L+R` from a
-   chorused capture is comb-free.  Whether the tremolo is also antiphase between L and R
-   (i.e. an auto-pan) is the same measurement on the envelope.
-4. **`[open]` Whether the delay line's 8-bit width is audible.**  IC17 is 8 bits wide, so the
-   delayed copy is stored at 8 bits — very likely through the same companding curve the wave
-   ROM uses, which IC15 already has a decoder for.  Worth modelling only if a capture shows
-   the wet path is noisier than the dry one.
-5. **`[open]` Registers `0x19` and `0x1B`.**  Written `0x00` and `0x21` here and at the
+`listen/hardware/effects`, captured 2026-09-01 with `capture_env.py --set effects`.  The
+first recording of either effect that exists.  Everything below is a ratio, a frequency or a
+duty cycle, so the session's higher interface gain does not enter into any of it.
+
+Three questions went in.  All three are answered, and the first one answered against me.
+
+### The LFO is a symmetric TRIANGLE, not a sawtooth
+
+Tremolo rate 7 depth 15, 71 cycles averaged: period 275 ms, trough to peak in 134 ms.  **Duty
+0.487.**  Across the whole tremolo sweep the duty runs 0.47 to 0.54.  The predicted sawtooth
+was 0.059.
+
+The shape in dB rises fast and flattens, which is what a ramp linear in AMPLITUDE looks like
+plotted in dB -- so the level law is confirmed even as the rate law is corrected.
+
+Fitting `scale` in `dLevel / (halfPeriod * 32000) / 2^(rate/8)` to each trial:
+
+```
+  tremolo rate sweep    3.956  4.029  3.973  3.954  4.194
+  tremolo depth sweep          4.112  3.973  4.105  4.288      (depths 4,7,11,15)
+  chorus  rate sweep    3.954  4.026  3.954  4.026
+  chorus  depth sweep   4.085  4.026  4.187  4.287
+```
+
+Constant at **4.0**, which is `ENV_RATE_SCALE / ENV_FALL_DIVISOR` = 64/16 exactly.  With that
+one change the frequency table above lands within 1.5% of measurement:
+
+```
+  rate            0      3      7     11     15
+  chorus  meas    -   0.606  0.872  1.211  1.744 Hz      (rate 0 too slow for a 10 s note)
+          pred  0.473  0.613  0.867  1.226  1.733
+  tremolo meas  1.869  2.469  3.443  4.845  7.269 Hz
+          pred  1.890  2.451  3.466  4.902  6.933
+```
+
+### The tremolo is an AUTO-PAN
+
+L and R modulate in antiphase: their envelope cross-correlation peaks at half the LFO period,
+and the SUM does not move with depth at all -- 8.9 dB of the organ's own ripple at depth 7 and
+the same 8.9 dB at depth 15, while each channel alone goes from 14.9 to 30.9 dB.
+
+So one channel takes the slot's level `g` and the other takes `A_hi + A_lo - g`, which for a
+symmetric triangle is the same waveform half a period later and sums to a constant.  The
+"spacious stereo effects" of the manual is literal.
+
+Measuring the pan ratio `L/(L+R)` cancels the tone's own level exactly, and it lands on the
+target table almost dead on:
+
+```
+  depth   targets    measured g/C      predicted g/C     swing meas  pred
+    0    240/239   0.4991..0.5012   0.4892..0.5108        0.0 dB    0.4
+    1    241/237   0.4696..0.5464   0.4568..0.5432        1.3       1.5
+    4    244/231   0.3775..0.6384   0.3628..0.6372        4.6       4.9
+    7    247/225   0.2854..0.7303   0.2783..0.7217        8.2       8.3
+   11    251/211   0.1626..0.8452   0.1502..0.8498       14.3      15.1
+   15    255/175   0.0396..0.9617   0.0303..0.9697       27.7      30.1
+```
+
+The shortfall at the ends is a percentile reading a momentary peak.  Depth 0 sits dead centre
+and does not move at all, confirming that the firmware really does switch the effect off
+rather than run a tiny one.
+
+### The chorus delay tap is `level >> 14`
+
+A sustained partial splits into a symmetric **triplet** -- the dry line plus two shifted
+copies, one from each ramp.  Harmonic 8 of note 60, chorus rate 7 depth 7: lines at -44.5,
++0.3 and +43.9 cents.
+
+That the two sidebands are not equal in cents is itself the proof this is a delay and not a
+pair of detuned voices.  A delay slope `s` gives ratios `1+s` and `1-s`, which in cents are
+`+1200*log2(1+s)` and `-1200*log2(1-s)` -- unequal by exactly the curvature of the log.  At
+depth 15 the measured pair is +92.6 / -96.9 cents, which solves to s = 0.05506 and 0.05481.
+
+Converting the slope to a delay swing and dividing into the level swing:
+
+```
+  trial              cents    half period    swing, samples      k
+  depth 7  rate 7    43.9        577 ms          474.9        13.91
+  depth 7  rate 0    23.7       1043 ms          457.7        13.96
+  depth 4  rate 7    25.0        604 ms          280.9        13.96
+  depth 11 rate 7    67.5        596 ms          757.7        13.90
+  depth 15 rate 7    94.7        590 ms         1060.6        13.90
+```
+
+**k = 14** across a 3.6:1 range of depth and 1.8:1 of rate.  The residual 0.06 is inside the
+4% spread of the scale fit.  It is corroborated by the targets themselves being powers of
+two once shifted: 32, 512 and 1024 samples.
+
+### The chorus is two taps, not a polarity flip
+
+`L - R` kills the unshifted carrier by 32 dB, so the dry signal is common to both channels.
+But `L + R` only reduces the sidebands by 4 dB, so the wet signal is NOT simply inverted in
+one channel -- an inversion would have cancelled it just as completely.  Both channels carry
+a delayed copy, and the two taps are half an LFO period apart, which is the same relationship
+the tremolo has.  One LFO, and the right channel uses its complement.
+
+Sideband energy relative to the carrier, chorus rate 7 depth 7, gain-matched (the capture's
+own channel imbalance is -0.13 dB and the channels null to -57 dB on a dry trial):
+
+```
+                      L      L+R     L-R
+  chorus wet       -2.9     -6.9    21.0 dB
+  chorus dry      -15.5    -15.5     0.7 dB
+```
+
+At -2.9 dB relative to the carrier the wet copy is roughly as loud as the dry one, so the mix
+is near enough 50/50.
+
+`[open]` Nothing here measures the delay line's 8-bit width or any feedback path.  The
+sideband clusters are clean and no second-order lines appear at 2x the offset, so there is no
+obvious regeneration.
+
+## 9. Open questions, in the order they should be settled
+
+1. **`[open]` Why the LFO slots ramp symmetrically and the voices do not.**  Section 4.  The
+   mode register is the lead.  This matters beyond the effects: if the voices' 16:1 asymmetry
+   is not really about direction, `ENV_FALL_DIVISOR` is modelling the wrong thing.
+2. **`[open]` Whether the delay line's 8-bit width is audible.**  IC17 is 8 bits wide, so the
+   delayed copy is stored at 8 bits, very likely through the same companding curve the wave
+   ROM uses -- IC15 already has a decoder for it.  Worth modelling only if a measurement shows
+   the wet path noisier than the dry one; nothing in this capture says it is.
+3. **`[open]` What the other three effect config bits do.**  Bit 4 is set on every effect mode
+   and bits 2, 5 and 6 vary with the group sizes, so they are probably routing rather than
+   effect parameters.
+4. **`[open]` Registers `0x19` and `0x1B`.**  Written `0x00` and `0x21` here and at the
    `0x43DA` init, never anything else.  Reading them as the slot scan range is a guess that
    fits `m_env_slots = 0x22` but has no evidence.

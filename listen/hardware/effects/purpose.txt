@@ -1,0 +1,7 @@
+First hardware capture of the U-110's chorus and tremolo.  No factory patch enables either
+effect, so nothing before this recording contained them; every trial here writes the OUTPUT
+MODE explicitly to 21 (wet) or 22 (dry) along with all four effect parameters.
+
+It settled three things: the LFO is a symmetric triangle (not the sawtooth the voice ramp law
+predicted), the tremolo is an auto-pan whose sum is unmodulated, and the chorus delay tap is
+the LFO level shifted right by 14, giving 1 to 32 ms.  See analysis/EFFECTS.md section 8.

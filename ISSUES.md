@@ -11,23 +11,25 @@ There might still be some discrepancies in the envelope, but they are quite smal
 There is an unexplained decrease in legit harmonic content at around 10 KHz. Since I don't hear there that well, I'm ok to let it go. 
 
 ## Chorus and Tremolo (see analysis/EFFECTS.md)
-Not implemented yet.  The firmware side is now fully decoded: both effects are LFOs run on
-ramp-generator slots 0x20 and 0x21, and the rate/depth tables are read out of the ROM.  Two
-things stand in the way of building it:
+Not implemented yet, but fully specified.  The device now carries the two LFO slots and runs them correctly against the real firmware.
+`listen/hardware/effects` is the first recording of either effect that exists -- no factory
+patch enables them, so hearing one at all needs `PATCH:COM:OUT #` set to an odd mode 21-49.
+The specification is now complete and measured:
 
-- **No hardware recording of the effects exists.**  Every factory patch selects a dry output
-  mode, so nothing in `listen/hardware/` has chorus or tremolo in it.  Hearing them at all
-  needs `PATCH:COM:OUT #` set to an odd mode in 21-49.  Section 5.
-- **Two unknowns need one capture each**: whether the LFO is the predicted 1/17-duty sawtooth,
-  and the shift that turns the chorus LFO level into a delay-line tap.  Section 8.
+- **LFO**: a symmetric triangle on ramp slots 0x20 (chorus) and 0x21 (tremolo), advancing
+  `2^(rate/8) * 4` per 32 kHz sample in BOTH directions.  Chorus 0.42-1.73 Hz, tremolo
+  1.67-6.93 Hz.  Depth 0 means the effect is off, not shallow.
+- **Tremolo** is an auto-pan: one channel gets the slot's level, the other its complement,
+  so the sum does not move.  0.4 to 30.1 dB of pan across the depth range.
+- **Chorus** is a delay tapped at `level >> 14` samples, 1 to 32 ms, with a tap in EACH
+  channel half an LFO period apart and a roughly 50/50 wet/dry mix.
 
-The capture set is written and validated against the emulator:
-`python3 tools/capture_env.py --set effects`, 52 trials, about 15 minutes.  It dictates every
-parameter it depends on, including the OUTPUT MODE (SysEx patch-common offset 0x18), rather
-than inheriting anything.  Section 7.
+What is left is the audio half: a 2048-sample delay line and the pan multiply, applied to
+Voice Group 1.  Sections 4 and 8.
 
-Done: the device now carries the two LFO slots and runs them (they were aliasing onto voices
-0 and 1 through a five-bit slot mask).  Section 6.
+Still open: why these slots ramp symmetrically when the voices are 16:1 asymmetric.  That is
+not just an effects question -- if the voices' asymmetry is not really about ramp direction,
+`ENV_FALL_DIVISOR` is modelling the wrong thing.  Section 9.
 
 ## MIDI output:
 There is not any MIDI output right now. MIDI through need not be implemented -- the OS or DAW can handle that.
