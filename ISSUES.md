@@ -10,8 +10,24 @@ There might still be some discrepancies in the envelope, but they are quite smal
 ## Harmonic content: 
 There is an unexplained decrease in legit harmonic content at around 10 KHz. Since I don't hear there that well, I'm ok to let it go. 
 
-## Chrous and Tremelo: 
-Chorus and tremelo are not implemented yet. We'll add these soon. 
+## Chorus and Tremolo (see analysis/EFFECTS.md)
+Not implemented yet.  The firmware side is now fully decoded: both effects are LFOs run on
+ramp-generator slots 0x20 and 0x21, and the rate/depth tables are read out of the ROM.  Two
+things stand in the way of building it:
+
+- **No hardware recording of the effects exists.**  Every factory patch selects a dry output
+  mode, so nothing in `listen/hardware/` has chorus or tremolo in it.  Hearing them at all
+  needs `PATCH:COM:OUT #` set to an odd mode in 21-49.  Section 5.
+- **Two unknowns need one capture each**: whether the LFO is the predicted 1/17-duty sawtooth,
+  and the shift that turns the chorus LFO level into a delay-line tap.  Section 8.
+
+The capture set is written and validated against the emulator:
+`python3 tools/capture_env.py --set effects`, 52 trials, about 15 minutes.  It dictates every
+parameter it depends on, including the OUTPUT MODE (SysEx patch-common offset 0x18), rather
+than inheriting anything.  Section 7.
+
+Done: the device now carries the two LFO slots and runs them (they were aliasing onto voices
+0 and 1 through a five-bit slot mask).  Section 6.
 
 ## MIDI output:
 There is not any MIDI output right now. MIDI through need not be implemented -- the OS or DAW can handle that.

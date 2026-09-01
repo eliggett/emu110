@@ -451,6 +451,22 @@ Two things worth knowing:
 - This is a patch parameter, so it reverts when you change patches unless you save it with
   **PATCH → WRT**.
 
+## Chorus and tremolo — you have to ask for them
+
+Neither effect is reachable from any factory patch. The enable bits are not in the patch's
+chorus/tremolo bytes at all; they live in a config byte the firmware looks up from the
+**Output Mode**, and only the odd `<L>/<R>` modes — 21, 23, 25 … 49 — have them set. All 64
+factory patches choose a dry mode, so `Ac.Piano`'s stored `CHORUS RATE 7 / DEPTH 7 / TREMO.
+RATE 7 / DEPTH 7` does nothing whatever until the mode is moved.
+
+To hear it, set **PATCH → COMMON → OUT** to **21**. That is the same page as the routing table
+above; mode 21 is `<L31> <R31>` and mode 22 is `M31`, the dry, centred version of the identical
+routing, which makes the pair a clean A/B. Over SysEx the parameter is patch-common offset
+`0x18`, carrying the mode number **minus one** — send 20 for mode 21.
+
+The device currently runs both LFOs but nothing consumes them, so the emulator still renders
+dry either way; `analysis/EFFECTS.md` has the decode and what is left to build.
+
 ## Output gain
 
 The U-110 is a quiet machine. Its firmware asks the sound chip for a sustain level of `0xDB`

@@ -18,5 +18,11 @@
 
 1. SYSTEM-DESIGN.md: Explains the design of the system, largly based on looking through the service manual (which is in the reference directory). Each time we discover something about the design (especially the mystery chips), this document is updated. 
 
-2. ROM-ANALYSIS.md: Explains how the ROM is organized. Because this is a "working document", there is a massive "9. Corrections log" section. I should probably re-write this at some point. 
+2. ROM-ANALYSIS.md: Explains how the ROM is organized. Because this is a "working document", there is a massive "9. Corrections log" section. I should probably re-write this at some point.
+
+3. ENVELOPE-DECAY.md: The hunt for the A. Piano decay fault. The chip was offering the CPU more interrupts than it had arrivals, so the second layer of the V-MIX was handed an envelope segment it never asked for. Solved; kept because the eliminated-hypothesis table is the useful part.
+
+4. RECONSTRUCTION.md: Why the emulator was brighter than the hardware. Reconstruction images from playing decimated samples well below their stored rate, fixed with a quadratic B-spline interpolator (U110_RECON=1, now the default). Also carries the two spectral items still open, marimba and the output EQ.
+
+5. EFFECTS.md: Chorus and tremolo, decoded from the firmware and the ROM tables. Both are LFOs run on two extra slots of the same envelope ramp generator the voices use, and no factory patch enables either -- which is why no recording we had contained them. Written before any hardware capture existed, so the open questions at the end are the ones a capture has to answer. 
 

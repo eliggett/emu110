@@ -104,6 +104,9 @@ def main():
         if hasattr(seq, 'SCRATCH'):
             sets['scratch'] = seq.SCRATCH
             sets['all'] = sets['all'] + seq.SCRATCH
+        if hasattr(seq, 'EFFECTS'):
+            sets['effects'] = seq.EFFECTS
+            sets['all'] = sets['all'] + seq.EFFECTS
         segs = sets[args.set]
     if args.only:
         # Filter what --set already chose, NOT seq.SEGMENTS: filtering the module's default

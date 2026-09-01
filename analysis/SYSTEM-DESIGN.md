@@ -303,17 +303,32 @@ TREMO. RATE, TREMO. DEPTH**. Eleven distinct combinations across the 64 factory 
 Ac.Piano `07 07 07 07`, Wide Piano `07 03 00 00` (tremolo off), Fantasy `03 01 04 0F`. They are
 written once when the patch loads.
 
-`[I]` Where they land in IC15's register window is not settled. Registers `19` and `1B` are
-constant across patches (`00`, `21`); `1D` varies (Fantasy `20`, Wide Piano `60`, Ac.Piano
-`00`) but does not map obviously onto the four parameter bytes.
+`[C]` **Where they land in IC15's register window is now settled**, and the answer is that
+they mostly do not: the four bytes are turned into ramp-generator segments in software. The
+patch-load routine at `0xB4C6` indexes two 16-entry tables per effect by DEPTH, offsets the
+rate byte by RATE, and programs the result into **slots `0x20` and `0x21`** -- two more slots
+of the same envelope ramp generator the 32 voices use. `0x20` is chorus, `0x21` tremolo. The
+interrupt handler turns each one round at its target, so the LFO is the ramp generator run
+back and forth. Register `1D` is not a parameter at all: it is a config byte the firmware
+looks up from the **OUTPUT MODE** (`0xA726 + 8*index`), and bits 1 and 3 are what enable
+tremolo and chorus. Registers `19` and `1B` really are constant. Full decode, tables and all,
+in `analysis/EFFECTS.md`.
+
+`[C]` **No factory patch turns either effect on.** All 64 select an output mode whose config
+byte has both bits clear, which is why every recording in `listen/hardware/` is dry and why
+the stored `07 07 07 07` on Ac.Piano does nothing. The effects reach the outputs only in the
+odd `<L>/<R>` modes 21-49.
 
 `[C]` **Implemented.** `roland_lp.cpp` gained a per-voice output mask and a selectable
 output count; `roland_u110.cpp` derives the mask from the Output Mode at RAM `0x280E` and sums
 the six buses to the MIX pair at the measured pan gains. See `IMPLEMENTATION-PLAN.md` §4.7b.
 
-`[I]` **Emulation gap.** MAME's device has no effect section at all, so chorus and tremolo
-patches render dry. Modelling them means adding an LFO plus a ~64 ms delay line to the device,
-driven by these four parameters.
+`[I]` **Emulation gap.** The two LFO slots now exist in the device and run correctly against
+the real firmware, but nothing consumes them yet: there is no delay line and no tremolo
+multiply, so an effect mode still renders dry. What remains is the audio half -- a 2048-sample
+delay line tapped from slot `0x20`'s level, a gain from slot `0x21`'s, applied to Voice
+Group 1 -- and the three measurements a hardware capture has to supply first
+(`analysis/EFFECTS.md` §8).
 
 ---
 

@@ -122,6 +122,19 @@ P_LFO_CHPRESS  = 0x14
 C_CHORUS_RATE, C_CHORUS_DEPTH   = 0x19, 0x1A
 C_TREMOLO_RATE, C_TREMOLO_DEPTH = 0x1B, 0x1C
 
+# OUTPUT MODE, and it is the parameter that decides whether the effects exist at all: the
+# enable bits are not in the chorus/tremolo bytes but in a config byte the firmware selects
+# with this one (0xA726 + 8*index), and only the odd L/R modes 21-49 set them.  Every
+# factory patch picks a dry mode, so nothing recorded before this existed has an effect in
+# it.  See analysis/EFFECTS.md.
+#
+# The Owner's Manual address map OCRs too badly to read here, so the offset was found the
+# way the part offsets were: write a distinctive value to each candidate and see where it
+# lands in the edit buffer.  0x14..0x18 -> 0x2800..0x2803 and 0x280E, so 0x18 is the one.
+# On the WIRE it is the mode number minus one, exactly as stored: 20 selects mode 21.
+C_OUTPUT_MODE = 0x18
+FX_MODE_WET, FX_MODE_DRY = 20, 21       # mode 21 <L31><R31>, mode 22 M31 -- the manual's pair
+
 PARAM_NAMES = {P_TONE_MEDIA: 'tone_media', P_TONE: 'tone', P_LEVEL: 'level',
                P_VELO_SENS: 'velo_sens', P_ENV_ATTACK: 'env_attack',
                P_ENV_RELEASE: 'env_release'}
@@ -144,8 +157,21 @@ def env_val(display):
 # `params` is written as DT1 to the part just before the note.  `tag` is what ends up in
 # trials.csv, so make it say what the trial varies.
 
-def _trial(note, vel, hold, gap, tag, params):
-    return dict(note=note, vel=vel, hold=hold, gap=gap, tag=tag, params=params)
+def _trial(note, vel, hold, gap, tag, params, common=None):
+    return dict(note=note, vel=vel, hold=hold, gap=gap, tag=tag, params=params,
+                common=common or {})
+
+
+def common_order(d):
+    """Patch-common writes in the order they must be sent.
+
+    Writing ANY of the five effect parameters makes the firmware re-run its effect setup
+    (0xB4C6) against whatever the other four currently hold -- confirmed in the emulator,
+    where changing tremolo depth alone retargeted the running LFO mid-note.  So OUTPUT MODE
+    goes LAST: whatever order the rest arrive in, the final setup is then run against a
+    complete, intended set rather than a half-updated one."""
+    rest = [(o, d[o]) for o in sorted(d) if o != C_OUTPUT_MODE]
+    return rest + ([(C_OUTPUT_MODE, d[C_OUTPUT_MODE])] if C_OUTPUT_MODE in d else [])
 
 
 # Tones chosen for different envelope characters, not for variety's sake:
@@ -382,6 +408,155 @@ _sseg('scratch_velo_sens', 'VELO SENS x velocity, vib, scratch patch', 15,
        for sv in (0, 8, 15) for v in (100, 40)])
 
 
+# ---------------------------------------------------------------- effects sweeps
+#
+# Run with --set effects.  This is the FIRST capture of the U-110's chorus and tremolo:
+# nothing recorded before it contains either, because the enable bits live in a config byte
+# selected by the OUTPUT MODE and all 64 factory patches choose a dry mode.  See
+# analysis/EFFECTS.md for the decode this is built to test.
+#
+# NOTHING IS INHERITED.  Every trial writes all five effect parameters -- chorus rate and
+# depth, tremolo rate and depth, output mode -- even when a value is unchanged from the
+# trial before, and every segment writes the whole part block first.  The effects are
+# reached only by changing the output mode, which is exactly the parameter most likely to
+# be left somewhere unexpected by a previous session or a panel edit, so there is no value
+# here that is allowed to be whatever the machine happened to hold.
+#
+# WHAT EACH SWEEP ASKS
+#
+#   fx_chorus_rate    predicted 0.65 -> 3.2 Hz across rate 0-15, at essentially constant
+#                     depth.  Measured as the modulation period of a sustained partial.
+#   fx_chorus_depth   predicted delay swing 11 -> 496 samples (0.35 -> 15.5 ms), the LFO
+#                     period staying put.  Depth 0 is the dry reference: the firmware
+#                     clears the enable bit rather than running a small effect.
+#   fx_tremolo_rate   predicted 2.6 -> 12.8 Hz.
+#   fx_tremolo_depth  predicted 0.4 -> 30.1 dB peak to peak.  Depth 0 is again dry.
+#   fx_shape          the decisive one, and it needs no sweep.  The rising and falling
+#                     ramps carry the same rate byte but the hardware's falling ramps move
+#                     16x slower, so the LFO should be a SAWTOOTH of duty 1/17, not a
+#                     triangle -- 36 ms up and 577 ms down at chorus rate 7 depth 7.  In
+#                     the chorus that means a near-constant pitch offset for 94% of the
+#                     cycle, which puts a DOUBLET in the spectrum rather than a smear.  A
+#                     triangle would smear.  Long holds on a flat-sustain tone, so there is
+#                     plenty of steady material to transform.
+#   fx_stereo         the same settings played wet (mode 21, <L31><R31>) and dry (mode 22,
+#                     M31).  L+R and L-R from the wet takes answer how the wet signal is
+#                     spread -- if it is dry+wet against dry-wet, L+R comes out comb-free
+#                     -- and whether the tremolo is antiphase, i.e. an auto-pan.
+#   fx_tones          three tones through the same settings, for listening rather than
+#                     measuring.
+#   fx_factory        three factory patches with their OWN stored effect values, written
+#                     explicitly, dry then wet.  What Roland's settings actually sound like
+#                     when the output mode lets them through.
+#
+# E. Organ 1 carries the measurements: flat sustain, no decay at all, so the only thing
+# moving in the recording is the effect.
+
+EFFECTS = []
+
+FX_NOTE, FX_VEL = 60, 100
+FX_HOLD, FX_GAP = 10.0, 2.5
+
+
+def _fx_common(cr, cd, tr, td, mode=FX_MODE_WET):
+    return {C_CHORUS_RATE: cr, C_CHORUS_DEPTH: cd,
+            C_TREMOLO_RATE: tr, C_TREMOLO_DEPTH: td, C_OUTPUT_MODE: mode}
+
+
+def _fx_setup(tone):
+    """The whole patch, dictated -- the scratch patch plus the effect block."""
+    out = []
+    for off, val in sorted(SCRATCH_PART0.items()):
+        out.append(('part', 0, off, val))
+    out.append(('part', 0, P_TONE, tone))
+    for part in range(1, 6):
+        out.append(('part', part, P_RX_CHANNEL, SCRATCH_MUTE_CH))
+    for off, val in common_order(_fx_common(0, 0, 0, 0)):
+        out.append(('common', off, val))
+    return out
+
+
+def _fxseg(name, label, tone, trials):
+    EFFECTS.append(dict(name=name, label=label, patch=0, setup=_fx_setup(tone),
+                        trials=trials))
+
+
+def _fxtrial(tag, cr, cd, tr, td, mode=FX_MODE_WET, hold=FX_HOLD, note=FX_NOTE):
+    return _trial(note, FX_VEL, hold, FX_GAP, tag, {},
+                  common=_fx_common(cr, cd, tr, td, mode))
+
+
+# 1. CHORUS RATE, depth held at 7, tremolo off.
+_fxseg('fx_chorus_rate', 'CHORUS RATE 0-15, depth 7, tremolo off, organ', TONE['organ'],
+       [_fxtrial('crate=%d' % r, r, 7, 0, 0) for r in (0, 3, 7, 11, 15)])
+
+# 2. CHORUS DEPTH, rate held at 7, tremolo off.  Depth 0 is the dry control.
+_fxseg('fx_chorus_depth', 'CHORUS DEPTH 0-15, rate 7, tremolo off, organ', TONE['organ'],
+       [_fxtrial('cdepth=%d' % d, 7, d, 0, 0) for d in (0, 1, 4, 7, 11, 15)])
+
+# 3. TREMOLO RATE, depth held at 7, chorus off.
+_fxseg('fx_tremolo_rate', 'TREMO. RATE 0-15, depth 7, chorus off, organ', TONE['organ'],
+       [_fxtrial('trate=%d' % r, 0, 0, r, 7) for r in (0, 3, 7, 11, 15)])
+
+# 4. TREMOLO DEPTH, rate held at 7, chorus off.  Depth 0 is the dry control.
+_fxseg('fx_tremolo_depth', 'TREMO. DEPTH 0-15, rate 7, chorus off, organ', TONE['organ'],
+       [_fxtrial('tdepth=%d' % d, 0, 0, 7, d) for d in (0, 1, 4, 7, 11, 15)])
+
+# 5. SHAPE.  Long holds, one effect at a time, at the settings the prediction is sharpest
+#    for.  25 s is about 27 chorus cycles at rate 7 -- enough steady material to resolve a
+#    doublet 21 cents wide, which needs roughly 2 s of window on its own.
+_fxseg('fx_shape', 'sawtooth-or-triangle: long holds, one effect at a time, organ',
+       TONE['organ'],
+       [_fxtrial('shape/chorus_7_7',  7, 7, 0, 0, hold=25.0),
+        _fxtrial('shape/chorus_7_15', 7, 15, 0, 0, hold=25.0),
+        _fxtrial('shape/chorus_0_7',  0, 7, 0, 0, hold=25.0),
+        _fxtrial('shape/tremolo_7_7', 0, 0, 7, 7, hold=25.0),
+        _fxtrial('shape/tremolo_7_15', 0, 0, 7, 15, hold=25.0),
+        _fxtrial('shape/dry', 0, 0, 0, 0, hold=25.0)])
+
+# 6. STEREO.  Identical settings, wet mode against dry mode, on a tone with no decay.
+_fxseg('fx_stereo', 'mode 21 <L31><R31> against mode 22 M31, same settings, organ',
+       TONE['organ'],
+       [_fxtrial('stereo/chorus_wet',  7, 7, 0, 0, FX_MODE_WET, hold=15.0),
+        _fxtrial('stereo/chorus_dry',  7, 7, 0, 0, FX_MODE_DRY, hold=15.0),
+        _fxtrial('stereo/tremolo_wet', 0, 0, 7, 7, FX_MODE_WET, hold=15.0),
+        _fxtrial('stereo/tremolo_dry', 0, 0, 7, 7, FX_MODE_DRY, hold=15.0),
+        _fxtrial('stereo/both_wet',    7, 7, 7, 7, FX_MODE_WET, hold=15.0),
+        _fxtrial('stereo/both_dry',    7, 7, 7, 7, FX_MODE_DRY, hold=15.0)])
+
+# 7. THREE TONES, wet and dry, for the ear rather than the analyser.  Strings and Choir
+#    are ping-pong loops with a flat sustain; Vib has a decay, so the effect has to be
+#    heard against a moving envelope.
+for _tn in ('strings', 'choir', 'vib'):
+    _fxseg('fx_tones_' + _tn, 'wet against dry at 7/7/7/7, %s' % _tn, TONE[_tn],
+           [_fxtrial('%s/dry' % _tn, 7, 7, 7, 7, FX_MODE_DRY, hold=12.0),
+            _fxtrial('%s/wet' % _tn, 7, 7, 7, 7, FX_MODE_WET, hold=12.0)])
+
+# 8. FACTORY PATCHES with the settings Roland stored for them, written out explicitly so
+#    the take does not depend on the patch memory being intact.  Read from the firmware's
+#    own patch table at 0xE000 + 0x80*n + 0x0F.  These segments deliberately have NO part
+#    setup: the point is the patch as shipped, with only the output mode moved.
+FACTORY_FX = [(1,  'Ac.Piano',   7, 7, 7, 7),
+              (31, 'Strings',    4, 6, 5, 0),
+              (14, 'Marimba',    4, 3, 5, 4)]
+
+for _pn, _nm, _cr, _cd, _tr, _td in FACTORY_FX:
+    EFFECTS.append(dict(
+        name='fx_factory_p%02d' % _pn,
+        label='P-%02d %s, stored %d/%d/%d/%d, dry then wet' % (_pn, _nm, _cr, _cd, _tr, _td),
+        patch=_pn - 1, setup=[],
+        trials=[_fxtrial('P-%02d/n%d/dry' % (_pn, n), _cr, _cd, _tr, _td, FX_MODE_DRY,
+                         hold=12.0, note=n)
+                for n in (48, 60)]
+               + [_fxtrial('P-%02d/n%d/wet' % (_pn, n), _cr, _cd, _tr, _td, FX_MODE_WET,
+                           hold=12.0, note=n)
+                  for n in (48, 60)]))
+
+# All three of these store output mode index 21, i.e. mode 22 `M31` -- so the dry trial is
+# the patch exactly as Roland shipped it, and the wet trial is mode 21, the SAME voice
+# grouping with the effect switched in.  Nothing else moves between the two.
+
+
 # ---------------------------------------------------------------- follow-up sweeps
 #
 # Run with --set followup.  These exist because the first take (listen/hardware/env) settled the
@@ -548,6 +723,9 @@ def write_dry_run(path, segments, ch, cch, part=0, midi_delay=10.0):
             for off in sorted(tr['params']):
                 ev.append((t, sysex(dt1(dev, part_addr(part, off), [tr['params'][off]]))))
                 t += 0.006                    # ~3.5 ms on the wire at 31250 baud
+            for off, val in common_order(tr.get('common', {})):
+                ev.append((t, sysex(dt1(dev, common_addr(off), [val]))))
+                t += 0.006
             t += PARAM_SETTLE
             rows.append((seg['name'], i, tr['tag'], tr['note'], tr['vel'], tr['hold'], t))
             ev.append((t, bytes([0x90 | ch, tr['note'], tr['vel']])))
@@ -659,9 +837,11 @@ def main():
                     help='patch to work in, as a program number (0 = P-01)')
     ap.add_argument('--only', default=None, help='comma-separated sweep names')
     ap.add_argument('--set', default='main',
-                    choices=('main', 'followup', 'scratch', 'all'),
+                    choices=('main', 'followup', 'scratch', 'effects', 'all'),
                     help="'main' is the original 15 sweeps; 'followup' is the shorter set "
-                         "the first take showed was needed (see FOLLOWUP above)")
+                         "the first take showed was needed (see FOLLOWUP above); "
+                         "'effects' is the chorus/tremolo set, which needs the OUTPUT MODE "
+                         "moved to a wet mode and is the only set that ever hears them")
     ap.add_argument('--dry-run-midi', default=None, metavar='FILE',
                     help='write the sequence as a MIDI file instead of playing it')
     ap.add_argument('--emu-rates', default=None, metavar='DIR',
@@ -676,7 +856,8 @@ def main():
         return
 
     segments = {'main': SEGMENTS, 'followup': FOLLOWUP, 'scratch': SCRATCH,
-                'all': SEGMENTS + FOLLOWUP + SCRATCH}[args.set]
+                'effects': EFFECTS,
+                'all': SEGMENTS + FOLLOWUP + SCRATCH + EFFECTS}[args.set]
     if args.only:
         want = [x.strip() for x in args.only.split(',')]
         pool = segments
@@ -817,6 +998,9 @@ def main():
                     for i, tr in enumerate(seg['trials']):
                         for off in sorted(tr['params']):
                             send_param(out, mido, dev, args.part, off, tr['params'][off])
+                        for off, val in common_order(tr.get('common', {})):
+                            send_common(out, mido, dev, off, val)
+                            time.sleep(0.012)
                         time.sleep(PARAM_SETTLE)
                         ts = time.time() - t0
                         line = ("%8.3f  %-28s note %3d vel %3d hold %.2fs"
