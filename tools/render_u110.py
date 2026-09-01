@@ -106,11 +106,14 @@ def main():
             sets['all'] = sets['all'] + seq.SCRATCH
         segs = sets[args.set]
     if args.only:
+        # Filter what --set already chose, NOT seq.SEGMENTS: filtering the module's default
+        # list threw --set away silently and rendered the wrong sequence's names.
         want = [x.strip() for x in args.only.split(',')]
-        segs = [s for s in seq.SEGMENTS if s['name'] in want]
+        pool = segs
+        segs = [s for s in pool if s['name'] in want]
         if not segs:
             sys.exit("no segment matched --only (names: %s)"
-                     % ", ".join(s['name'] for s in seq.SEGMENTS))
+                     % ", ".join(s['name'] for s in pool))
 
     out_dir = args.out_dir if os.path.isabs(args.out_dir) else os.path.join(HERE, args.out_dir)
     os.makedirs(out_dir, exist_ok=True)
