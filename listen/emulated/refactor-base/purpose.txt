@@ -1,0 +1,4 @@
+Regression pair for the roland_u110_data.h refactor: rendered BEFORE the
+shared tables and pure functions moved out of roland_u110.cpp.  All 13 files, and the
+1005 s session.wav, are byte-identical between the two (md5 0e00e8ba...), which is what
+proves the refactor is pure code motion.  Safe to delete once that is no longer in doubt.

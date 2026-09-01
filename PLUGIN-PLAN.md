@@ -967,7 +967,12 @@ Extracted and headless should be a few percent — comfortable for many instance
 
 ## 12. Work order
 
-1. Refactor `roland_u110.cpp`: tables and pure functions into a shared header (§3).
+1. ~~Refactor `roland_u110.cpp`: tables and pure functions into a shared header (§3).~~
+   **Done** — `mame/src/mame/roland/roland_u110_data.h`. It depends on nothing but
+   `<cstdint>`/`<cstddef>`, so the plugin compiles it with no MAME tree in the include
+   path. Verified two ways: the reimplemented `bitswap` matches MAME's over the whole
+   2^19 address domain and all 256 data bytes (and is bijective), and a 1005 s render
+   is byte-identical before and after, 13/13 files.
 2. Wire MIDI OUT in the MAME driver, testable against `-mout` (§10.3).
 3. Define `U110Core` (§4) and stand up the null-test harness against MAME.
 4. Write `plugin/compat/emu.h`; compile MAME's four device sources against it;
