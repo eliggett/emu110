@@ -669,7 +669,7 @@ mode table plus Output Assign gives the part → output mapping directly.
 | Switches | Six panel switches on IC8 `READ0`-`READ5`, **pins 64-69**; read as one byte at `0x1300` — see §6.1 |
 | MIDI IN | JK1 → IC2 opto-isolator → CPU `RXD`, pin 18 |
 | MIDI OUT | CPU `TXD`, pin 17.  Emulated: serialised to a `midi_port` at 31250 baud 8N1. The firmware transmits nothing unprompted -- SysEx replies and bulk dumps only |
-| MIDI THRU | **Unverified.** `[?]` This row previously claimed THRU also comes off `TXD`. The owner's manual says "the MIDI messages fed into the MIDI IN connector are output through the MIDI THRU connector", which describes a buffer off the opto-isolator, not anything the CPU generates -- and if it were `TXD`, THRU would carry OUT's data rather than IN's.  Not emulated until the schematic settles it; a guess here would be actively misleading |
+| MIDI THRU | JK3, buffered off the **IC2 opto-isolator output** -- the same node that feeds the CPU `RXD`.  A wire, not a feature: no CPU involvement, no deserialising, so THRU repeats MIDI IN bit for bit and keeps working while the firmware is busy or halted.  Confirmed against the service manual; an earlier revision of this table wrongly put THRU on `TXD` alongside OUT, which would have made it carry OUT's data instead of IN's.  Emulated |
 | MIDI activity LED | CPU `P2.6`, pin 33, via a 2SA1115 driver |
 
 ### 6.1 Panel switches and LEDs `[S]` `[C]`

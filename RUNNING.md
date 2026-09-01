@@ -72,12 +72,35 @@ sequencer to `Midi Through` with `aconnect`.
 
 This is how the capture and render tools drive the machine.
 
-### MIDI output is not wired up
+### MIDI output and thru
 
-The U-110's MIDI OUT/THRU (CPU TXD, pin 17) is currently only written to the log —
-see the `TODO` at `mame/src/mame/roland/roland_u110.cpp:745`. Nothing you can pass on the
-command line will make it reach the host. It has no effect on playing notes; it matters only
-if you want to pull patch data out over SysEx.
+Both jacks work, and they are **separate media slots** -- note the digits, they were added
+when THRU arrived and `-mout` on its own is no longer a valid option name:
+
+| Option | Jack | Carries |
+|---|---|---|
+| `-mout1 "<port>"` | MIDI OUT | SysEx replies and bulk dumps |
+| `-mout2 "<port>"` | MIDI THRU | an exact echo of whatever arrives at MIDI IN |
+
+```sh
+./u110 u110 -min "UM-4 MIDI 1" -mout1 "UM-4 MIDI 2"
+```
+
+**MIDI OUT is silent unless you ask it something.** The U-110 has no keyboard and sends no
+active sensing, so a boot produces zero bytes -- that is correct behaviour, not a fault.
+It answers `RQ1` requests and transmits bulk dumps. To pull all 64 patches out, send
+
+```
+F0 41 0F 23 11 02 00 00 01 00 00 7D F7
+```
+
+and 128 packets come back at addresses `020000`..`027F00` (plus `010000` for SETUP, with
+`F0 41 0F 23 11 01 00 00 00 00 20 5F F7`).  `tools/u110_sysex.py` builds these for you.
+**`SETUP:MIDI:EXCLUSIVE` must be ON** or every request is discarded in silence.
+
+**MIDI THRU is a wire.** The service manual shows JK3 driven straight off the IC2
+opto-isolator output, the same node that feeds the CPU -- so THRU repeats MIDI IN bit for
+bit, with no CPU involvement, and keeps working even if the firmware is busy or wedged.
 
 ### If no note ever sounds
 

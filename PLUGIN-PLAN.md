@@ -153,9 +153,24 @@ CORE_SOURCES = \
   $(MAME)/src/devices/sound/roland_lp.cpp \
   $(MAME)/src/devices/cpu/mcs96/mcs96.cpp \
   $(MAME)/src/devices/cpu/mcs96/i8x9x.cpp \
-  $(MAME)/src/devices/video/msm6222b.cpp
-CORE_CXXFLAGS = -I plugin/compat
+  $(MAME)/src/devices/video/msm6222b.cpp \
+  $(MAME)/src/devices/sound/flt_biquad.cpp \
+  $(MAME)/src/devices/sound/flt_rc.cpp
+CORE_CXXFLAGS = -I plugin/compat -I $(MAME)/src/mame/roland
 ```
+
+**The two filter devices are on that list deliberately.** Both are BSD-3-Clause
+(checked), so the *entire* audio chain — voices, pan matrix, Sallen-Key cascade,
+output RC, HF correction — is shared source with MAME rather than reimplemented.
+
+That is what makes the null test (§4) exact **by construction**. A reimplemented
+biquad would land within a fraction of a dB and never bit-match, and every future
+difference would have to be argued about. Sharing the source removes the argument.
+
+It also fixes the order of work on §11's "run the reconstruction chain at the output
+rate" idea: get bit-identical first with the same chain at the same rate, *then*
+improve the chain, with the null test as the baseline the improvement is measured
+against. Improving and null-testing at the same time would leave neither trustworthy.
 
 The same file compiles in both places. Edit `roland_lp.cpp`, rebuild the plugin,
 the change is in. No fork, no drift, one source of truth.
@@ -237,6 +252,28 @@ public:
 ```
 
 ### Acceptance test — the null test
+
+**Built:** `plugin/tools/null_test.py`. `--self` renders twice through MAME and
+requires a match; the default mode compares MAME against the core once that
+exists, and says so plainly rather than passing when it does not.
+
+The oracle holds: MAME renders **bit-identically run to run**, 864001 frames of
+32 kHz stereo. Without that nothing can be null-tested against it, so `--self` is
+the first thing to run and the first thing to re-run when the harness changes.
+
+Two traps found while standing it up, both now handled in the tool:
+
+- **A null test against silence passes for the wrong reason.** The first run of the
+  harness reported a clean PASS on two entirely silent files. The harness now
+  refuses to compare a reference that is digital silence, and reports peak level
+  and how much of the render actually has signal in it (currently −6.3 dBFS, 45%
+  of frames sounding).
+- **MAME's MIDI file reader assumes 60 BPM when a file has no `set_tempo`**, not
+  the 120 BPM the spec specifies. The whole sequence then plays at half speed,
+  which looks exactly like the emulator running slow. Always write an explicit
+  tempo — `capture_u110.py` always did, which is why this had never been seen.
+
+
 
 **Set this up before starting.** Render the same MIDI file through MAME and
 through the core; require bit-identical output, or −120 dB residual if a
@@ -839,8 +876,14 @@ so the timing is proven rather than assumed:
 A 1005 s audio render is byte-identical before and after, so nothing leaked into
 the audio path.
 
-`[?]` **MIDI THRU** is a separate jack on the real unit and is often a hardware
-pass-through rather than CPU-generated. Check the schematic before emulating it.
+**MIDI THRU is a hardware pass-through** — the service manual shows JK3 driven
+straight off the IC2 opto-isolator output, the same node that feeds the CPU's RXD.
+No CPU involvement at all, so THRU repeats MIDI IN bit for bit and keeps working
+even while the firmware is busy or halted. Emulated in the driver.
+
+**The plugin core therefore needs no THRU support whatsoever.** The plugin echoes
+its own MIDI input to a thru port; `U110Core` never sees it. One less thing in the
+interface, decided by the hardware rather than by us.
 
 `[?]` **Large SysEx through plugin ports.** DPF's `MidiEvent` has a small fixed
 buffer with an extension pointer, and LV2 atom sequences have a buffer size limit.
@@ -983,8 +1026,11 @@ Extracted and headless should be a few percent — comfortable for many instance
    is byte-identical before and after, 13/13 files.
 2. ~~Wire MIDI OUT in the MAME driver, testable against `-mout` (§10.3).~~ **Done.**
    Serialised to a `midi_port`, verified end-to-end over ALSA with a 17706-byte,
-   129-packet bulk dump. MIDI THRU deliberately not emulated — see below.
-3. Define `U110Core` (§4) and stand up the null-test harness against MAME.
+   129-packet bulk dump. MIDI THRU is emulated too, as a hardware pass-through.
+3. ~~Define `U110Core` (§4) and stand up the null-test harness against MAME.~~ **Done.**
+   `plugin/core/u110_core.h` (BSD, compiles standalone) and
+   `plugin/tools/null_test.py`. `--self` proves the oracle: MAME renders
+   bit-identically run to run, 864001 frames at 32 kHz native.
 4. Write `plugin/compat/emu.h`; compile MAME's four device sources against it;
    drive the null test to green and put it in CI (§3).
 5. DPF standalone, no UI, plus the ImGui debug window (§2.1, §5).
@@ -1026,13 +1072,10 @@ that subsystem, so the hook point is known.
   `tools/u110_sysex.py`, and the bulk-dump map confirmed empirically now that MIDI
   OUT works: `010000` SETUP (1 packet), `020000`..`027F00` patches 1-64 (128
   packets). Reading a bank out is proven; writing one back is untested.
-- `[?]` **MIDI THRU — hardware pass-through or CPU-generated?** Still open, and now
-  the *only* thing blocking the third jack. `analysis/SYSTEM-DESIGN.md` §6 claimed
-  THRU comes off `TXD` alongside OUT; the owner's manual contradicts that ("the MIDI
-  messages fed into the MIDI IN connector are output through the MIDI THRU
-  connector"), and if it were `TXD` then THRU would carry OUT's data rather than
-  IN's. The doc is now marked unverified. **This needs an eye on the schematic** —
-  the service notes PDF is not OCR'd, so it cannot be grepped.
+- ~~`[?]` MIDI THRU — hardware pass-through or CPU-generated?~~ **Resolved: hardware.**
+  JK3 is buffered off the IC2 opto-isolator output. `analysis/SYSTEM-DESIGN.md` §6 had
+  wrongly put it on `TXD` alongside OUT, which would have made THRU carry OUT's data
+  instead of IN's; corrected there. Emulated, and the core needs no support for it.
 - `[?]` Per-patch record size in `patchram` — is 8192/64 = 128 exact?
 - `[?]` CGROM: baked MatrixSans vs a published HD44780 A00 table — compare.
 - `[?]` What CGRAM chars 0, 1 and 2 are for after boot. They are redefined at

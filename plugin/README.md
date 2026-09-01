@@ -10,10 +10,12 @@ only how the directory is laid out and how to work in it.
 
 ```
 plugin/
-  compat/      our drop-in emu.h -- lets MAME's BSD device sources compile
-               here unchanged.  See PLUGIN-PLAN.md section 3.
-  src/         the plugin: DPF glue, the panel UI, patch management
-  tools/       build-time tools (panel export, CGROM baking)
+  core/        BSD-3-Clause.  U110Core: the emulation with no MAME framework
+               around it.  u110_core.h is the interface the plugin talks to.
+  compat/      BSD-3-Clause.  Our drop-in emu.h -- lets MAME's device sources
+               compile here unchanged.  See PLUGIN-PLAN.md section 3.
+  src/         GPL-3.0-or-later.  The plugin: DPF glue, panel UI, patch management
+  tools/       build-time and test tools (panel export, null test, CGROM baking)
   generated/   build products.  Not tracked, never edited by hand.
   build/       object files and the built plugin bundles.  Not tracked.
 ```
@@ -25,7 +27,7 @@ the short version:
 
 | Where | Licence | Rule |
 |---|---|---|
-| `mame/src/devices/...`, `compat/` | BSD-3-Clause | anything that *emulates the hardware* |
+| `mame/src/devices/...`, `core/`, `compat/` | BSD-3-Clause | anything that *emulates the hardware* |
 | `src/`, `tools/` | GPL-3.0-or-later | anything about *being a plugin* |
 
 Code may not move from `src/` down into the emulation.  Keeping the core BSD is
@@ -92,3 +94,25 @@ rsvg-convert -w 1600 plugin/generated/panel_flat.svg -o /tmp/panel_ref.png
 This is worth doing because it is the only way to catch nanosvg quietly dropping
 something.  Compare against `panel_flat.svg`, never against the source artwork --
 the source still contains the editing-aid layers.
+
+## The null test
+
+`plugin/tools/null_test.py` is the acceptance test and, because the device sources are
+shared with MAME rather than forked, a continuous regression check.
+
+```sh
+plugin/tools/null_test.py --self     # does MAME render reproducibly?  (the oracle)
+plugin/tools/null_test.py            # MAME vs U110Core
+```
+
+The bar is **bit-identical**, not a residual floor. The core renders at the chip's native
+32 kHz and so does MAME, so no resampler is in the path and a one-LSB drift is a real
+emulation difference.
+
+Two things the harness guards against, both of which bit it during development:
+
+- **It refuses to compare a silent reference.** Two silent files match perfectly and prove
+  nothing; the first run of the harness "passed" exactly that way.
+- **MIDI files it writes always carry an explicit `set_tempo`.** MAME's reader falls back
+  to 60 BPM without one, not the spec's 120, and the sequence then plays at half speed --
+  which is indistinguishable from the emulator running slow.

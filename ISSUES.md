@@ -57,7 +57,8 @@ own trace, 0 malformed and 0 bad checksums**, addressed `010000` then `020000`..
 That unblocks `.syx` interop (PLUGIN-PLAN 10.5): a whole bank can now be read out of the
 machine.  Writing one back is untested.
 
-MIDI THRU is a separate jack and is deliberately NOT emulated -- see below.
+MIDI THRU is emulated too, and exactly as the hardware does it: a direct copy of the
+MIDI IN line state off the opto-isolator, with no CPU involvement.
 
 ## Spectral / reconstruction (see analysis/RECONSTRUCTION.md)
 
