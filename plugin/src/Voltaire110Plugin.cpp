@@ -95,8 +95,27 @@ enum Params
     kParamButtonDec,
     kParamButtonIncEnter,
 
+    // --- read-only, DSP -> UI ------------------------------------------------------
+    //
+    // PLUGIN-PLAN.md section 8 left the transport as an open question.  It is output
+    // parameters: LV2 mandates the UI as a separate binary, so it cannot read the DSP's
+    // memory, and output parameters are what DPF's own examples use.
+    //
+    // The LCD is 32 CHARACTER CODES, not pixels, packed three to a float -- a float32
+    // holds 24 bits exactly, so this is lossless.  The custom glyphs are sent one per
+    // frame in rotation rather than all at once, which keeps the parameter count sane;
+    // all eight refresh in about a quarter second.
+    kParamOutFirst,
+    kParamOutLcd0 = kParamOutFirst,     // 11 floats x 3 chars = 33 >= 32
+    kParamOutLcdLast = kParamOutLcd0 + 10,
+    kParamOutStatus,                    // LEDs, cursor, card presence
+    kParamOutCgramIndex,                // which custom glyph the next two carry
+    kParamOutCgramA,                    // rows 0-3, five bits each
+    kParamOutCgramB,                    // rows 4-7
+
     kParamCount
 };
+constexpr uint32_t kNumLcdParams = 11;
 
 const char *const kButtonNames[] = {
     "Part / Jump", "Edit / Exit", "Left", "Right", "Dec", "Inc / Enter"
@@ -162,7 +181,32 @@ protected:
             parameter.ranges.max = 1.0f;
             break;
         default:
-            if (index >= kParamButtonFirst && index < kParamCount)
+            if (index >= kParamOutFirst)
+            {
+                // Read-only, DSP -> UI.  Integer-valued so hosts do not interpolate them.
+                parameter.hints = kParameterIsOutput | kParameterIsInteger;
+                parameter.ranges.def = 0.0f;
+                parameter.ranges.min = 0.0f;
+                parameter.ranges.max = 16777215.0f;
+                const uint32_t o = index - kParamOutFirst;
+                if (index <= kParamOutLcdLast)
+                {
+                    std::snprintf(m_pname, sizeof(m_pname), "LCD %u", o);
+                    std::snprintf(m_psym, sizeof(m_psym), "lcd_%u", o);
+                }
+                else
+                {
+                    static const char *const nm[] = { "Status", "CGRAM idx", "CGRAM a", "CGRAM b" };
+                    static const char *const sy[] = { "status", "cgram_i", "cgram_a", "cgram_b" };
+                    const uint32_t k = index - kParamOutStatus;
+                    std::snprintf(m_pname, sizeof(m_pname), "%s", nm[k]);
+                    std::snprintf(m_psym, sizeof(m_psym), "%s", sy[k]);
+                }
+                parameter.name = m_pname;
+                parameter.symbol = m_psym;
+                break;
+            }
+            if (index >= kParamButtonFirst && index < kParamOutFirst)
             {
                 const uint32_t b = index - kParamButtonFirst;
                 parameter.hints = kParameterIsAutomatable | kParameterIsBoolean;
@@ -183,7 +227,9 @@ protected:
         case kParamVolume:       return m_volumeDb;
         case kParamHfCorrection: return m_hfCorrection ? 1.0f : 0.0f;
         }
-        if (index >= kParamButtonFirst && index < kParamCount)
+        if (index >= kParamOutFirst)
+            return m_outParams[index - kParamOutFirst];
+        if (index >= kParamButtonFirst)
             return m_buttons[index - kParamButtonFirst] ? 1.0f : 0.0f;
         return 0.0f;
     }
@@ -207,7 +253,7 @@ protected:
             break;
         }
         default:
-            if (index >= kParamButtonFirst && index < kParamCount)
+            if (index >= kParamButtonFirst && index < kParamOutFirst)
             {
                 const uint32_t b = index - kParamButtonFirst;
                 const bool down = value > 0.5f;
@@ -275,6 +321,7 @@ protected:
         }
 
         sendMidiOut();
+        publishPanel();
         reportLcd();
     }
 
@@ -303,6 +350,47 @@ private:
             m_coreR.resize(coreFrames);
         }
         m_core.renderStereo(m_coreL.data(), m_coreR.data(), coreFrames);
+    }
+
+    /// Pack the panel into the output parameters for the UI, at about 30 Hz.
+    void publishPanel()
+    {
+        m_publishDivider += 1;
+        if (m_publishDivider < 32)
+            return;
+        m_publishDivider = 0;
+
+        voltaire::PanelState st;
+        m_core.snapshot(st);
+
+        for (uint32_t i = 0; i < kNumLcdParams; i ++)
+        {
+            uint32_t v = 0;
+            for (uint32_t k = 0; k < 3; k ++)
+            {
+                const uint32_t c = i * 3 + k;
+                v |= uint32_t(c < 32 ? st.lcd[c] : 0) << (8 * k);
+            }
+            m_outParams[kParamOutLcd0 - kParamOutFirst + i] = float(v);
+        }
+
+        m_outParams[kParamOutStatus - kParamOutFirst] =
+                float(uint32_t(st.leds) | (uint32_t(st.cursor_pos) << 8)
+                      | (uint32_t(st.cursor_flags) << 16));
+
+        // One custom glyph per frame, round robin.  All eight refresh in about a quarter
+        // second, which is fine for everything except the boot logo animation -- that is
+        // a CGRAM animation at ~19 fps and will come out approximate.  Accepted.
+        m_cgramTurn = (m_cgramTurn + 1) & 7;
+        uint32_t a = 0, b = 0;
+        for (uint32_t r = 0; r < 4; r ++)
+        {
+            a |= uint32_t(st.cgram[m_cgramTurn * 8 + r] & 0x1f) << (5 * r);
+            b |= uint32_t(st.cgram[m_cgramTurn * 8 + 4 + r] & 0x1f) << (5 * r);
+        }
+        m_outParams[kParamOutCgramIndex - kParamOutFirst] = float(m_cgramTurn);
+        m_outParams[kParamOutCgramA - kParamOutFirst] = float(a);
+        m_outParams[kParamOutCgramB - kParamOutFirst] = float(b);
     }
 
     /// Print the LCD when it changes, if asked.
@@ -409,6 +497,10 @@ private:
     bool m_buttons[voltaire::kButtonCount] = { false };
     unsigned m_lcdDivider = 0;
     char m_lastLcd[40] = { 0 };
+    char m_pname[32] = { 0 }, m_psym[32] = { 0 };
+    unsigned m_publishDivider = 0;
+    uint32_t m_cgramTurn = 0;
+    float m_outParams[kParamCount - kParamOutFirst] = { 0.0f };
 
     DISTRHO_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Voltaire110Plugin)
 };

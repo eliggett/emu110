@@ -86,6 +86,8 @@ int main(int argc, char **argv)
     static float outL[BLOCK], outR[BLOCK];
     static unsigned char ev_in[ATOM_CAP], ev_out[ATOM_CAP];
     float latency = 0, volume = 0.0f, hf = 1.0f;
+    float btn[6] = { 0, 0, 0, 0, 0, 0 };
+    static float outp[16];
 
     d->connect_port(h, 0, outL);
     d->connect_port(h, 1, outR);
@@ -94,6 +96,8 @@ int main(int argc, char **argv)
     d->connect_port(h, 4, &latency);
     d->connect_port(h, 5, &volume);
     d->connect_port(h, 6, &hf);
+    for (int i = 0; i < 6; i++) d->connect_port(h, 7 + i, &btn[i]);
+    for (int i = 0; i < 15; i++) d->connect_port(h, 13 + i, &outp[i]);
     if (d->activate) d->activate(h);
 
     const uint32_t urid_seq   = map_uri(NULL, LV2_ATOM__Sequence);
@@ -119,6 +123,11 @@ int main(int argc, char **argv)
         const unsigned char *msg = NULL;
         static const unsigned char on[3]  = { 0x90, 60, 100 };
         static const unsigned char off[3] = { 0x80, 60, 0 };
+        /* Press EDIT/EXIT at 7 s and release at 8 s: the buttons are what drive the
+         * machine's own menus, and this proves the whole loop from a host control port
+         * through to the LCD. */
+        btn[1] = (done >= (long)(7.0 * RATE) && done < (long)(8.0 * RATE)) ? 1.0f : 0.0f;
+
         if (done <= t12 && t12 < done + BLOCK) msg = on;
         if (done <= t15 && t15 < done + BLOCK) msg = off;
         if (msg)

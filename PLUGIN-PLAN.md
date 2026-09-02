@@ -729,9 +729,14 @@ glyphs every ~52.5 ms (§7); polling at 30 Hz would alias it into a stutter. Sen
 the CGRAM block whenever `cgram_dirty` is set, independently of the 30 Hz text
 cadence.
 
-`[?]` **Confirm DPF's DSP→UI push mechanism.** Output parameters
-(`kParameterIsOutput`) are floats and unsuitable for a blob; DPF's state
-mechanism is the likely carrier.
+**Resolved: output parameters after all.** `updateStateValue()` is DPF's state push but
+must not be called from `run()`, and there is no other DSP-side callback; DPF's own
+examples use output parameters, and LV2's separate-binary UI rules out shared memory.
+
+Floats carry a blob perfectly well if packed deliberately: a float32 holds 24 bits
+exactly, so the 32 LCD **character codes** go three to a float in 11 parameters,
+losslessly. The eight custom glyphs go one per frame in rotation — three more
+parameters instead of sixteen.
 
 **Publishing must be fire-and-forget.** If the UI is closed, or the host never
 opens it, the emulation must run bit-identically. The snapshot is never in the
@@ -1150,12 +1155,21 @@ Extracted and headless should be a few percent — comfortable for many instance
    CLAP, VST3) and the LV2 **makes the right sound**: C4 at 262.0 Hz, verified by a
    minimal LV2 host that loads the built bundle. The ImGui debug window is still to do.
 6. Panel snapshot protocol and command queue (§8).
-7. Bake the CGROM from MatrixSans Screen; hand-fix the mangled glyphs (§7).
-8. Live CGRAM rendering and push-on-change transport; verify against the boot
-   logo animation (§7, §8).
+7. ~~Bake the CGROM from MatrixSans Screen; hand-fix the mangled glyphs (§7).~~ **Done.**
+   `tools/make_lcd_cgrom.py` samples the font at its own dot centres — MatrixSans Screen
+   is drawn on a real grid (486×686 units, 97.2×98 pitch), so this recovers the
+   designer's bitmap rather than rasterising it. Only `#`, `%` and `@` needed hand
+   correction; `M`, `W`, `m`, `w` survive the five-column grid intact.
+8. ~~Live CGRAM rendering and push-on-change transport (§7, §8).~~ **Done**, with one
+   deliberate compromise: the custom glyphs are sent one per frame in rotation rather
+   than pushed on change, so all eight refresh in about a quarter second. That is fine
+   for the play screen's bars and digits and approximate for the boot logo, which is a
+   ~19 fps CGRAM animation. Accepted on the owner's say-so; it lasts 370 ms.
 9. LV2 and CLAP targets; VST3 falls out.
 10. Panel automaton, direct name reads, bank files (§10.4, §10.5).
-11. Inkscape panel and the vector UI (§6).
+11. ~~Inkscape panel and the vector UI (§6).~~ **Done.** nanosvg → NanoVG, geometry from
+    `panel_geometry.h`, LCD drawn as dots from the baked table plus live CGRAM, knob
+    rotated in code. No coordinate is typed into the UI source.
 12. **Fix the Sallen-Key chain** (§10.2): it peaks +4.29 dB where the service
     notes say +2.17 dB. Then re-measure and re-fit the HF correction — do not
     keep the current one on top of a corrected chain. *(The measurement itself is
@@ -1179,7 +1193,8 @@ that subsystem, so the hook point is known.
 
 - ~~`[?]` DPF's `travesty` VST3 licensing.~~ **Resolved: ISC, clean-room, no Steinberg
   SDK.** See §1.
-- `[?]` DPF's DSP→UI push mechanism for a ~120-byte blob.
+- ~~`[?]` DPF's DSP→UI push mechanism for a ~120-byte blob.~~ **Resolved: packed output
+  parameters.** See §8.
 - `[?]` DPF standalone audio backends on Windows and macOS.
 - `[?]` DPF / LV2 SysEx size limits — does a bank dump need chunking?
 - `[?]` FL Studio version on the target machine — does it host CLAP?

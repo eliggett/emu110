@@ -238,3 +238,32 @@ It sounded like crackle on every note.
 
 The plugin's streaming now matches a single continuous offline pass at **correlation
 1.000000**, and the resampler is bit-identical at every block size from 16 to 4096.
+
+## The panel
+
+`make` builds it; everything in `generated/` is a build product and none of it is checked
+in, so a fresh clone regenerates from the Inkscape artwork and the font.
+
+**No coordinate is typed into the UI source.** Every rectangle comes from
+`generated/panel_geometry.h`, which `panel_export.py` composes out of the SVG. Move a
+control in Inkscape, run `make`, and both the drawing and the hit box follow.
+
+Two things are deliberately not in the SVG: the **knob pointer**, rotated in code rather
+than exported as frames, and the **LCD**, which has to be built from character codes
+because the firmware redefines its custom glyphs while it runs.
+
+`VOLTAIRE_PANEL_SVG=/path/to.svg` overrides the built-in artwork, so the panel can be
+redrawn in Inkscape and reloaded without a rebuild.
+
+### `[!]` nanosvg matches tag names literally
+
+The exporter rewrites the flattened SVG with ElementTree, and ElementTree invents
+namespace prefixes (`ns0:svg`, `ns0:path`) unless the default namespace is registered.
+A prefixed document **parses without error and yields zero shapes** — the panel simply
+does not draw, with nothing in any log to say why. `panel_export.py` registers the
+namespace and then checks its own output for `<svg`, because this is the failure with no
+symptom.
+
+nanosvg also resolves the document's own units. The artwork is in millimetres, so shapes
+come back scaled by 96/25.4; the UI normalises them onto viewBox units, which is what
+`panel_geometry.h` uses.

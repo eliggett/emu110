@@ -9,12 +9,13 @@
 NAME = Voltaire110
 
 FILES_DSP = src/Voltaire110Plugin.cpp
+FILES_UI  = src/Voltaire110UI.cpp
 
 include dpf/Makefile.plugins.mk
 
 CORE_LIB = build/libu110core.a
 
-BUILD_CXX_FLAGS += -I../plugin/core -Icore -Isrc -std=c++20
+BUILD_CXX_FLAGS += -Icore -Isrc -Igenerated -std=c++20
 LINK_FLAGS      += $(CURDIR)/$(CORE_LIB)
 
 # The standalone is the daily development loop -- MIDI in, audio out, no host in the way --
@@ -22,12 +23,26 @@ LINK_FLAGS      += $(CURDIR)/$(CORE_LIB)
 # PipeWire Just Works.
 TARGETS = lv2_sep vst3 clap jack
 
-all: core $(TARGETS)
+all: generated core $(TARGETS)
 
-core:
+# Everything in generated/ is a build product: the panel geometry and artwork come from the
+# Inkscape SVG, the LCD character set from MatrixSans.  Neither is checked in, so a fresh
+# clone rebuilds them rather than inheriting a stale copy.
+GENERATED = generated/panel_geometry.h generated/panel_svg.h generated/u110_cgrom.h
+
+generated: $(GENERATED)
+
+generated/panel_geometry.h generated/panel_svg.h: ../resources/graphics/overall_panel_inkscape.svg tools/panel_export.py
+	@tools/panel_export.py --text-to-path
+
+generated/u110_cgrom.h: ../tools/make_lcd_cgrom.py
+	@mkdir -p generated
+	@python3 ../tools/make_lcd_cgrom.py --header generated/u110_cgrom.h
+
+core: generated
 	@tools/build_core.sh
 
-.PHONY: core
+.PHONY: core generated
 
 # A minimal LV2 host, so what gets tested is what a user loads.  Building the core and
 # null-testing it proves the emulation; this proves the PLUGIN -- DPF, the resampler at the
