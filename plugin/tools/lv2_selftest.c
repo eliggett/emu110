@@ -105,6 +105,7 @@ int main(int argc, char **argv)
     float latency = 0, volume = (argc > 4) ? (float)atof(argv[4]) : 0.0f, hf = 1.0f;
     float btn[6] = { 0, 0, 0, 0, 0, 0 };
     const int want_fx = (argc > 5) && strcmp(argv[5], "fx") == 0;
+    const int want_stream = (argc > 5) && strcmp(argv[5], "stream") == 0;
     static float outp[16];
 
     d->connect_port(h, 0, outL);
@@ -128,6 +129,9 @@ int main(int argc, char **argv)
     int peak = 0;
     unsigned seen_leds = 0;
     long blocks_total = 0, lit_blocks[4] = { 0, 0, 0, 0 };
+    long slow_total = 0, slow_midi_lit = 0;
+    double next_slow = 0.0;
+    unsigned last_midi = 0; long midi_edges = 0;
 
     for (long done = 0; done < total; done += BLOCK)
     {
@@ -163,8 +167,17 @@ int main(int argc, char **argv)
                         sizeof(LV2_Atom_Event) + kFxSetup[step].len);
             }
         }
-        if (done <= t12 && t12 < done + BLOCK) msg = on;
-        if (done <= t15 && t15 < done + BLOCK) msg = off;
+        if (want_stream) {
+            /* A note every 400 ms from 10 s, which is what playing looks like -- the MIDI
+             * lamp is driven by activity, so a single held note says little about it. */
+            const long period = (long)(0.4 * RATE);
+            const long since = done - (long)(10.0 * RATE);
+            if (since >= 0 && (since % period) == 0)
+                msg = ((since / period) & 1) ? off : on;
+        } else {
+            if (done <= t12 && t12 < done + BLOCK) msg = on;
+            if (done <= t15 && t15 < done + BLOCK) msg = off;
+        }
         if (msg)
         {
             LV2_Atom_Event *e = (LV2_Atom_Event *)((char *)LV2_ATOM_CONTENTS(LV2_Atom_Sequence, seq));
@@ -191,6 +204,18 @@ int main(int argc, char **argv)
             seen_leds |= l;
             blocks_total++;
             for (int b = 0; b < 4; b++) if (l & (1u << b)) lit_blocks[b]++;
+            /* What a host that polls the output ports SLOWLY would see.  Ardour and Carla
+             * poll on their own schedules, so a lamp driven by a firmware pulse has to
+             * survive being looked at rarely. */
+            {
+                const double t = (double)done / RATE;
+                if (t >= next_slow) {
+                    next_slow += 0.1;                  /* 10 Hz observer */
+                    slow_total++;
+                    if (l & 4u) slow_midi_lit++;
+                }
+                if (((l >> 2) & 1u) != last_midi) { midi_edges++; last_midi = (l >> 2) & 1u; }
+            }
         }
 
         for (int i = 0; i < BLOCK && written < total; i++, written++)
@@ -214,7 +239,11 @@ int main(int argc, char **argv)
       printf("lamps (percentage of the run lit):\n");
       for (int b = 0; b < 4; b++)
           printf("    %-5s %5.1f%%\n", nm[b],
-                 100.0 * (double)lit_blocks[b] / (double)(blocks_total ? blocks_total : 1)); }
+                 100.0 * (double)lit_blocks[b] / (double)(blocks_total ? blocks_total : 1));
+      printf("  MIDI lamp transitions: %ld in the run (%.1f per second)\n",
+             midi_edges, (double)midi_edges / SECONDS);
+      printf("  MIDI lamp seen by a 10 Hz observer: %5.1f%% of %ld samples\n",
+             100.0 * (double)slow_midi_lit / (double)(slow_total ? slow_total : 1), slow_total); }
     printf("peak: %d (%s)\n", peak, peak > 0 ? "PLUGIN MAKES SOUND" : "SILENT");
 
     FILE *o = fopen(wav, "wb");
