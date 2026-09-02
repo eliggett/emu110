@@ -153,6 +153,15 @@ protected:
                 const auto &r = voltaire::panel::kButton[i];
                 if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h)
                 {
+                    // FILT LATCHES.  It selects a state rather than driving a menu, so
+                    // unlike the six machine buttons it toggles on press and stays put.
+                    if (i == voltaire::panel::BUT_FILTER)
+                    {
+                        m_hf = !m_hf;
+                        setParam(kParamHfCorrection, m_hf ? 1.0f : 0.0f);
+                        repaint();
+                        return true;
+                    }
                     const int p = mapButton(i);
                     if (p < 0)
                         return true;                 // a real control with nothing behind it yet
@@ -377,7 +386,11 @@ private:
         drawLed(voltaire::panel::LED_EDIT_EXIT, (m_leds & 0x02) != 0, Color(255, 60, 40));
         drawLed(voltaire::panel::LED_MIDI, false, Color(255, 60, 40));
         drawLed(voltaire::panel::LED_CLIP, false, Color(255, 60, 40));
-        drawLed(voltaire::panel::LED_FILT, false, Color(255, 60, 40));
+        // FILT is the measured HF correction (PLUGIN-PLAN.md section 10.2) -- the only
+        // filter the machine has that is switchable.  It is a CALIBRATION rather than a
+        // tone control, so the lamp means "the emulator is matched to the hardware", which
+        // is the state you normally want lit.
+        drawLed(voltaire::panel::LED_FILT, m_hf, Color(255, 60, 40));
     }
 
     void drawLed(int id, bool on, Color c)
@@ -430,6 +443,15 @@ private:
 
     void drawButtonFeedback()
     {
+        // A latching button shows its state, not a momentary press.
+        if (m_hf)
+        {
+            const auto &f = voltaire::panel::kButton[voltaire::panel::BUT_FILTER];
+            beginPath();
+            roundedRect(f.x, f.y, f.w, f.h, f.h * 0.08f);
+            fillColor(Color(255, 255, 255, 0.14f));
+            fill();
+        }
         if (m_held < 0)
             return;
         const auto &r = voltaire::panel::kButton[m_held];
