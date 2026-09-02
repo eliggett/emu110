@@ -98,7 +98,12 @@ struct PanelState
 	uint8_t  cgram_dirty;
 	uint8_t  cgram[64];
 
-	uint8_t  leds;              ///< from led_w at 0x1200 (written inverted by the firmware)
+	/// Panel lamps, active HIGH here whatever the hardware's polarity.
+	///   bit 0  PART / JUMP     from led_w at 0x1200, which the firmware writes INVERTED
+	///   bit 1  EDIT / EXIT     likewise
+	///   bit 2  MIDI activity   CPU port 2 bit 6, pin 33, via a 2SA1115 driver
+	/// The plugin adds its own bits above these; see the plugin layer.
+	uint8_t  leds;
 	uint8_t  card_present;      ///< 4 bits, one per slot, 1 = present (NOT PORT1's polarity)
 	uint8_t  patch;             ///< current patch number
 	uint8_t  part_tone[6];      ///< per-part tone index

@@ -384,8 +384,10 @@ private:
         // when their function exists.
         drawLed(voltaire::panel::LED_PART_JUMP, (m_leds & 0x01) != 0, Color(255, 60, 40));
         drawLed(voltaire::panel::LED_EDIT_EXIT, (m_leds & 0x02) != 0, Color(255, 60, 40));
-        drawLed(voltaire::panel::LED_MIDI, false, Color(255, 60, 40));
-        drawLed(voltaire::panel::LED_CLIP, false, Color(255, 60, 40));
+        // MIDI is the machine's own lamp, off CPU port 2 bit 6, so it blinks when the
+        // hardware's does.  CLIP is the plugin's, measured after the volume control.
+        drawLed(voltaire::panel::LED_MIDI, (m_leds & 0x04) != 0, Color(255, 140, 40));
+        drawLed(voltaire::panel::LED_CLIP, (m_leds & 0x08) != 0, Color(255, 40, 30));
         // FILT is the measured HF correction (PLUGIN-PLAN.md section 10.2) -- the only
         // filter the machine has that is switchable.  It is a CALIBRATION rather than a
         // tone control, so the lamp means "the emulator is matched to the hardware", which

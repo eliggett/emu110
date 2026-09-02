@@ -842,7 +842,11 @@ void U110Core::snapshot(PanelState &out) const
 	std::memcpy(out.lcd + 16, m_impl->lcd_ddram + 40, 16);
 	std::memcpy(out.cgram, m_impl->lcd_cgram, sizeof(out.cgram));
 	out.cgram_dirty = m_impl->lcd_cgram_dirty;
-	out.leds = u8(~m_impl->leds & 0x03);
+	// The firmware writes the two panel lamps inverted; the MIDI lamp is a CPU port bit,
+	// which is how the hardware drives it -- P2.6 through a 2SA1115.  Reporting the real
+	// source rather than inventing "MIDI seen recently" means the lamp blinks exactly when
+	// the machine's own does.
+	out.leds = u8((~m_impl->leds & 0x03) | (BIT(m_impl->port2, 6) ? 0x04 : 0x00));
 	out.card_present = u8(~m_impl->card_present & 0x0f);
 }
 

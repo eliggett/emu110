@@ -85,7 +85,7 @@ int main(int argc, char **argv)
 
     static float outL[BLOCK], outR[BLOCK];
     static unsigned char ev_in[ATOM_CAP], ev_out[ATOM_CAP];
-    float latency = 0, volume = 0.0f, hf = 1.0f;
+    float latency = 0, volume = (argc > 4) ? (float)atof(argv[4]) : 0.0f, hf = 1.0f;
     float btn[6] = { 0, 0, 0, 0, 0, 0 };
     static float outp[16];
 
@@ -108,6 +108,7 @@ int main(int argc, char **argv)
     short *pcm = malloc(sizeof(short) * 2 * total);
     long written = 0;
     int peak = 0;
+    unsigned seen_leds = 0;
 
     for (long done = 0; done < total; done += BLOCK)
     {
@@ -145,6 +146,7 @@ int main(int argc, char **argv)
         oseq->atom.size = ATOM_CAP - sizeof(LV2_Atom);
 
         d->run(h, BLOCK);
+        seen_leds |= ((unsigned)outp[11]) & 0x0f;    /* status word: lamp bits */
 
         for (int i = 0; i < BLOCK && written < total; i++, written++)
         {
@@ -162,6 +164,9 @@ int main(int argc, char **argv)
     d->cleanup(h);
 
     printf("reported latency: %.0f host frames\n", latency);
+    printf("lamps seen: PART=%d EDIT=%d MIDI=%d CLIP=%d\n",
+           (seen_leds & 1) != 0, (seen_leds & 2) != 0,
+           (seen_leds & 4) != 0, (seen_leds & 8) != 0);
     printf("peak: %d (%s)\n", peak, peak > 0 ? "PLUGIN MAKES SOUND" : "SILENT");
 
     FILE *o = fopen(wav, "wb");

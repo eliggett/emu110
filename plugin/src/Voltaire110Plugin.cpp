@@ -313,12 +313,25 @@ protected:
         m_resampler[1].process(m_coreR.data(), coreFrames, outR, frames);
 
         // Post-gain, smoothed.  No limiter: that would be dishonest about the signal.
+        // The clip lamp is measured HERE, after the gain, because that is where clipping
+        // actually happens -- the volume is a plugin-layer post-gain modelling an analogue
+        // pot after the DAC, so the emulation never sees it.
+        float peak = 0.0f;
         for (uint32_t i = 0; i < frames; i ++)
         {
             m_gain += (m_gainTarget - m_gain) * 0.001f;
             outL[i] *= m_gain;
             outR[i] *= m_gain;
+            const float a = std::fabs(outL[i]), b = std::fabs(outR[i]);
+            if (a > peak) peak = a;
+            if (b > peak) peak = b;
         }
+        if (peak >= 1.0f)
+            m_clipHold = uint32_t(m_hostRate * kClipHoldSeconds);
+        else if (m_clipHold > frames)
+            m_clipHold -= frames;
+        else
+            m_clipHold = 0;
 
         sendMidiOut();
         publishPanel(frames);
@@ -331,6 +344,10 @@ private:
     /// How often the panel snapshot goes to the UI.  Fast enough that a button press feels
     /// immediate; the cost is a snapshot copy, which is a few hundred bytes.
     static constexpr double kPanelRefreshHz = 20.0;
+
+    /// How long the clip lamp stays lit after a sample reaches full scale.  A single
+    /// clipped sample is over in 20 us; without a hold you would never see it.
+    static constexpr double kClipHoldSeconds = 0.4;
 
     void setupRate(double hostRate)
     {
@@ -382,8 +399,11 @@ private:
             m_outParams[kParamOutLcd0 - kParamOutFirst + i] = float(v);
         }
 
+        // Lamp bits 0-2 come from the machine; bit 3 is the plugin's own clip indicator,
+        // which the emulation cannot know about because the volume lives above it.
+        const uint32_t leds = uint32_t(st.leds) | (m_clipHold ? 0x08u : 0x00u);
         m_outParams[kParamOutStatus - kParamOutFirst] =
-                float(uint32_t(st.leds) | (uint32_t(st.cursor_pos) << 8)
+                float(leds | (uint32_t(st.cursor_pos) << 8)
                       | (uint32_t(st.cursor_flags) << 16));
 
         // One custom glyph per frame, round robin.  All eight refresh in about a quarter
@@ -507,6 +527,7 @@ private:
     unsigned m_lcdAccum = 0;
     char m_lastLcd[40] = { 0 };
     char m_pname[32] = { 0 }, m_psym[32] = { 0 };
+    uint32_t m_clipHold = 0;
     uint32_t m_publishAccum = 0;
     uint32_t m_publishPeriod = 2400;
     uint32_t m_cgramTurn = 0;
