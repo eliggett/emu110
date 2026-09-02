@@ -108,7 +108,15 @@ enum Params
     kParamOutFirst,
     kParamOutLcd0 = kParamOutFirst,     // 11 floats x 3 chars = 33 >= 32
     kParamOutLcdLast = kParamOutLcd0 + 10,
-    kParamOutStatus,                    // LEDs, cursor, card presence
+    // The lamps get a parameter of their OWN, with a range that matches their content.
+    //
+    // They used to be bits 0-3 of a word that also carried the cursor, declared 0..16777215
+    // -- so a lamp changing moved the value by 4 parts in 16.7 million.  A host that
+    // forwards an output port to its UI only when the value changes by more than some
+    // epsilon RELATIVE TO THE RANGE will drop that and keep the LCD, whose changes move the
+    // high bytes.  Which is exactly what was seen: text immediate, lamps frozen.
+    kParamOutLamps,                     // 0..15, so one lamp is 1/15th of the range
+    kParamOutCursor,                    // position and blink phase
     kParamOutCgramIndex,                // which custom glyph the next two carry
     kParamOutCgramA,                    // rows 0-3, five bits each
     kParamOutCgramB,                    // rows 4-7
@@ -196,9 +204,15 @@ protected:
                 }
                 else
                 {
-                    static const char *const nm[] = { "Status", "CGRAM idx", "CGRAM a", "CGRAM b" };
-                    static const char *const sy[] = { "status", "cgram_i", "cgram_a", "cgram_b" };
-                    const uint32_t k = index - kParamOutStatus;
+                    static const char *const nm[] = { "Lamps", "Cursor", "CGRAM idx",
+                                                      "CGRAM a", "CGRAM b" };
+                    static const char *const sy[] = { "lamps", "cursor", "cgram_i",
+                                                      "cgram_a", "cgram_b" };
+                    const uint32_t k = index - kParamOutLamps;
+                    // A range that fits the content, so the smallest real change is a
+                    // large fraction of it and no host can dismiss it as noise.
+                    parameter.ranges.max = (index == kParamOutLamps) ? 15.0f
+                            : (index == kParamOutCursor) ? 65535.0f : 16777215.0f;
                     std::snprintf(m_pname, sizeof(m_pname), "%s", nm[k]);
                     std::snprintf(m_psym, sizeof(m_psym), "%s", sy[k]);
                 }
@@ -402,9 +416,9 @@ private:
         // Lamp bits 0-2 come from the machine; bit 3 is the plugin's own clip indicator,
         // which the emulation cannot know about because the volume lives above it.
         const uint32_t leds = uint32_t(st.leds) | (m_clipHold ? 0x08u : 0x00u);
-        m_outParams[kParamOutStatus - kParamOutFirst] =
-                float(leds | (uint32_t(st.cursor_pos) << 8)
-                      | (uint32_t(st.cursor_flags) << 16));
+        m_outParams[kParamOutLamps - kParamOutFirst] = float(leds & 0x0f);
+        m_outParams[kParamOutCursor - kParamOutFirst] =
+                float(uint32_t(st.cursor_pos) | (uint32_t(st.cursor_flags) << 8));
 
         // One custom glyph per frame, round robin.  All eight refresh in about a quarter
         // second, which is fine for everything except the boot logo animation -- that is

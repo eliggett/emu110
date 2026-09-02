@@ -200,7 +200,7 @@ int main(int argc, char **argv)
         rt_arm(0);
         {   /* Lamp bits, and how much of the run each was lit -- "ever seen" cannot show
              * a polarity mistake, and every lamp on this machine is active low. */
-            const unsigned l = ((unsigned)outp[11]) & 0x0f;
+            const unsigned l = ((unsigned)outp[11]) & 0x0f;   /* port 24: lamps */
             seen_leds |= l;
             blocks_total++;
             for (int b = 0; b < 4; b++) if (l & (1u << b)) lit_blocks[b]++;

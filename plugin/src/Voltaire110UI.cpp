@@ -42,7 +42,8 @@ enum Params
     kParamOutFirst = kParamButtonFirst + 6,
     kParamOutLcd0 = kParamOutFirst,
     kParamOutLcdLast = kParamOutLcd0 + 10,
-    kParamOutStatus, kParamOutCgramIndex, kParamOutCgramA, kParamOutCgramB,
+    kParamOutLamps, kParamOutCursor,
+    kParamOutCgramIndex, kParamOutCgramA, kParamOutCgramB,
     kParamCount
 };
 
@@ -85,17 +86,17 @@ protected:
                 }
             }
         }
-        else if (index == kParamOutStatus)
+        else if (index == kParamOutLamps)
+        {
+            const uint8_t leds = uint8_t(uint32_t(value) & 0x0f);
+            if (leds != m_leds) { m_leds = leds; m_dirty = true; }
+        }
+        else if (index == kParamOutCursor)
         {
             const uint32_t v = uint32_t(value);
-            const uint8_t leds = uint8_t(v & 0xff);
-            const uint8_t pos = uint8_t((v >> 8) & 0xff);
-            const uint8_t flags = uint8_t((v >> 16) & 0xff);
-            if (leds != m_leds || pos != m_cursorPos || flags != m_cursorFlags)
-            {
-                m_leds = leds; m_cursorPos = pos; m_cursorFlags = flags;
-                m_dirty = true;
-            }
+            const uint8_t pos = uint8_t(v & 0xff), flags = uint8_t((v >> 8) & 0xff);
+            if (pos != m_cursorPos || flags != m_cursorFlags)
+            { m_cursorPos = pos; m_cursorFlags = flags; m_dirty = true; }
         }
         else if (index == kParamOutCgramIndex) { m_cgramIn = uint32_t(value) & 7; }
         else if (index == kParamOutCgramA || index == kParamOutCgramB)
