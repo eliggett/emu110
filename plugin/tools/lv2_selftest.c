@@ -30,8 +30,19 @@ static void rt_arm(int on)   { if (rt_audit_set_active) rt_audit_set_active(on);
 
 #define RATE     48000.0
 #define BLOCK    256
-#define SECONDS  16.0
+#define SECONDS  20.0
 #define ATOM_CAP 4096
+
+/* Optional: put the machine into a chorus patch before the note, so the effects path is
+ * exercised.  Enabled with a fifth argument of "fx". */
+static const struct { int len; unsigned char b[16]; } kFxSetup[] = {
+    { 2, { 0xcf, 0x07 } },  /* program change P-08 Double E.P */
+    { 11, { 0xf0, 0x41, 0x0f, 0x23, 0x12, 0x00, 0x01, 0x19, 0x02, 0x64, 0xf7 } },  /* chorus rate 2 */
+    { 11, { 0xf0, 0x41, 0x0f, 0x23, 0x12, 0x00, 0x01, 0x1a, 0x01, 0x64, 0xf7 } },  /* chorus depth 1 */
+    { 11, { 0xf0, 0x41, 0x0f, 0x23, 0x12, 0x00, 0x01, 0x1b, 0x00, 0x64, 0xf7 } },  /* tremolo rate 0 */
+    { 11, { 0xf0, 0x41, 0x0f, 0x23, 0x12, 0x00, 0x01, 0x1c, 0x00, 0x63, 0xf7 } },  /* tremolo depth 0 */
+    { 11, { 0xf0, 0x41, 0x0f, 0x23, 0x12, 0x00, 0x01, 0x18, 0x14, 0x53, 0xf7 } },  /* output mode 21 */
+};
 
 /* A URID map just big enough for the handful of URIs DPF asks about. */
 static char *g_uris[128];
@@ -93,6 +104,7 @@ int main(int argc, char **argv)
     static unsigned char ev_in[ATOM_CAP], ev_out[ATOM_CAP];
     float latency = 0, volume = (argc > 4) ? (float)atof(argv[4]) : 0.0f, hf = 1.0f;
     float btn[6] = { 0, 0, 0, 0, 0, 0 };
+    const int want_fx = (argc > 5) && strcmp(argv[5], "fx") == 0;
     static float outp[16];
 
     d->connect_port(h, 0, outL);
@@ -127,15 +139,30 @@ int main(int argc, char **argv)
         seq->body.pad  = 0;
 
         /* Note on at 12 s, off at 15 s -- after the machine has finished booting. */
-        const long t12 = (long)(12.0 * RATE), t15 = (long)(15.0 * RATE);
+        const long t12 = (long)(12.0 * RATE), t15 = (long)(16.0 * RATE);
         const unsigned char *msg = NULL;
-        static const unsigned char on[3]  = { 0x90, 60, 100 };
+        static const unsigned char on[3]  = { 0x90, 60, 64 };
         static const unsigned char off[3] = { 0x80, 60, 0 };
         /* Press EDIT/EXIT at 7 s and release at 8 s: the buttons are what drive the
          * machine's own menus, and this proves the whole loop from a host control port
          * through to the LCD. */
-        btn[1] = (done >= (long)(7.0 * RATE) && done < (long)(8.0 * RATE)) ? 1.0f : 0.0f;
+        btn[1] = (!want_fx && done >= (long)(7.0 * RATE)
+                  && done < (long)(8.0 * RATE)) ? 1.0f : 0.0f;
 
+        if (want_fx) {
+            const long step = (done - (long)(7.0 * RATE)) / BLOCK;
+            if (step >= 0 && step < (long)(sizeof(kFxSetup)/sizeof(kFxSetup[0])) &&
+                ((done - (long)(7.0 * RATE)) % BLOCK) == 0) {
+                LV2_Atom_Event *e = (LV2_Atom_Event *)((char *)
+                        LV2_ATOM_CONTENTS(LV2_Atom_Sequence, seq));
+                e->time.frames = 0;
+                e->body.type = urid_midi;
+                e->body.size = (uint32_t)kFxSetup[step].len;
+                memcpy(LV2_ATOM_BODY(&e->body), kFxSetup[step].b, kFxSetup[step].len);
+                seq->atom.size += (uint32_t)lv2_atom_pad_size(
+                        sizeof(LV2_Atom_Event) + kFxSetup[step].len);
+            }
+        }
         if (done <= t12 && t12 < done + BLOCK) msg = on;
         if (done <= t15 && t15 < done + BLOCK) msg = off;
         if (msg)
