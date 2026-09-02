@@ -18,6 +18,12 @@
 #include <lv2/parameters/parameters.h>
 
 #include <dlfcn.h>
+
+/* Supplied by rt_audit.so when it is LD_PRELOADed; weak so the selftest links without it. */
+extern void rt_audit_set_active(int on) __attribute__((weak));
+extern void rt_audit_report(void)       __attribute__((weak));
+extern void rt_audit_reset(void)        __attribute__((weak));
+static void rt_arm(int on)   { if (rt_audit_set_active) rt_audit_set_active(on); }
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -146,7 +152,12 @@ int main(int argc, char **argv)
         oseq->atom.type = urid_seq;
         oseq->atom.size = ATOM_CAP - sizeof(LV2_Atom);
 
+        /* Only audit once the machine is up: instantiate() and the first blocks legally
+         * allocate, and counting those would bury the interesting result. */
+        if (done == (long)(10.0 * RATE) && rt_audit_reset) rt_audit_reset();
+        rt_arm(done >= (long)(10.0 * RATE));
         d->run(h, BLOCK);
+        rt_arm(0);
         {   /* Lamp bits, and how much of the run each was lit -- "ever seen" cannot show
              * a polarity mistake, and every lamp on this machine is active low. */
             const unsigned l = ((unsigned)outp[11]) & 0x0f;
@@ -167,6 +178,7 @@ int main(int argc, char **argv)
         }
     }
 
+    if (rt_audit_report) rt_audit_report();
     if (d->deactivate) d->deactivate(h);
     d->cleanup(h);
 

@@ -38,6 +38,18 @@ using namespace roland_u110;
 
 namespace {
 
+// The diagnostic switches, read ONCE.  getenv walks the environment block and is not for
+// the audio thread; these used to be called per register access, which the real-time
+// audit counted as 23383 calls inside one run of the callback.
+#define TRACE_FLAG(NAME, ENV) \
+    inline bool NAME() { static const bool on = std::getenv(ENV) != nullptr; return on; }
+TRACE_FLAG(trace_u110_lcdtrace,  "U110_LCDTRACE")
+TRACE_FLAG(trace_u110_envtrace,  "U110_ENVTRACE")
+TRACE_FLAG(trace_u110_tgtrace,   "U110_TGTRACE")
+TRACE_FLAG(trace_u110_miditrace, "U110_MIDITRACE")
+TRACE_FLAG(trace_u110_cycles,    "U110_CYCLES")
+#undef TRACE_FLAG
+
 constexpr u32 CPU_CLOCK  = 12000000;        // 12 MHz XTAL
 constexpr u32 PCM_CLOCK  = 34816000;        // IC15's own crystal, X2
 constexpr u32 PCM_DIV    = 1088;            // 34.816 MHz / 1088 = 32000 Hz exactly
@@ -243,6 +255,18 @@ void U110Core::Impl::build()
 		});
 	}
 
+	// Touch every trace flag here, so its one-time getenv and its static-init guard happen
+	// on THIS thread rather than the first time the audio callback reaches them.
+	(void)trace_u110_lcdtrace(); (void)trace_u110_envtrace(); (void)trace_u110_tgtrace();
+	(void)trace_u110_miditrace(); (void)trace_u110_cycles();
+
+	// Reserve the MIDI queues once.  They are pushed to from the audio thread, and a
+	// vector that grows there is an allocation on the render path.
+	midi_in_queue.reserve(1024);
+	midi_in_at.reserve(1024);
+	midi_out_bytes.reserve(1024);
+	midi_out_at.reserve(1024);
+
 	lcd_timer = machine.scheduler().alloc([this](s32 p) { lcd_int_cb(p); });
 	stream_timer = machine.scheduler().alloc([this](s32 p) { stream_tick(p); });
 
@@ -382,7 +406,7 @@ std::string U110Core::Impl::lcd_line(int n) const
 void U110Core::Impl::lcd_ctrl_w(u8 data)
 {
 	lcd_track_ctrl(data);
-	if (getenv("U110_LCDTRACE"))
+	if (trace_u110_lcdtrace())
 		std::fprintf(stderr, "LCD %f cmd %02X\n", machine.time().as_double(), data);
 	lcd.control_w(data);
 	lcd_timer->adjust(attotime::from_usec(40));
@@ -391,7 +415,7 @@ void U110Core::Impl::lcd_ctrl_w(u8 data)
 void U110Core::Impl::lcd_data_w(u8 data)
 {
 	lcd_track_data(data);
-	if (getenv("U110_LCDTRACE"))
+	if (trace_u110_lcdtrace())
 		std::fprintf(stderr, "LCD %f chr %02X '%c'\n", machine.time().as_double(), data,
 				(data >= 0x20 && data < 0x7f) ? char(data) : '.');
 	lcd.data_w(data);
@@ -453,7 +477,7 @@ u16 U110Core::Impl::snd_r(offs_t offset, u16 mem_mask)
 		else if (offset == 0x00)
 		{
 			const u8 v = pcm.read(0x00);
-			if (getenv("U110_ENVTRACE"))
+			if (trace_u110_envtrace())
 				std::fprintf(stderr, "ENVRD %f -> v%02X\n", machine.time().as_double(), v);
 			return v;                               // NOT offset+1: 01 is the read port
 		}
@@ -474,7 +498,7 @@ void U110Core::Impl::snd_w(offs_t offset, u16 data, u16 mem_mask)
 	{
 		snd_regs[offset] = data & 0xff;
 		tg_writes ++;
-		if (getenv("U110_TGTRACE"))
+		if (trace_u110_tgtrace())
 			std::fprintf(stderr, "TG %f v%02X reg %02X = %02X cyc %llu\n",
 					machine.time().as_double(), snd_regs[0x1f] & 0x1f,
 					unsigned(offset), data & 0xff,
@@ -490,7 +514,7 @@ void U110Core::Impl::snd_w(offs_t offset, u16 data, u16 mem_mask)
 	{
 		offs_t const hi = (offset == 0x11 || offset == 0x15) ? offset + 2 : offset + 1;
 		snd_regs[offset + 1] = data >> 8;
-		if (getenv("U110_TGTRACE"))
+		if (trace_u110_tgtrace())
 			std::fprintf(stderr, "TG %f v%02X reg %02X = %02X cyc %llu\n",
 					machine.time().as_double(), snd_regs[0x1f] & 0x1f,
 					unsigned(offset + 1), data >> 8,
@@ -530,7 +554,7 @@ void U110Core::Impl::midi_deliver_due()
 		// block size" property the null test rests on.
 		const attotime due = midi_due();
 		const u8 byte = midi_in_queue[midi_in_pos ++];
-		if (getenv("U110_MIDITRACE"))
+		if (trace_u110_miditrace())
 			std::fprintf(stderr, "MIDI IN %f %02X   (due %f)\n",
 					machine.time().as_double(), byte, due.as_double());
 		cpu.serial_w(byte);
@@ -631,7 +655,7 @@ void U110Core::Impl::run_block(u32 frames)
 		midi_in_pos = 0;
 	}
 
-	if (getenv("U110_CYCLES"))
+	if (trace_u110_cycles())
 	{
 		static u64 last_cycles = 0; static double last_t = 0; static u64 last_tg = 0;
 		const double t = machine.time().as_double();

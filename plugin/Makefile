@@ -49,8 +49,18 @@ generated/u110_cgrom.h: ../tools/make_lcd_cgrom.py
 	@mkdir -p generated
 	@python3 ../tools/make_lcd_cgrom.py --header generated/u110_cgrom.h
 
+# The DPF targets link libu110core.a but make has no rule tying them to it, so a change
+# in the core or the shim would build a fresh archive and quietly relink NOTHING -- the
+# plugin kept running the old code, which is a very confusing way to test a fix.  Dropping
+# the built binaries when the archive is newer forces the relink.
 core: generated
 	@tools/build_core.sh
+	@for f in bin/$(NAME).lv2/$(NAME)_dsp.so bin/$(NAME).clap bin/$(NAME) \
+	          bin/$(NAME).vst3/Contents/x86_64-linux/$(NAME).so; do \
+		if [ -e "$$f" ] && [ "$(CORE_LIB)" -nt "$$f" ]; then \
+			echo "  core is newer than $$f -- forcing a relink"; rm -f "$$f"; \
+		fi; \
+	done
 
 .PHONY: core generated ttl
 
@@ -63,4 +73,16 @@ selftest: all
 		bin/Voltaire110.lv2/Voltaire110_dsp.so \
 		"https://github.com/eliggett/emu110/voltaire110" build/lv2_selftest.wav
 
-.PHONY: selftest
+# Real-time safety.  The audio callback has a hard deadline and what matters is the worst
+# case, so anything that can block -- malloc, free, locks, getenv -- must not be reachable
+# from run().  Reading the code cannot settle that, because most of the calls are several
+# layers down in code we did not write.  This interposes the allocator and counts.
+rtaudit: all
+	@gcc -shared -fPIC -rdynamic -o build/rt_audit.so tools/rt_audit.c -ldl
+	@gcc -O2 -g -o build/lv2_selftest tools/lv2_selftest.c -ldl $$(pkg-config --cflags lv2)
+	@U110_DATA_DIR=$${U110_DATA_DIR:-$(CURDIR)/..} LD_PRELOAD=$(CURDIR)/build/rt_audit.so \
+		build/lv2_selftest bin/$(NAME).lv2/$(NAME)_dsp.so \
+		"https://github.com/eliggett/emu110/voltaire110" build/rt_audit.wav 0 2>&1 \
+		| sed -n '/real-time audit/,/^$$/p'
+
+.PHONY: rtaudit selftest

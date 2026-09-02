@@ -355,8 +355,14 @@ public:
 private:
 	void apply_pending_inputs(s32);
 
+	// A FIXED queue, not a vector.  This is on the audio thread: a vector that is emptied
+	// and refilled allocates every time it grows from nothing, and the real-time audit
+	// caught exactly that -- one malloc per interrupt-line change, plus the matching free.
+	// MAME's own device_input uses a fixed queue of 32 for the same reason.
 	struct pending_input { int line, state; };
-	std::vector<pending_input> m_pending_inputs;
+	static constexpr unsigned kMaxPendingInputs = 32;
+	pending_input m_pending_inputs[kMaxPendingInputs];
+	unsigned m_pending_count = 0;
 	emu_timer *m_sync_timer = nullptr;
 
 	int *m_icountptr = nullptr;

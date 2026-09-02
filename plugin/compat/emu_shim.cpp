@@ -131,8 +131,13 @@ void device_scheduler::advance_to(attotime target)
 		else
 			next->m_active = false;
 
-		auto cb = next->m_cb;
-		s32 param = next->m_param;
+		// Call through a REFERENCE.  Copying the std::function allocates, and this fires
+		// at the envelope timer's rate -- 64000 times a second -- so the copy alone was
+		// two heap operations per core sample on the audio thread.  Timers are allocated
+		// once and never destroyed, so the reference cannot dangle even if the callback
+		// re-arms the timer it was called from.
+		const std::function<void(s32)> &cb = next->m_cb;
+		const s32 param = next->m_param;
 		if (cb)
 			cb(param);
 	}
@@ -312,8 +317,14 @@ u64 device_execute_interface::attotime_to_cycles(attotime t) const
 
 void device_execute_interface::set_input_line(int line, int state)
 {
-	m_pending_inputs.push_back({ line, state });
-	if (m_pending_inputs.size() != 1)
+	if (m_pending_count >= kMaxPendingInputs)
+	{
+		device().logerror("input line queue overflow; dropping line %d state %d\n",
+				line, state);
+		return;
+	}
+	m_pending_inputs[m_pending_count ++] = { line, state };
+	if (m_pending_count != 1)
 		return;                      // a sync is already armed for this batch
 
 	if (!m_sync_timer)
@@ -327,11 +338,14 @@ void device_execute_interface::set_input_line(int line, int state)
 
 void device_execute_interface::apply_pending_inputs(s32)
 {
-	// Copy first: a handler may queue more.
-	std::vector<pending_input> batch;
-	batch.swap(m_pending_inputs);
-	for (const auto &p : batch)
-		execute_set_input(p.line, p.state);
+	// Take the batch first: a handler may queue more, and those belong to the next sync.
+	pending_input batch[kMaxPendingInputs];
+	const unsigned n = m_pending_count;
+	for (unsigned i = 0; i < n; i ++)
+		batch[i] = m_pending_inputs[i];
+	m_pending_count = 0;
+	for (unsigned i = 0; i < n; i ++)
+		execute_set_input(batch[i].line, batch[i].state);
 }
 
 void device_execute_interface::steal_remaining_cycles()

@@ -283,3 +283,43 @@ almost right, which is the hard kind of wrong.
 Related: the knob pointer is drawn in code so it can rotate, so the artwork's own copy is
 skipped by id (`kVolumeKnobPointerId`). Drawing both leaves the old pointer behind at its
 zero position.
+
+## Real-time safety
+
+```sh
+make rtaudit
+```
+
+The audio callback has a hard deadline -- 5.3 ms for a 256-frame block at 48 kHz -- and what
+matters is the **worst case**, not the average. `malloc` may ask the kernel for pages; a
+lock may wait on another thread. Either can blow the deadline occasionally, which is heard
+as a click and is very hard to reproduce.
+
+Reading the code cannot settle this, because most of the interesting calls are several
+layers down in code we did not write. `tools/rt_audit.c` interposes the allocator, arms a
+flag around `run()`, and counts -- and reports the call sites, so a hit has a name rather
+than being an occasional click.
+
+The first run found **384,184 mallocs and 23,383 getenv calls in six seconds** of a settled
+machine. Current state:
+
+```
+    malloc  0    free  0    realloc  0    calloc  0    pthread_mutex_lock  0
+    getenv  3    (one-time static initialisation inside roland_lp.cpp)
+```
+
+### `[!]` What was wrong, and why none of it was visible
+
+- **`device_scheduler::advance_to` copied a `std::function` to call it.** That is one
+  allocation and one free per timer expiry, and the envelope timer fires at 64 kHz -- two
+  heap operations per core sample. Calling through a `const &` fixes it; timers are
+  allocated once and never destroyed, so the reference cannot dangle.
+- **`set_input_line` pushed onto a `std::vector` that was emptied every time.** Growing
+  from empty allocates, so every interrupt-line change cost a malloc and a free. It is now
+  a fixed array of 32, which is what MAME's own `device_input` uses, for this reason.
+- **`getenv` was called per sound-register write** to test a debug flag. Now cached in a
+  `bool` that is touched once at construction, off the audio thread.
+- The MIDI queues now `reserve()` at construction rather than growing on the render path.
+
+None of this was audible in ordinary playing, which is exactly why it needed measuring
+rather than reasoning about.
