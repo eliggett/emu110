@@ -193,6 +193,13 @@ public:
 	/// once this is bit-identical, so the improvement has a trustworthy baseline.
 	void renderStereo(float *left, float *right, uint32_t nframes);
 
+	/// Switch the measured HF correction in or out (PLUGIN-PLAN.md section 10.2).
+	///
+	/// This is a CALIBRATION, not a tone control: it is the fitted bell that makes the
+	/// emulator match the hardware captures, and the reason to switch it off is to hear
+	/// the uncorrected model, not to taste.  Default on.
+	void setHfCorrection(bool on);
+
 	/// Panel switch state.  Send EDGES, and hold a press long enough in EMULATED time for
 	/// the firmware's debouncer at 0x4118 to see it -- roughly 150 ms.  A press and release
 	/// inside one buffer will be missed entirely.

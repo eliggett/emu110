@@ -795,6 +795,18 @@ size_t U110Core::midiOut(uint8_t *buf, size_t cap, uint32_t *offsets)
 	return n;
 }
 
+void U110Core::setHfCorrection(bool on)
+{
+	if (!m_impl->started)
+		return;
+	// modify() flushes the stream before retuning, so the switch is clean mid-note.  Off
+	// is an exact bypass: a PEAK biquad with gain 1.0 has identical numerator and
+	// denominator, so the samples pass through untouched.
+	for (int ch = 0; ch < 2; ch ++)
+		m_impl->eq[ch].modify(filter_biquad_device::biquad_type::PEAK,
+				EQ_FC, EQ_Q, on ? EQ_GAIN : 1.0);
+}
+
 void U110Core::setButton(Button sw, bool down)
 {
 	if (sw < 0 || sw >= kButtonCount)

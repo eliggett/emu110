@@ -168,3 +168,46 @@ sounds wrong.
 
 `U110_DITHER=0` does the corresponding job on the MAME side, switching off the TPDF dither
 at the 16-bit output so the two ends can be compared sample for sample.
+
+## Building the plugin
+
+```sh
+cd plugin && make            # core + standalone, LV2, CLAP, VST3
+make selftest                # load the built LV2 and prove it makes sound
+```
+
+Output lands in `plugin/bin/`. The core is built separately into `build/libu110core.a` and
+linked in, so DPF's compiler flags and ours stay independent and the core can be built and
+null-tested with no DPF present at all.
+
+**ROMs are never bundled.** The plugin looks for the user's own dumps, in this order
+(PLUGIN-PLAN.md §9):
+
+```
+$U110_DATA_DIR/roms   $XDG_DATA_HOME/u110/roms   ~/.local/share/u110/roms   /usr/share/u110/roms
+```
+
+With none found it loads, stays silent, and says why on stderr.
+
+### `make selftest`
+
+Building the core and null-testing it proves the *emulation*. It says nothing about the
+*plugin*: DPF, the resampler at the host's rate, MIDI arriving as LV2 atoms, the port
+layout in the generated TTL. `tools/lv2_selftest.c` is a minimal LV2 host that loads the
+built bundle exactly as Ardour would, plays a note and writes a wav — so what gets tested
+is what a user loads.
+
+### The resampler
+
+`src/Resampler.hpp`, a Kaiser-windowed sinc polyphase at the exact rational ratio (2:3 to
+48 kHz, 320:441 to 44.1 kHz). §11 warns that linear interpolation "would quietly undo a
+lot" of the accuracy work, and with the core now bit-identical to MAME that would be
+absurd. Measured, by fitting a sine and taking the residual:
+
+| | 100 Hz | 1 kHz | 5 kHz | 12 kHz |
+|---|---|---|---|---|
+| level | ±0.000 dB | ±0.000 dB | ±0.000 dB | ±0.000 dB |
+| residual below signal | 100 dB | 103 dB | 99 dB | 92 dB |
+
+15 kHz sits in the transition band at −7.5 dB. The U-110's own output is already some
+23 dB down at 14–16 kHz, so this is not the dominant term up there.

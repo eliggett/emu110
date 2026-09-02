@@ -41,8 +41,10 @@ SOURCES=(
   "$MAME/src/lib/util/disasmintf.cpp"
 )
 
+# -fPIC because the same objects are linked into the plugin's shared libraries (LV2,
+# VST3, CLAP) as well as into the standalone test tools.
 CXXFLAGS=(-std=c++20 -O2 -g -Wall -Wno-unused-variable -Wno-unused-but-set-variable
-          -Wno-unused-function -fno-strict-aliasing)
+          -Wno-unused-function -fno-strict-aliasing -fPIC)
 
 # mcs96ops.lst is compiled into mcs96.hxx / i8x9x.hxx by MAME's own generator.  The plugin
 # build runs the same Python step rather than checking generated files in.
@@ -74,6 +76,10 @@ for src in "${SOURCES[@]}"; do
   fi
 done
 [ $fail -ne 0 ] && exit 1
+
+# A static library, so the DPF build links the core without inheriting its compiler flags
+# (or imposing ours on DPF).  The two builds stay independent.
+ar rcs "$OUT/libu110core.a" "${OBJS[@]}" 2>/dev/null && echo "  archived                 $(realpath --relative-to="$HERE" "$OUT/libu110core.a")"
 
 # Compiling proves the declarations line up; only linking proves the definitions do.
 echo

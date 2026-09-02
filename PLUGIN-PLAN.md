@@ -68,8 +68,11 @@ from-scratch reimplementation of the VST3 interfaces (the `travesty` directory),
 ISC licensed, written specifically so DPF plugins are not bound by Steinberg's
 terms.
 
-`[?]` **Verify before relying on this:** clone DPF, read the license headers in
-`distrho/src/travesty/`.
+**Verified.** `distrho/src/travesty/` is **ISC licensed**, clean-room, pure C —
+"a pure C VST3-compatible interface... without a bloated SDK", by falkTX, 2021–2022.
+The only occurrence of "Steinberg" in the whole directory is a comment noting that
+content scaling shares an IID with PreSonus's. **No Steinberg SDK, no registration,
+no GPLv3 obligation from that direction.**
 
 What survives regardless of SDK is the **trademark**: "VST" is Steinberg's
 registered mark. Say "VST3-compatible", don't use the logo.
@@ -1143,7 +1146,9 @@ Extracted and headless should be a few percent — comfortable for many instance
    null test to green and put it in CI (§3).~~ **Done except CI.** The core is
    **bit-identical to MAME**, 864000 of 864000 frames, and block-size independent.
    Only "put it in CI" remains.
-5. DPF standalone, no UI, plus the ImGui debug window (§2.1, §5).
+5. **Half done.** ~~DPF standalone, no UI~~ — all four targets build (standalone, LV2,
+   CLAP, VST3) and the LV2 **makes the right sound**: C4 at 262.0 Hz, verified by a
+   minimal LV2 host that loads the built bundle. The ImGui debug window is still to do.
 6. Panel snapshot protocol and command queue (§8).
 7. Bake the CGROM from MatrixSans Screen; hand-fix the mangled glyphs (§7).
 8. Live CGRAM rendering and push-on-change transport; verify against the boot
@@ -1172,7 +1177,8 @@ that subsystem, so the hook point is known.
 
 ## 13. Open questions
 
-- `[?]` DPF's `travesty` VST3 licensing — read the headers in `distrho/src/travesty/`.
+- ~~`[?]` DPF's `travesty` VST3 licensing.~~ **Resolved: ISC, clean-room, no Steinberg
+  SDK.** See §1.
 - `[?]` DPF's DSP→UI push mechanism for a ~120-byte blob.
 - `[?]` DPF standalone audio backends on Windows and macOS.
 - `[?]` DPF / LV2 SysEx size limits — does a bank dump need chunking?

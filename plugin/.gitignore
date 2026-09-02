@@ -1,3 +1,6 @@
-# Build products.  Regenerate with plugin/tools/panel_export.py and the Makefile.
+# Build products.  Regenerate with tools/build_core.sh and make.
 build/
 generated/
+bin/
+*.o
+*.d
