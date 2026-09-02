@@ -95,35 +95,9 @@ enum Params
     kParamButtonDec,
     kParamButtonIncEnter,
 
-    // --- read-only, DSP -> UI ------------------------------------------------------
-    //
-    // PLUGIN-PLAN.md section 8 left the transport as an open question.  It is output
-    // parameters: LV2 mandates the UI as a separate binary, so it cannot read the DSP's
-    // memory, and output parameters are what DPF's own examples use.
-    //
-    // The LCD is 32 CHARACTER CODES, not pixels, packed three to a float -- a float32
-    // holds 24 bits exactly, so this is lossless.  The custom glyphs are sent one per
-    // frame in rotation rather than all at once, which keeps the parameter count sane;
-    // all eight refresh in about a quarter second.
-    kParamOutFirst,
-    kParamOutLcd0 = kParamOutFirst,     // 11 floats x 3 chars = 33 >= 32
-    kParamOutLcdLast = kParamOutLcd0 + 10,
-    // The lamps get a parameter of their OWN, with a range that matches their content.
-    //
-    // They used to be bits 0-3 of a word that also carried the cursor, declared 0..16777215
-    // -- so a lamp changing moved the value by 4 parts in 16.7 million.  A host that
-    // forwards an output port to its UI only when the value changes by more than some
-    // epsilon RELATIVE TO THE RANGE will drop that and keep the LCD, whose changes move the
-    // high bytes.  Which is exactly what was seen: text immediate, lamps frozen.
-    kParamOutLamps,                     // 0..15, so one lamp is 1/15th of the range
-    kParamOutCursor,                    // position and blink phase
-    kParamOutCgramIndex,                // which custom glyph the next two carry
-    kParamOutCgramA,                    // rows 0-3, five bits each
-    kParamOutCgramB,                    // rows 4-7
-
     kParamCount
 };
-constexpr uint32_t kNumLcdParams = 11;
+
 
 const char *const kButtonNames[] = {
     "Part / Jump", "Edit / Exit", "Left", "Right", "Dec", "Inc / Enter"
@@ -139,7 +113,8 @@ class Voltaire110Plugin : public Plugin
 {
 public:
     Voltaire110Plugin()
-        : Plugin(kParamCount, 0, 0)
+        // parameters, programs, STATES -- the third is what registers the "panel" blob.
+        : Plugin(kParamCount, 0, 1)
     {
         loadRoms();
         setupRate(getSampleRate());
@@ -189,38 +164,7 @@ protected:
             parameter.ranges.max = 1.0f;
             break;
         default:
-            if (index >= kParamOutFirst)
-            {
-                // Read-only, DSP -> UI.  Integer-valued so hosts do not interpolate them.
-                parameter.hints = kParameterIsOutput | kParameterIsInteger;
-                parameter.ranges.def = 0.0f;
-                parameter.ranges.min = 0.0f;
-                parameter.ranges.max = 16777215.0f;
-                const uint32_t o = index - kParamOutFirst;
-                if (index <= kParamOutLcdLast)
-                {
-                    std::snprintf(m_pname, sizeof(m_pname), "LCD %u", o);
-                    std::snprintf(m_psym, sizeof(m_psym), "lcd_%u", o);
-                }
-                else
-                {
-                    static const char *const nm[] = { "Lamps", "Cursor", "CGRAM idx",
-                                                      "CGRAM a", "CGRAM b" };
-                    static const char *const sy[] = { "lamps", "cursor", "cgram_i",
-                                                      "cgram_a", "cgram_b" };
-                    const uint32_t k = index - kParamOutLamps;
-                    // A range that fits the content, so the smallest real change is a
-                    // large fraction of it and no host can dismiss it as noise.
-                    parameter.ranges.max = (index == kParamOutLamps) ? 15.0f
-                            : (index == kParamOutCursor) ? 65535.0f : 16777215.0f;
-                    std::snprintf(m_pname, sizeof(m_pname), "%s", nm[k]);
-                    std::snprintf(m_psym, sizeof(m_psym), "%s", sy[k]);
-                }
-                parameter.name = m_pname;
-                parameter.symbol = m_psym;
-                break;
-            }
-            if (index >= kParamButtonFirst && index < kParamOutFirst)
+            if (index >= kParamButtonFirst && index < kParamCount)
             {
                 const uint32_t b = index - kParamButtonFirst;
                 parameter.hints = kParameterIsAutomatable | kParameterIsBoolean;
@@ -241,8 +185,6 @@ protected:
         case kParamVolume:       return m_volumeDb;
         case kParamHfCorrection: return m_hfCorrection ? 1.0f : 0.0f;
         }
-        if (index >= kParamOutFirst)
-            return m_outParams[index - kParamOutFirst];
         if (index >= kParamButtonFirst)
             return m_buttons[index - kParamButtonFirst] ? 1.0f : 0.0f;
         return 0.0f;
@@ -267,7 +209,7 @@ protected:
             break;
         }
         default:
-            if (index >= kParamButtonFirst && index < kParamOutFirst)
+            if (index >= kParamButtonFirst && index < kParamCount)
             {
                 const uint32_t b = index - kParamButtonFirst;
                 const bool down = value > 0.5f;
@@ -280,6 +222,36 @@ protected:
             break;
         }
     }
+
+    // ---- panel state: one struct, over the atom port -------------------------------
+    //
+    // Output control ports were the wrong shape for this.  A scalar port is meant to carry
+    // ONE value with a meaningful range, and hosts apply their own change detection to it;
+    // packing a bitfield into one and asking every host to notice a change of 4 in
+    // 16777215 is asking for exactly the trouble it caused.  It also does not scale to what
+    // is coming -- tone and patch NAMES, and a parameter editor -- which are text, not
+    // numbers.
+    //
+    // So the panel goes as a single blob on the atom port, which is LV2's channel for
+    // structured DSP->UI data and what responsive plugins actually use.  Scalars that
+    // really are scalars, like the VU meters, stay as output ports; that is what those are
+    // for.
+
+    void initState(uint32_t index, State &state) override
+    {
+        if (index != 0)
+            return;
+        state.key = "panel";
+        state.label = "Panel";
+        // Not host-readable: this is live machine state, not something to save in a
+        // session or show in a generic UI.
+        state.hints = kStateIsOnlyForUI;
+        state.defaultValue = "";
+    }
+
+    // getState() belongs to DISTRHO_PLUGIN_WANT_FULL_STATE, which we do not want: this
+    // state is live machine display, not something a host should save or restore.
+    void setState(const char *, const char *) override { }
 
     // ---- audio ---------------------------------------------------------------------
 
@@ -363,6 +335,24 @@ private:
     /// clipped sample is over in 20 us; without a hold you would never see it.
     static constexpr double kClipHoldSeconds = 0.4;
 
+    /// Everything the panel needs, in one fixed layout.  Hex rather than base64 so the
+    /// encoder is four lines and has no dependency; 99 bytes becomes 198 characters, which
+    /// is nothing next to an audio buffer.
+    struct PanelBlob
+    {
+        uint8_t lcd[32];
+        uint8_t cgram[64];
+        uint8_t leds, cursor_pos, cursor_flags;
+    };
+
+    static void encodeHex(const uint8_t *src, size_t n, char *dst)
+    {
+        static const char *const h = "0123456789abcdef";
+        for (size_t i = 0; i < n; i ++)
+        { dst[i * 2] = h[src[i] >> 4]; dst[i * 2 + 1] = h[src[i] & 0x0f]; }
+        dst[n * 2] = 0;
+    }
+
     void setupRate(double hostRate)
     {
         m_hostRate = hostRate;
@@ -402,37 +392,33 @@ private:
         voltaire::PanelState st;
         m_core.snapshot(st);
 
-        for (uint32_t i = 0; i < kNumLcdParams; i ++)
+        // The blob: only when something in it actually changed.  An idle machine sends
+        // nothing at all, which is what keeps the allocation DPF does inside
+        // updateStateValue() off the audio thread in the common case.
         {
-            uint32_t v = 0;
-            for (uint32_t k = 0; k < 3; k ++)
+            PanelBlob blob;
+            std::memcpy(blob.lcd, st.lcd, sizeof(blob.lcd));
+            std::memcpy(blob.cgram, st.cgram, sizeof(blob.cgram));
+            blob.leds = uint8_t(uint32_t(st.leds) | (m_clipHold ? 0x08u : 0x00u));
+            blob.cursor_pos = st.cursor_pos;
+            blob.cursor_flags = st.cursor_flags;
+            if (std::memcmp(&blob, &m_lastBlob, sizeof(blob)) != 0)
             {
-                const uint32_t c = i * 3 + k;
-                v |= uint32_t(c < 32 ? st.lcd[c] : 0) << (8 * k);
+                m_lastBlob = blob;
+                encodeHex(reinterpret_cast<const uint8_t *>(&blob), sizeof(blob), m_blobHex);
+                // getenv cached: this is the audio thread.
+                static const bool trace = std::getenv("VOLTAIRE_BLOB") != nullptr;
+                const bool ok = updateStateValue("panel", m_blobHex);
+                if (trace)
+                {
+                    static int n = 0;
+                    if (++n <= 5)
+                        std::fprintf(stderr, "blob %d: %s (%zu chars)\n",
+                                n, ok ? "sent" : "REJECTED", std::strlen(m_blobHex));
+                }
             }
-            m_outParams[kParamOutLcd0 - kParamOutFirst + i] = float(v);
         }
 
-        // Lamp bits 0-2 come from the machine; bit 3 is the plugin's own clip indicator,
-        // which the emulation cannot know about because the volume lives above it.
-        const uint32_t leds = uint32_t(st.leds) | (m_clipHold ? 0x08u : 0x00u);
-        m_outParams[kParamOutLamps - kParamOutFirst] = float(leds & 0x0f);
-        m_outParams[kParamOutCursor - kParamOutFirst] =
-                float(uint32_t(st.cursor_pos) | (uint32_t(st.cursor_flags) << 8));
-
-        // One custom glyph per frame, round robin.  All eight refresh in about a quarter
-        // second, which is fine for everything except the boot logo animation -- that is
-        // a CGRAM animation at ~19 fps and will come out approximate.  Accepted.
-        m_cgramTurn = (m_cgramTurn + 1) & 7;
-        uint32_t a = 0, b = 0;
-        for (uint32_t r = 0; r < 4; r ++)
-        {
-            a |= uint32_t(st.cgram[m_cgramTurn * 8 + r] & 0x1f) << (5 * r);
-            b |= uint32_t(st.cgram[m_cgramTurn * 8 + 4 + r] & 0x1f) << (5 * r);
-        }
-        m_outParams[kParamOutCgramIndex - kParamOutFirst] = float(m_cgramTurn);
-        m_outParams[kParamOutCgramA - kParamOutFirst] = float(a);
-        m_outParams[kParamOutCgramB - kParamOutFirst] = float(b);
     }
 
     /// Print the LCD when it changes, if asked.
@@ -540,12 +526,12 @@ private:
     bool m_buttons[voltaire::kButtonCount] = { false };
     unsigned m_lcdAccum = 0;
     char m_lastLcd[40] = { 0 };
-    char m_pname[32] = { 0 }, m_psym[32] = { 0 };
     uint32_t m_clipHold = 0;
+    PanelBlob m_lastBlob = {};
+    char m_blobHex[sizeof(PanelBlob) * 2 + 1] = { 0 };
     uint32_t m_publishAccum = 0;
     uint32_t m_publishPeriod = 2400;
-    uint32_t m_cgramTurn = 0;
-    float m_outParams[kParamCount - kParamOutFirst] = { 0.0f };
+
 
     DISTRHO_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Voltaire110Plugin)
 };

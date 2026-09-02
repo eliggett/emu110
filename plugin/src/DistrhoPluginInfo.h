@@ -21,6 +21,10 @@
 #define DISTRHO_PLUGIN_WANT_MIDI_OUTPUT 1
 #define DISTRHO_PLUGIN_WANT_LATENCY     1
 
+// The panel travels to the UI as ONE BLOB over the atom port, not as a pile of scalars.
+// See the note in Voltaire110Plugin.cpp.
+#define DISTRHO_PLUGIN_WANT_STATE       1
+
 // The panel is drawn with NanoVG, which DGL already carries.  No widget toolkit: PUGL
 // uses raw X11/Cocoa/Win32 plus GL and nothing else, which is what keeps the plugin out
 // of a symbol fight with Ardour's own GTK.

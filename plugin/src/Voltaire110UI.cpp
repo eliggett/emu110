@@ -39,12 +39,15 @@ enum Params
 {
     kParamVolume = 0, kParamHfCorrection,
     kParamButtonFirst,
-    kParamOutFirst = kParamButtonFirst + 6,
-    kParamOutLcd0 = kParamOutFirst,
-    kParamOutLcdLast = kParamOutLcd0 + 10,
-    kParamOutLamps, kParamOutCursor,
-    kParamOutCgramIndex, kParamOutCgramA, kParamOutCgramB,
-    kParamCount
+    kParamCount = kParamButtonFirst + 6
+};
+
+/// The panel as the DSP sends it: one fixed layout, hex encoded, over the atom port.
+struct PanelBlob
+{
+    uint8_t lcd[32];
+    uint8_t cgram[64];
+    uint8_t leds, cursor_pos, cursor_flags;
 };
 
 class Voltaire110UI : public UI
@@ -69,50 +72,49 @@ protected:
 
     void parameterChanged(uint32_t index, float value) override
     {
-        // Mark dirty; do NOT repaint here.  The DSP publishes fifteen output parameters
-        // per snapshot, so repainting per parameter meant fifteen full redraws for one
-        // change of the display -- and a redraw is the whole SVG plus 1280 LCD dots.
-        // uiIdle() coalesces them into at most one.
-        if (index >= kParamOutLcd0 && index <= kParamOutLcdLast)
-        {
-            const uint32_t v = uint32_t(value);
-            for (uint32_t k = 0; k < 3; k ++)
-            {
-                const uint32_t c = (index - kParamOutLcd0) * 3 + k;
-                if (c < 32)
-                {
-                    const uint8_t ch = uint8_t((v >> (8 * k)) & 0xff);
-                    if (m_lcd[c] != ch) { m_lcd[c] = ch; m_dirty = true; }
-                }
-            }
-        }
-        else if (index == kParamOutLamps)
-        {
-            const uint8_t leds = uint8_t(uint32_t(value) & 0x0f);
-            if (leds != m_leds) { m_leds = leds; m_dirty = true; }
-        }
-        else if (index == kParamOutCursor)
-        {
-            const uint32_t v = uint32_t(value);
-            const uint8_t pos = uint8_t(v & 0xff), flags = uint8_t((v >> 8) & 0xff);
-            if (pos != m_cursorPos || flags != m_cursorFlags)
-            { m_cursorPos = pos; m_cursorFlags = flags; m_dirty = true; }
-        }
-        else if (index == kParamOutCgramIndex) { m_cgramIn = uint32_t(value) & 7; }
-        else if (index == kParamOutCgramA || index == kParamOutCgramB)
-        {
-            const uint32_t v = uint32_t(value);
-            const uint32_t base = m_cgramIn * 8 + (index == kParamOutCgramB ? 4 : 0);
-            for (uint32_t r = 0; r < 4; r ++)
-            {
-                const uint8_t row = uint8_t((v >> (5 * r)) & 0x1f);
-                if (m_cgram[base + r] != row) { m_cgram[base + r] = row; m_dirty = true; }
-            }
-        }
-        else if (index == kParamVolume)
+        if (index == kParamVolume)
         { if (value != m_volume) { m_volume = value; m_dirty = true; } }
         else if (index == kParamHfCorrection)
         { const bool on = value > 0.5f; if (on != m_hf) { m_hf = on; m_dirty = true; } }
+    }
+
+    /// The panel arrives as ONE blob, not as a pile of scalars.
+    ///
+    /// Everything the display needs comes in a single message on the atom port: the 32
+    /// character codes, the eight live custom glyphs, the lamps and the cursor.  No
+    /// packing of bitfields into floats, no per-field ranges to get right, and no host
+    /// deciding whether a change was big enough to be worth forwarding.
+    void stateChanged(const char *key, const char *value) override
+    {
+        if (std::strcmp(key, "panel") != 0 || value == nullptr)
+            return;
+        PanelBlob blob;
+        if (!decodeHex(value, reinterpret_cast<uint8_t *>(&blob), sizeof(blob)))
+            return;
+
+        std::memcpy(m_lcd, blob.lcd, sizeof(m_lcd));
+        std::memcpy(m_cgram, blob.cgram, sizeof(m_cgram));
+        m_leds = blob.leds;
+        m_cursorPos = blob.cursor_pos;
+        m_cursorFlags = blob.cursor_flags;
+        m_dirty = true;
+    }
+
+    static bool decodeHex(const char *src, uint8_t *dst, size_t n)
+    {
+        auto nib = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            return -1;
+        };
+        for (size_t i = 0; i < n; i ++)
+        {
+            const int hi = nib(src[i * 2]), lo = nib(src[i * 2 + 1]);
+            if (hi < 0 || lo < 0)
+                return false;
+            dst[i] = uint8_t((hi << 4) | lo);
+        }
+        return true;
     }
 
     /// One repaint per idle, and only when something actually changed.

@@ -16,6 +16,7 @@
 #include <lv2/options/options.h>
 #include <lv2/buf-size/buf-size.h>
 #include <lv2/parameters/parameters.h>
+#include <lv2/worker/worker.h>
 
 #include <dlfcn.h>
 
@@ -43,6 +44,20 @@ static const struct { int len; unsigned char b[16]; } kFxSetup[] = {
     { 11, { 0xf0, 0x41, 0x0f, 0x23, 0x12, 0x00, 0x01, 0x1c, 0x00, 0x63, 0xf7 } },  /* tremolo depth 0 */
     { 11, { 0xf0, 0x41, 0x0f, 0x23, 0x12, 0x00, 0x01, 0x18, 0x14, 0x53, 0xf7 } },  /* output mode 21 */
 };
+
+/* A pending worker job, run between blocks the way a host would. */
+static unsigned char g_work[8192];
+static uint32_t g_work_size = 0;
+static LV2_Worker_Status schedule_work(LV2_Worker_Schedule_Handle h, uint32_t size, const void *data)
+{
+    (void)h;
+    if (size > sizeof(g_work)) return LV2_WORKER_ERR_NO_SPACE;
+    memcpy(g_work, data, size);
+    g_work_size = size;
+    return LV2_WORKER_SUCCESS;
+}
+static LV2_Worker_Status work_respond(LV2_Worker_Respond_Handle h, uint32_t size, const void *data)
+{ (void)h; (void)size; (void)data; return LV2_WORKER_SUCCESS; }
 
 /* A URID map just big enough for the handful of URIs DPF asks about. */
 static char *g_uris[128];
@@ -93,9 +108,16 @@ int main(int argc, char **argv)
           sizeof(float), urid_float, &rate_val },
         { LV2_OPTIONS_BLANK, 0, 0, 0, 0, NULL }
     };
+    /* The Worker.  DPF requires it once state is enabled, because that is how it keeps
+     * state handling OFF the audio thread -- schedule_work() is called from run() and the
+     * host runs work() elsewhere.  Doing that faithfully is also what makes the real-time
+     * audit below mean anything: work() is deliberately run OUTSIDE the audited window. */
+    LV2_Worker_Schedule sched = { NULL, schedule_work };
+    LV2_Feature f_worker = { LV2_WORKER__schedule, &sched };
+
     LV2_Feature f_opts = { LV2_OPTIONS__options, (void *)opts };
     LV2_Feature f_bounded = { LV2_BUF_SIZE__boundedBlockLength, NULL };
-    const LV2_Feature *features[] = { &f_map, &f_opts, &f_bounded, NULL };
+    const LV2_Feature *features[] = { &f_map, &f_opts, &f_bounded, &f_worker, NULL };
 
     LV2_Handle h = d->instantiate(d, RATE, "./", features);
     if (!h) { fprintf(stderr, "instantiate failed\n"); return 1; }
@@ -106,7 +128,7 @@ int main(int argc, char **argv)
     float btn[6] = { 0, 0, 0, 0, 0, 0 };
     const int want_fx = (argc > 5) && strcmp(argv[5], "fx") == 0;
     const int want_stream = (argc > 5) && strcmp(argv[5], "stream") == 0;
-    static float outp[16];
+
 
     d->connect_port(h, 0, outL);
     d->connect_port(h, 1, outR);
@@ -116,7 +138,7 @@ int main(int argc, char **argv)
     d->connect_port(h, 5, &volume);
     d->connect_port(h, 6, &hf);
     for (int i = 0; i < 6; i++) d->connect_port(h, 7 + i, &btn[i]);
-    for (int i = 0; i < 15; i++) d->connect_port(h, 13 + i, &outp[i]);
+    /* No output control ports any more: the panel arrives as a blob on events-out. */
     if (d->activate) d->activate(h);
 
     const uint32_t urid_seq   = map_uri(NULL, LV2_ATOM__Sequence);
@@ -132,6 +154,7 @@ int main(int argc, char **argv)
     long slow_total = 0, slow_midi_lit = 0;
     double next_slow = 0.0;
     unsigned last_midi = 0; long midi_edges = 0;
+    long state_atoms = 0, midi_out_atoms = 0; unsigned blob_leds = 0;
 
     for (long done = 0; done < total; done += BLOCK)
     {
@@ -198,9 +221,50 @@ int main(int argc, char **argv)
         rt_arm(done >= (long)(10.0 * RATE));
         d->run(h, BLOCK);
         rt_arm(0);
+
+        /* Count what the plugin put on its events-out port.  MIDI goes to the host; the
+         * state blobs are what the UI would receive. */
+        {
+            LV2_Atom_Sequence *os = (LV2_Atom_Sequence *)ev_out;
+            LV2_ATOM_SEQUENCE_FOREACH(os, e)
+            {
+                if (e->body.type == urid_midi) { midi_out_atoms++; continue; }
+                state_atoms++;
+                /* The panel blob is hex inside the atom; find it and take the lamps,
+                 * which is the last field of the struct the plugin sends. */
+                {
+                    const char *p = (const char *)LV2_ATOM_BODY_CONST(&e->body);
+                    const uint32_t n = e->body.size;
+                    for (uint32_t k = 0; k + 198 <= n; k++) {
+                        int ok = 1;
+                        for (uint32_t j = 0; j < 198 && ok; j++) {
+                            const char c = p[k + j];
+                            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) ok = 0;
+                        }
+                        if (!ok) continue;
+                        /* byte 96 of the struct is `leds` -> hex chars 192..193 */
+                        const char hi = p[k + 192], lo = p[k + 193];
+                        const int v = ((hi <= '9' ? hi - '0' : hi - 'a' + 10) << 4)
+                                    | (lo <= '9' ? lo - '0' : lo - 'a' + 10);
+                        blob_leds = (unsigned)v & 0x0f;
+                        break;
+                    }
+                }
+            }
+        }
+
+        /* Run any scheduled work here -- off the audio thread, as a host would. */
+        if (g_work_size != 0)
+        {
+            const LV2_Worker_Interface *wi =
+                    d->extension_data ? d->extension_data(LV2_WORKER__interface) : NULL;
+            if (wi && wi->work)
+                wi->work(h, work_respond, NULL, g_work_size, g_work);
+            g_work_size = 0;
+        }
         {   /* Lamp bits, and how much of the run each was lit -- "ever seen" cannot show
              * a polarity mistake, and every lamp on this machine is active low. */
-            const unsigned l = ((unsigned)outp[11]) & 0x0f;   /* port 24: lamps */
+            const unsigned l = blob_leds;
             seen_leds |= l;
             blocks_total++;
             for (int b = 0; b < 4; b++) if (l & (1u << b)) lit_blocks[b]++;
@@ -244,6 +308,8 @@ int main(int argc, char **argv)
              midi_edges, (double)midi_edges / SECONDS);
       printf("  MIDI lamp seen by a 10 Hz observer: %5.1f%% of %ld samples\n",
              100.0 * (double)slow_midi_lit / (double)(slow_total ? slow_total : 1), slow_total); }
+    printf("events-out: %ld state blobs to the UI, %ld MIDI atoms to the host\n",
+           state_atoms, midi_out_atoms);
     printf("peak: %d (%s)\n", peak, peak > 0 ? "PLUGIN MAKES SOUND" : "SILENT");
 
     FILE *o = fopen(wav, "wb");

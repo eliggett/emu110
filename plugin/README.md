@@ -350,3 +350,44 @@ The DSP publishes the panel as fifteen output parameters. Calling `repaint()` fr
 display**, around 220 a second -- for a display that changes 20 times a second at most.
 Coalescing in `uiIdle()` is what fixes it; comparing values before marking dirty is what
 makes an idle panel free.
+
+## DSP → UI: one struct on the atom port
+
+The panel is sent to the UI as a **single blob** -- 32 LCD character codes, the eight live
+custom glyphs, the lamps and the cursor -- hex encoded, over the LV2 atom port. Not as
+individual output control ports.
+
+That was the first design and it was wrong. A control port is meant to carry one value with
+a meaningful range, and hosts apply their own change detection to it. Packing a bitfield
+into one meant a lamp change moved the port by 4 parts in 16777215, which Ardour reasonably
+declined to forward while it forwarded the LCD, whose changes move whole bytes. Text
+updated instantly, lamps sat frozen. It also does not scale to what is coming: tone and
+patch names, and a parameter editor, are text.
+
+**What stays a control port:** things that genuinely are one number with a range -- volume,
+the HF switch, the buttons, and the VU meters when they arrive. That is what those ports are
+for, and a meter at 0..1 has none of the problems above.
+
+### Cost
+
+`updateStateValue()` allocates twice per call inside DPF (a `String` key and a map
+assignment), so the blob is sent **only when it changes**. An idle machine sends nothing;
+navigating the menus costs a few allocations a second. Measured with `make rtaudit`:
+
+```
+    malloc 82   free 82   over ~10 s of continuous playing = 8/s
+```
+
+Not zero, and worth knowing. Continuous data must not go this way -- a VU meter at 30 Hz
+would be 60 allocations a second, forever, which is why meters stay on control ports.
+
+### `[!]` A patch to DPF
+
+`updateStateValue()` is implemented for LV2, CLAP, AU and Carla, but **not for the JACK
+standalone or VST3** -- those pass `nullptr` for the callback. The standalone is the daily
+development loop, so `dpf/distrho/src/DistrhoPluginJACK.cpp` carries a small local patch: a
+fixed 16-slot ring the audio thread writes without allocating or blocking, drained by the UI
+thread in idle. It is the same shape as DPF's other backends and could go upstream.
+
+**VST3 still has no path**, so its panel will not update. That target is already documented
+as built-but-untested.
