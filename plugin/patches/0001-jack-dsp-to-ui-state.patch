@@ -1,0 +1,73 @@
+diff --git a/distrho/src/DistrhoPluginJACK.cpp b/distrho/src/DistrhoPluginJACK.cpp
+index 0539807..4e5cffb 100644
+--- a/distrho/src/DistrhoPluginJACK.cpp
++++ b/distrho/src/DistrhoPluginJACK.cpp
+@@ -136,7 +136,12 @@ class PluginJack
+ {
+ public:
+     PluginJack(jack_client_t* const client, const uintptr_t winId)
+-        : fPlugin(this, writeMidiCallback, requestParameterValueChangeCallback, nullptr),
++        : fPlugin(this, writeMidiCallback, requestParameterValueChangeCallback,
++#if DISTRHO_PLUGIN_WANT_STATE && DISTRHO_PLUGIN_HAS_UI
++                  updateStateValueCallback),
++#else
++                  nullptr),
++#endif
+ #if DISTRHO_PLUGIN_HAS_UI
+           fUI(this,
+               winId,
+@@ -345,6 +350,17 @@ protected:
+             }
+         }
+ 
++#if DISTRHO_PLUGIN_WANT_STATE
++        // Deliver anything the DSP pushed to the UI.  Drained HERE, on the UI thread,
++        // because run() must not touch the UI directly.
++        while (fStateQueueRead != fStateQueueWrite)
++        {
++            const StateMessage& msg(fStateQueue[fStateQueueRead]);
++            fUI.stateChanged(msg.key, msg.value);
++            fStateQueueRead = (fStateQueueRead + 1) % kStateQueueSize;
++        }
++#endif
++
+         fUI.exec_idle();
+     }
+ #endif
+@@ -589,6 +605,36 @@ private:
+     UIExporter     fUI;
+ #endif
+ 
++#if DISTRHO_PLUGIN_WANT_STATE && DISTRHO_PLUGIN_HAS_UI
++    // DSP -> UI state, which this backend did not implement (LV2, CLAP, AU and Carla do).
++    // A fixed ring, so the audio thread neither allocates nor blocks; the UI thread drains
++    // it in idle.
++    static constexpr uint32_t kStateQueueSize = 16;
++    struct StateMessage { char key[64]; char value[4096]; };
++    StateMessage fStateQueue[kStateQueueSize];
++    volatile uint32_t fStateQueueWrite = 0, fStateQueueRead = 0;
++
++    bool updateStateValue(const char* const key, const char* const value)
++    {
++        const uint32_t next = (fStateQueueWrite + 1) % kStateQueueSize;
++        if (next == fStateQueueRead)
++            return false;                       // full; drop rather than block
++        StateMessage& msg(fStateQueue[fStateQueueWrite]);
++        std::strncpy(msg.key, key, sizeof(msg.key) - 1);
++        msg.key[sizeof(msg.key) - 1] = '\0';
++        std::strncpy(msg.value, value, sizeof(msg.value) - 1);
++        msg.value[sizeof(msg.value) - 1] = '\0';
++        fStateQueueWrite = next;
++        return true;
++    }
++
++    static bool updateStateValueCallback(void* const ptr, const char* const key,
++                                         const char* const value)
++    {
++        return ((PluginJack*)ptr)->updateStateValue(key, value);
++    }
++#endif
++
+     jack_client_t* fClient;
+ 
+ #if DISTRHO_PLUGIN_NUM_INPUTS > 0

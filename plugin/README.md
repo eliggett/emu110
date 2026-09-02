@@ -391,3 +391,8 @@ thread in idle. It is the same shape as DPF's other backends and could go upstre
 
 **VST3 still has no path**, so its panel will not update. That target is already documented
 as built-but-untested.
+
+The patch lives in `plugin/patches/` and `make` applies it to the submodule, idempotently,
+before building. DPF is not forked -- a fresh clone gets upstream DPF and the patch on top,
+and if upstream ever moves under it the build says so rather than silently producing a
+plugin whose panel does not update.
