@@ -417,8 +417,8 @@ onto one bus instead of reaching Multi Outputs 1 and 2 directly.
 
 ```
   delay line   2048 samples of the group sum, IC17's size at the engine rate
-  chorus       tap_L = level >> 14, tap_R = (endpoints - level) >> 14, integer, no
-               interpolation; out = dry + 0.5 * tap
+  chorus       tap_L = level >> 14, tap_R = (endpoints - level) >> 14, LINEARLY
+               INTERPOLATED (see section 11); out = dry + 0.5 * tap
   tremolo      gain_L = level / endpoints, gain_R = 1 - gain_L
   LFO          the ramp generator's own slots, ramping at 2^(rate/8) * 4 per sample in
                both directions
@@ -475,3 +475,49 @@ means the sweep steps; and the wet/dry mix is a flat 0.5 from three readings tha
 4. **`[open]` Registers `0x19` and `0x1B`.**  Written `0x00` and `0x21` here and at the
    `0x43DA` init, never anything else.  Reading them as the slot scan range is a guess that
    fits `m_env_slots = 0x22` but has no evidence.
+
+
+---
+
+## 11. Correction: the delay tap interpolates
+
+`[C]` **Section 4 said the tap is integer with no interpolation. That was wrong**, and it
+was audible.
+
+The reasoning had been that an eleven-wire address cannot be fractional. True of the
+ADDRESS, false of the OUTPUT. A delay whose length steps by whole samples emits a
+discontinuity at every step, and the step rate is the tap range divided by half the LFO
+period -- so it scales with DEPTH:
+
+| Chorus depth | Steps per second | What it sounds like |
+|---|---|---|
+| 1 | tens | individual clicks |
+| 15 | near a kilohertz | a tone; it ring-modulates the note |
+
+Reported from the plugin as "a crunch or crinkle... nasty clicky stuff" that "becomes a
+tone as you increase the chorus depth from 1 to 15, almost like a ring modulator". That
+description is the measurement: an artifact whose RATE tracks depth can only be the tap
+stepping.
+
+Measured on P-08, note 83, chorus rate 1, sidebands at `f0 +/- f_step`:
+
+| Depth | Integer tap | Linear interpolation |
+|---|---|---|
+| 4 | -49.0 / -49.7 dB | **-69.5 / -73.0 dB** |
+| 15 | -37.3 / -37.2 dB | **-67.3 / -67.1 dB** |
+
+Thirty decibels, and the pitch-modulation depth section 8 measured is unchanged --
+interpolation removes the stepping, not the chorus.
+
+**Why this is evidence about the hardware and not a preference.** The artifact is loud, it
+is characteristic, and it is not on the U-110. Something in the real path removes it, and
+interpolating the tap is the cheapest thing that does. Linear is a guess at the FORM;
+nothing in the captures distinguishes it from anything fancier.
+
+**The note number was the missing piece.** This did not reproduce on note 60 and is obvious
+on note 83: at 988 Hz adjacent samples differ enough that a one-sample step in the delay is
+a large discontinuity, where at 262 Hz it is small. Any future report of this kind wants
+the pitch as well as the settings.
+
+`[?]` Still unmeasured: the delay line holds floats where IC17 is eight bits wide.
+Interpolating between two 8-bit companded samples is not the same as between two floats.

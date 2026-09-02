@@ -32,6 +32,13 @@ level within 0.4 dB.  Sections 8 and 9.
 The order of the two is now measured too -- delay first, pan last, which is also the only
 arrangement one 2K x 8 SRAM can support.
 
+**Corrected 2026-09-02: the tap INTERPOLATES.**  It had been integer, on the reasoning that
+an eleven-wire address cannot be fractional -- true of the address, false of the output.  A
+delay that steps by whole samples clicks at every step, at a rate that scales with DEPTH:
+tens per second at depth 1, near a kilohertz at depth 15, where it ring-modulates the note.
+Reported from the plugin, confirmed spectrally, and linear interpolation drops the sidebands
+30 dB.  See EFFECTS.md section 11.
+
 Left undone, and neither part measured: the delay line holds floats where IC17 is eight bits
 wide, and the wet/dry mix is a flat 0.5 fitted from three readings that bracket 0.45-0.55.
 
