@@ -80,7 +80,29 @@ enum Params
 {
     kParamVolume = 0,
     kParamHfCorrection,
+
+    // The six panel switches, as host parameters.
+    //
+    // Until the vector panel exists there is no other way to reach the machine's own menus,
+    // which is most of what a U-110 is.  A generic host UI gives a toggle per button, and
+    // that works because the firmware's debouncer only needs the press held for about
+    // 150 ms of emulated time -- far less than anyone can click.
+    kParamButtonFirst,
+    kParamButtonPartJump = kParamButtonFirst,
+    kParamButtonEditExit,
+    kParamButtonLeft,
+    kParamButtonRight,
+    kParamButtonDec,
+    kParamButtonIncEnter,
+
     kParamCount
+};
+
+const char *const kButtonNames[] = {
+    "Part / Jump", "Edit / Exit", "Left", "Right", "Dec", "Inc / Enter"
+};
+const char *const kButtonSymbols[] = {
+    "btn_part_jump", "btn_edit_exit", "btn_left", "btn_right", "btn_dec", "btn_inc_enter"
 };
 
 } // anonymous namespace
@@ -139,6 +161,18 @@ protected:
             parameter.ranges.min = 0.0f;
             parameter.ranges.max = 1.0f;
             break;
+        default:
+            if (index >= kParamButtonFirst && index < kParamCount)
+            {
+                const uint32_t b = index - kParamButtonFirst;
+                parameter.hints = kParameterIsAutomatable | kParameterIsBoolean;
+                parameter.name = kButtonNames[b];
+                parameter.symbol = kButtonSymbols[b];
+                parameter.ranges.def = 0.0f;
+                parameter.ranges.min = 0.0f;
+                parameter.ranges.max = 1.0f;
+            }
+            break;
         }
     }
 
@@ -149,6 +183,8 @@ protected:
         case kParamVolume:       return m_volumeDb;
         case kParamHfCorrection: return m_hfCorrection ? 1.0f : 0.0f;
         }
+        if (index >= kParamButtonFirst && index < kParamCount)
+            return m_buttons[index - kParamButtonFirst] ? 1.0f : 0.0f;
         return 0.0f;
     }
 
@@ -170,6 +206,18 @@ protected:
             }
             break;
         }
+        default:
+            if (index >= kParamButtonFirst && index < kParamCount)
+            {
+                const uint32_t b = index - kParamButtonFirst;
+                const bool down = value > 0.5f;
+                if (down != m_buttons[b])
+                {
+                    m_buttons[b] = down;
+                    m_core.setButton(voltaire::Button(b), down);
+                }
+            }
+            break;
         }
     }
 
@@ -179,7 +227,8 @@ protected:
 
     void activate() override
     {
-        m_resampler.reset();
+        m_resampler[0].reset();
+        m_resampler[1].reset();
         m_gain = m_gainTarget;
     }
 
@@ -196,7 +245,8 @@ protected:
             return;
         }
 
-        const uint32_t coreFrames = m_resampler.inputsFor(frames);
+        // Both channels are in lockstep by construction, so either may be asked.
+        const uint32_t coreFrames = m_resampler[0].inputsFor(frames);
 
         // MIDI first, timestamped into the core block about to be rendered.  The host's
         // offsets are in HOST frames; the core counts in its own 32 kHz frames.
@@ -213,8 +263,8 @@ protected:
         }
 
         renderCore(coreFrames);
-        m_resampler.process(m_coreL.data(), coreFrames, outL, frames);
-        m_resampler.process(m_coreR.data(), coreFrames, outR, frames);
+        m_resampler[0].process(m_coreL.data(), coreFrames, outL, frames);
+        m_resampler[1].process(m_coreR.data(), coreFrames, outR, frames);
 
         // Post-gain, smoothed.  No limiter: that would be dishonest about the signal.
         for (uint32_t i = 0; i < frames; i ++)
@@ -225,6 +275,7 @@ protected:
         }
 
         sendMidiOut();
+        reportLcd();
     }
 
 private:
@@ -233,8 +284,9 @@ private:
     void setupRate(double hostRate)
     {
         m_hostRate = hostRate;
-        m_resampler.setup(kCoreRate, hostRate);
-        setLatency(m_resampler.latency());
+        m_resampler[0].setup(kCoreRate, hostRate);
+        m_resampler[1].setup(kCoreRate, hostRate);
+        setLatency(m_resampler[0].latency());
         // Enough core frames for a generous host buffer, allocated once.
         m_coreL.assign(size_t(kCoreRate / 1000.0) * 512, 0.0f);
         m_coreR.assign(m_coreL.size(), 0.0f);
@@ -251,6 +303,37 @@ private:
             m_coreR.resize(coreFrames);
         }
         m_core.renderStereo(m_coreL.data(), m_coreR.data(), coreFrames);
+    }
+
+    /// Print the LCD when it changes, if asked.
+    ///
+    /// There is no panel yet, so without this the machine's own menus are invisible: you
+    /// can press the buttons but not see what they did.  Off unless VOLTAIRE_LCD is set,
+    /// because printing from the audio thread is not something to do by default.
+    void reportLcd()
+    {
+        static const bool want = std::getenv("VOLTAIRE_LCD") != nullptr;
+        if (!want)
+            return;
+        if (++ m_lcdDivider < 32)          // roughly 30 Hz at any sane buffer size
+            return;
+        m_lcdDivider = 0;
+
+        voltaire::PanelState st;
+        m_core.snapshot(st);
+        char line[40];
+        for (int i = 0; i < 32; i ++)
+        {
+            const uint8_t c = st.lcd[i];
+            line[i + (i >= 16 ? 3 : 0)] = (c >= 0x20 && c < 0x7f) ? char(c) : '.';
+        }
+        line[16] = ' '; line[17] = '|'; line[18] = ' ';
+        line[35] = 0;
+        if (std::memcmp(line, m_lastLcd, sizeof(line)) != 0)
+        {
+            std::memcpy(m_lastLcd, line, sizeof(line));
+            d_stdout("LCD [%s]", line);
+        }
     }
 
     void sendMidiOut()
@@ -309,7 +392,13 @@ private:
     }
 
     voltaire::U110Core m_core;
-    voltaire::Resampler m_resampler;
+
+    // ONE RESAMPLER PER CHANNEL.  They share a ratio but not their state: the filter
+    // history and the input/output positions are per-channel, and running both channels
+    // through a single instance interleaves their samples in one history and advances the
+    // phase twice per block.  The pitch survives that -- the average rate is still right --
+    // so it does not sound broken in an obvious way.  It sounds like crackle on every note.
+    voltaire::Resampler m_resampler[2];
     std::vector<float> m_coreL, m_coreR;
 
     double m_hostRate = 48000.0;
@@ -317,6 +406,9 @@ private:
     float m_gain = 1.0f, m_gainTarget = 1.0f;
     bool m_hfCorrection = true;
     bool m_romsLoaded = false;
+    bool m_buttons[voltaire::kButtonCount] = { false };
+    unsigned m_lcdDivider = 0;
+    char m_lastLcd[40] = { 0 };
 
     DISTRHO_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Voltaire110Plugin)
 };

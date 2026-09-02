@@ -211,3 +211,30 @@ absurd. Measured, by fitting a sine and taking the residual:
 
 15 kHz sits in the transition band at −7.5 dB. The U-110's own output is already some
 23 dB down at 14–16 kHz, so this is not the dominant term up there.
+
+## Using it before the panel exists
+
+There is no custom GUI yet, so the six panel switches are exposed as **host parameters** --
+`Part / Jump`, `Edit / Exit`, `Left`, `Right`, `Dec`, `Inc / Enter`. Any generic UI (Carla,
+Ardour's own) gives you a toggle per button, and that is enough to drive the machine's own
+menus, which is most of what a U-110 is. It works because the firmware's debouncer only
+needs a press held for about 150 ms of emulated time, far less than anyone can click.
+
+To see what the buttons did, set `VOLTAIRE_LCD=1` and the plugin prints the display
+whenever it changes:
+
+```
+LCD [P-01:Ac.Piano    | MIDI.1.*.*.*.*.*]
+```
+
+Off by default -- printing from the audio thread is not something to do unasked.
+
+## `[!]` One resampler per channel
+
+The first build shared a single `Resampler` between left and right. The two channels then
+pushed into one filter history and advanced the phase twice per block. The **pitch survives
+that** -- the average rate is still right -- so it did not sound broken in any obvious way.
+It sounded like crackle on every note.
+
+The plugin's streaming now matches a single continuous offline pass at **correlation
+1.000000**, and the resampler is bit-identical at every block size from 16 to 4096.
