@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <vector>
 
 START_NAMESPACE_DISTRHO
@@ -67,6 +68,10 @@ protected:
 
     void parameterChanged(uint32_t index, float value) override
     {
+        // Mark dirty; do NOT repaint here.  The DSP publishes fifteen output parameters
+        // per snapshot, so repainting per parameter meant fifteen full redraws for one
+        // change of the display -- and a redraw is the whole SVG plus 1280 LCD dots.
+        // uiIdle() coalesces them into at most one.
         if (index >= kParamOutLcd0 && index <= kParamOutLcdLast)
         {
             const uint32_t v = uint32_t(value);
@@ -74,38 +79,65 @@ protected:
             {
                 const uint32_t c = (index - kParamOutLcd0) * 3 + k;
                 if (c < 32)
-                    m_lcd[c] = uint8_t((v >> (8 * k)) & 0xff);
+                {
+                    const uint8_t ch = uint8_t((v >> (8 * k)) & 0xff);
+                    if (m_lcd[c] != ch) { m_lcd[c] = ch; m_dirty = true; }
+                }
             }
-            repaint();
         }
         else if (index == kParamOutStatus)
         {
             const uint32_t v = uint32_t(value);
-            m_leds = uint8_t(v & 0xff);
-            m_cursorPos = uint8_t((v >> 8) & 0xff);
-            m_cursorFlags = uint8_t((v >> 16) & 0xff);
+            const uint8_t leds = uint8_t(v & 0xff);
+            const uint8_t pos = uint8_t((v >> 8) & 0xff);
+            const uint8_t flags = uint8_t((v >> 16) & 0xff);
+            if (leds != m_leds || pos != m_cursorPos || flags != m_cursorFlags)
+            {
+                m_leds = leds; m_cursorPos = pos; m_cursorFlags = flags;
+                m_dirty = true;
+            }
         }
         else if (index == kParamOutCgramIndex) { m_cgramIn = uint32_t(value) & 7; }
-        else if (index == kParamOutCgramA)
+        else if (index == kParamOutCgramA || index == kParamOutCgramB)
         {
             const uint32_t v = uint32_t(value);
+            const uint32_t base = m_cgramIn * 8 + (index == kParamOutCgramB ? 4 : 0);
             for (uint32_t r = 0; r < 4; r ++)
-                m_cgram[m_cgramIn * 8 + r] = uint8_t((v >> (5 * r)) & 0x1f);
+            {
+                const uint8_t row = uint8_t((v >> (5 * r)) & 0x1f);
+                if (m_cgram[base + r] != row) { m_cgram[base + r] = row; m_dirty = true; }
+            }
         }
-        else if (index == kParamOutCgramB)
-        {
-            const uint32_t v = uint32_t(value);
-            for (uint32_t r = 0; r < 4; r ++)
-                m_cgram[m_cgramIn * 8 + 4 + r] = uint8_t((v >> (5 * r)) & 0x1f);
-        }
-        else if (index == kParamVolume) { m_volume = value; repaint(); }
-        else if (index == kParamHfCorrection) { m_hf = value > 0.5f; repaint(); }
+        else if (index == kParamVolume)
+        { if (value != m_volume) { m_volume = value; m_dirty = true; } }
+        else if (index == kParamHfCorrection)
+        { const bool on = value > 0.5f; if (on != m_hf) { m_hf = on; m_dirty = true; } }
+    }
+
+    /// One repaint per idle, and only when something actually changed.
+    ///
+    /// This is what makes the panel cost nothing while the machine sits idle, and redraw
+    /// promptly while it is being driven -- no fixed refresh rate to compromise over,
+    /// because a static display genuinely needs no frames at all.
+    void uiIdle() override
+    {
+        if (!m_dirty)
+            return;
+        m_dirty = false;
+        repaint();
     }
 
     // ---- drawing --------------------------------------------------------------------
 
     void onNanoDisplay() override
     {
+        // VOLTAIRE_FPS reports both how often the panel redraws and what one redraw costs.
+        // Both numbers matter: a redraw is the whole SVG plus 1280 LCD dots, so the rate it
+        // is asked for at is the difference between idling and saturating a core.
+        struct timespec t0;
+        if (m_countFrames)
+            clock_gettime(CLOCK_MONOTONIC, &t0);
+
         const float s = panelScale();
         const float ox = (getWidth() - voltaire::panel::kDesignWidth * s) * 0.5f;
         const float oy = (getHeight() - voltaire::panel::kDesignHeight * s) * 0.5f;
@@ -127,6 +159,27 @@ protected:
         drawButtonFeedback();
 
         restore();
+
+        if (m_countFrames)
+        {
+            struct timespec t1;
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            static double accum = 0.0, last = 0.0;
+            static int frames = 0;
+            const double now = double(t1.tv_sec) + t1.tv_nsec * 1e-9;
+            accum += (now - (double(t0.tv_sec) + t0.tv_nsec * 1e-9)) * 1000.0;
+            frames ++;
+            if (last == 0.0) last = now;
+            if (now - last >= 2.0)
+            {
+                std::fprintf(stderr,
+                        "panel: %.1f redraws/s, %.2f ms each -> %.0f%% of a core\n",
+                        frames / (now - last), accum / frames,
+                        100.0 * accum / 1000.0 / (now - last));
+                std::fflush(stderr);
+                frames = 0; accum = 0.0; last = now;
+            }
+        }
     }
 
     // ---- input ----------------------------------------------------------------------
@@ -464,6 +517,8 @@ private:
     }
 
     NSVGimage *m_svg = nullptr;
+    bool m_dirty = true;
+    const bool m_countFrames = std::getenv("VOLTAIRE_FPS") != nullptr;
 
     uint8_t m_lcd[32];
     uint8_t m_cgram[64];

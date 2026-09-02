@@ -323,3 +323,30 @@ machine. Current state:
 
 None of this was audible in ordinary playing, which is exactly why it needed measuring
 rather than reasoning about.
+
+## Panel redraw cost
+
+The panel is not cheap to draw -- the whole SVG plus 32 characters of 40 LCD dots, about
+**1.2 ms of CPU per redraw**. So what matters is how often a redraw is *asked for*.
+
+It is **demand-driven**, not throttled: `parameterChanged()` compares each value and marks
+the panel dirty only if something actually changed, and `uiIdle()` turns at most one dirty
+flag into one repaint. An idle machine costs nothing; a machine being driven redraws
+promptly. There is no refresh rate to compromise over.
+
+```sh
+VOLTAIRE_FPS=1 ./bin/Voltaire110      # prints the rate and the cost per redraw
+```
+
+```
+panel: 11.2 redraws/s, 1.08 ms each -> 1% of a core     (booting)
+panel:  4.1 redraws/s, 1.38 ms each -> 1% of a core     (idle, cursor blinking)
+```
+
+### `[!]` Repainting per parameter is 15 redraws per change
+
+The DSP publishes the panel as fifteen output parameters. Calling `repaint()` from
+`parameterChanged()` therefore asked for **fifteen full redraws for one change of the
+display**, around 220 a second -- for a display that changes 20 times a second at most.
+Coalescing in `uiIdle()` is what fixes it; comparing values before marking dirty is what
+makes an idle panel free.
