@@ -23,7 +23,17 @@ LINK_FLAGS      += $(CURDIR)/$(CORE_LIB)
 # PipeWire Just Works.
 TARGETS = lv2_sep vst3 clap jack
 
-all: generated core $(TARGETS)
+all: generated core $(TARGETS) ttl
+
+# The LV2 bundle is INCOMPLETE without its manifest: DPF builds Voltaire110_ui.so, but
+# nothing declares it, so hosts load the plugin and report that it has no custom UI.  The
+# generator has to run AFTER the UI is linked, which is exactly the ordering that gets
+# missed when it is a separate manual step.
+ttl: $(TARGETS)
+	@dpf/utils/generate-ttl.sh > /dev/null 2>&1
+	@grep -q "ui:X11UI" bin/$(NAME).lv2/manifest.ttl \
+		&& echo "  LV2 manifest declares the UI" \
+		|| echo "  WARNING: LV2 manifest has no UI entry"
 
 # Everything in generated/ is a build product: the panel geometry and artwork come from the
 # Inkscape SVG, the LCD character set from MatrixSans.  Neither is checked in, so a fresh
@@ -42,13 +52,12 @@ generated/u110_cgrom.h: ../tools/make_lcd_cgrom.py
 core: generated
 	@tools/build_core.sh
 
-.PHONY: core generated
+.PHONY: core generated ttl
 
 # A minimal LV2 host, so what gets tested is what a user loads.  Building the core and
 # null-testing it proves the emulation; this proves the PLUGIN -- DPF, the resampler at the
 # host's rate, MIDI as LV2 atoms, and the generated TTL's port layout.
-selftest: lv2_sep
-	@dpf/utils/generate-ttl.sh > /dev/null 2>&1
+selftest: all
 	@gcc -O2 -o build/lv2_selftest tools/lv2_selftest.c -ldl $$(pkg-config --cflags lv2)
 	@U110_DATA_DIR=$${U110_DATA_DIR:-$(CURDIR)/..} build/lv2_selftest \
 		bin/Voltaire110.lv2/Voltaire110_dsp.so \
