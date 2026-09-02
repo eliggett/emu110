@@ -109,6 +109,7 @@ int main(int argc, char **argv)
     long written = 0;
     int peak = 0;
     unsigned seen_leds = 0;
+    long blocks_total = 0, lit_blocks[4] = { 0, 0, 0, 0 };
 
     for (long done = 0; done < total; done += BLOCK)
     {
@@ -146,7 +147,13 @@ int main(int argc, char **argv)
         oseq->atom.size = ATOM_CAP - sizeof(LV2_Atom);
 
         d->run(h, BLOCK);
-        seen_leds |= ((unsigned)outp[11]) & 0x0f;    /* status word: lamp bits */
+        {   /* Lamp bits, and how much of the run each was lit -- "ever seen" cannot show
+             * a polarity mistake, and every lamp on this machine is active low. */
+            const unsigned l = ((unsigned)outp[11]) & 0x0f;
+            seen_leds |= l;
+            blocks_total++;
+            for (int b = 0; b < 4; b++) if (l & (1u << b)) lit_blocks[b]++;
+        }
 
         for (int i = 0; i < BLOCK && written < total; i++, written++)
         {
@@ -164,9 +171,11 @@ int main(int argc, char **argv)
     d->cleanup(h);
 
     printf("reported latency: %.0f host frames\n", latency);
-    printf("lamps seen: PART=%d EDIT=%d MIDI=%d CLIP=%d\n",
-           (seen_leds & 1) != 0, (seen_leds & 2) != 0,
-           (seen_leds & 4) != 0, (seen_leds & 8) != 0);
+    { static const char *const nm[4] = { "PART", "EDIT", "MIDI", "CLIP" };
+      printf("lamps (percentage of the run lit):\n");
+      for (int b = 0; b < 4; b++)
+          printf("    %-5s %5.1f%%\n", nm[b],
+                 100.0 * (double)lit_blocks[b] / (double)(blocks_total ? blocks_total : 1)); }
     printf("peak: %d (%s)\n", peak, peak > 0 ? "PLUGIN MAKES SOUND" : "SILENT");
 
     FILE *o = fopen(wav, "wb");

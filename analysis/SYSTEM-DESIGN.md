@@ -670,7 +670,7 @@ mode table plus Output Assign gives the part → output mapping directly.
 | MIDI IN | JK1 → IC2 opto-isolator → CPU `RXD`, pin 18 |
 | MIDI OUT | CPU `TXD`, pin 17.  Emulated: serialised to a `midi_port` at 31250 baud 8N1. The firmware transmits nothing unprompted -- SysEx replies and bulk dumps only |
 | MIDI THRU | JK3, buffered off the **IC2 opto-isolator output** -- the same node that feeds the CPU `RXD`.  A wire, not a feature: no CPU involvement, no deserialising, so THRU repeats MIDI IN bit for bit and keeps working while the firmware is busy or halted.  Confirmed against the service manual; an earlier revision of this table wrongly put THRU on `TXD` alongside OUT, which would have made it carry OUT's data instead of IN's.  Emulated |
-| MIDI activity LED | CPU `P2.6`, pin 33, via a 2SA1115 driver |
+| MIDI activity LED | CPU `P2.6`, pin 33, via a 2SA1115 driver. **Active LOW**: 2SA is the JIS prefix for a PNP transistor, which conducts when its base is pulled low, so `P2.6` = 0 lights the lamp. Observed on the emulated panel and confirmed by the part number. The two panel LEDs at `0x1200` are active low too, inverted by the firmware — the machine drives every lamp this way |
 
 ### 6.1 Panel switches and LEDs `[S]` `[C]`
 
