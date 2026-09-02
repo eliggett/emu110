@@ -321,16 +321,21 @@ protected:
         }
 
         sendMidiOut();
-        publishPanel();
+        publishPanel(frames);
         reportLcd();
     }
 
 private:
     static constexpr double kCoreRate = double(voltaire::kCoreSampleRate);
 
+    /// How often the panel snapshot goes to the UI.  Fast enough that a button press feels
+    /// immediate; the cost is a snapshot copy, which is a few hundred bytes.
+    static constexpr double kPanelRefreshHz = 20.0;
+
     void setupRate(double hostRate)
     {
         m_hostRate = hostRate;
+        m_publishPeriod = uint32_t(hostRate / kPanelRefreshHz);
         m_resampler[0].setup(kCoreRate, hostRate);
         m_resampler[1].setup(kCoreRate, hostRate);
         setLatency(m_resampler[0].latency());
@@ -353,12 +358,15 @@ private:
     }
 
     /// Pack the panel into the output parameters for the UI, at about 30 Hz.
-    void publishPanel()
+    void publishPanel(uint32_t frames)
     {
-        m_publishDivider += 1;
-        if (m_publishDivider < 32)
+        // Counting BLOCKS made the panel's refresh depend on the host's buffer size: at
+        // 1024 frames it was over half a second, which feels like the machine is ignoring
+        // you.  Count frames instead, so the rate is the same everywhere.
+        m_publishAccum += frames;
+        if (m_publishAccum < m_publishPeriod)
             return;
-        m_publishDivider = 0;
+        m_publishAccum = 0;
 
         voltaire::PanelState st;
         m_core.snapshot(st);
@@ -403,9 +411,10 @@ private:
         static const bool want = std::getenv("VOLTAIRE_LCD") != nullptr;
         if (!want)
             return;
-        if (++ m_lcdDivider < 32)          // roughly 30 Hz at any sane buffer size
+        m_lcdAccum += 1;
+        if (m_lcdAccum < 8)
             return;
-        m_lcdDivider = 0;
+        m_lcdAccum = 0;
 
         voltaire::PanelState st;
         m_core.snapshot(st);
@@ -495,10 +504,11 @@ private:
     bool m_hfCorrection = true;
     bool m_romsLoaded = false;
     bool m_buttons[voltaire::kButtonCount] = { false };
-    unsigned m_lcdDivider = 0;
+    unsigned m_lcdAccum = 0;
     char m_lastLcd[40] = { 0 };
     char m_pname[32] = { 0 }, m_psym[32] = { 0 };
-    unsigned m_publishDivider = 0;
+    uint32_t m_publishAccum = 0;
+    uint32_t m_publishPeriod = 2400;
     uint32_t m_cgramTurn = 0;
     float m_outParams[kParamCount - kParamOutFirst] = { 0.0f };
 

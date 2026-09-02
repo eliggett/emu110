@@ -267,3 +267,19 @@ symptom.
 nanosvg also resolves the document's own units. The artwork is in millimetres, so shapes
 come back scaled by 96/25.4; the UI normalises them onto viewBox units, which is what
 `panel_geometry.h` uses.
+
+## `[!]` NanoVG forces every subpath to CCW
+
+Letters with counters -- the hole in an "o", "a", "R", "0" -- filled solid. The winding
+was not the problem: nanosvg hands over correctly opposed subpaths (the logo has 12 outer
+contours and 4 counters). **NanoVG reverses them.** Each subpath defaults to `NVG_CCW`,
+and `nvg__flattenPaths` enforces that by reversing anything wound the other way, so the
+holes become solid outer contours.
+
+The fix is to preserve each subpath's own direction with `pathWinding()`, computed from
+its signed area. Any SVG renderer built on NanoVG needs this; without it the artwork looks
+almost right, which is the hard kind of wrong.
+
+Related: the knob pointer is drawn in code so it can rotate, so the artwork's own copy is
+skipped by id (`kVolumeKnobPointerId`). Drawing both leaves the old pointer behind at its
+zero position.

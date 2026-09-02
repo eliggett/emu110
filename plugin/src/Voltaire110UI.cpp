@@ -270,6 +270,10 @@ private:
         {
             if (!(sh->flags & NSVG_FLAGS_VISIBLE))
                 continue;
+            // The knob pointer is drawn in code so it can rotate.  Skipping the artwork's
+            // copy is what stops the old one being left behind at its zero position.
+            if (std::strcmp(sh->id, voltaire::panel::kVolumeKnobPointerId) == 0)
+                continue;
             beginPath();
             for (NSVGpath *p = sh->paths; p != nullptr; p = p->next)
             {
@@ -281,6 +285,12 @@ private:
                 }
                 if (p->closed)
                     closePath();
+
+                // NanoVG FORCES every subpath to CCW unless told otherwise, so the
+                // counters inside letters -- the hole in an "o" -- get reversed and the
+                // glyph fills solid.  nanosvg already hands over correctly opposed
+                // windings, so preserving each subpath's own direction is the whole fix.
+                pathWinding(subpathArea(p) >= 0.0f ? CCW : CW);
             }
             if (sh->fill.type == NSVG_PAINT_COLOR)
             {
@@ -295,6 +305,15 @@ private:
             }
         }
         restore();
+    }
+
+    /// Signed area of a flattened subpath; its sign is the winding direction.
+    static float subpathArea(const NSVGpath *p)
+    {
+        float a = 0.0f;
+        for (int i = 0, j = p->npts - 1; i < p->npts; j = i ++)
+            a += p->pts[j * 2] * p->pts[i * 2 + 1] - p->pts[i * 2] * p->pts[j * 2 + 1];
+        return a * 0.5f;
     }
 
     static Color nvgCol(unsigned int c, float opacity)
@@ -387,6 +406,15 @@ private:
         // transform, not 128 exported frames.
         const float t = (m_volume - (-3.0f)) / (16.0f - (-3.0f));
         const float sweep = 280.0f;
+
+        // A face under the pointer, so the control reads as one object rather than a line
+        // floating over the bezel.
+        beginPath();
+        circle(k.cx, k.cy, k.r * 0.88f);
+        fillPaint(linearGradient(k.cx, k.cy - k.r, k.cx, k.cy + k.r,
+                                 Color(78, 78, 82), Color(38, 38, 42)));
+        fill();
+
         save();
         translate(k.cx, k.cy);
         rotate((t - 0.5f) * sweep * float(M_PI) / 180.0f);
