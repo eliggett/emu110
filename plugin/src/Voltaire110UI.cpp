@@ -22,6 +22,7 @@
 
 #include "panel_geometry.h"
 #include "panel_svg.h"
+#include "panel_background.h"
 #include "u110_cgrom.h"
 
 #include <cmath>
@@ -235,6 +236,7 @@ protected:
         translate(ox, oy);
         scale(s, s);
 
+        drawBackground();
         drawArtwork();
         drawLcd();
         drawLeds();
@@ -819,6 +821,35 @@ private:
         m_svg = nsvgParse(copy.data(), "px", 96.0f);   // nsvgParse modifies its input
     }
 
+    // The artwork's raster layer, which nanosvg cannot draw: it has no <image>
+    // element, so panel_export.py renders every image -- transform, clip path and all
+    // -- through rsvg-convert into panel_background.png and embeds the bytes.  What
+    // arrives here is already exactly the design rectangle, so it goes down with no
+    // geometry of its own and cannot drift out of register with the vectors.
+    //
+    // Created on the first frame rather than in the constructor because it needs a
+    // NanoVG context, which only exists once there is something to draw into.  If it
+    // fails there is no fallback and none is wanted: the panel simply comes up on its
+    // flat ground, which is what it looked like before there was a background at all.
+    void drawBackground()
+    {
+        if (!m_backgroundTried)
+        {
+            m_backgroundTried = true;
+            m_background = createImageFromMemory(
+                    kPanelBackgroundPng, sizeof(kPanelBackgroundPng), 0);
+        }
+        if (!m_background.isValid())
+            return;
+
+        const float w = voltaire::panel::kDesignWidth;
+        const float h = voltaire::panel::kDesignHeight;
+        beginPath();
+        rect(0, 0, w, h);
+        fillPaint(imagePattern(0, 0, w, h, 0.0f, m_background, 1.0f));
+        fill();
+    }
+
     void drawArtwork()
     {
         if (m_svg == nullptr)
@@ -884,10 +915,19 @@ private:
         return a * 0.5f;
     }
 
+    /// nanosvg packs a shape's colour as 0xAABBGGRR, folding fill-opacity into the top
+    /// byte; sh->opacity carries the element's own opacity= on top of that.
+    ///
+    /// [!] DGL's Color takes RGB as 0-255 INTEGERS and alpha as a 0-1 FLOAT
+    /// (Color(int, int, int, float)).  Passing the alpha byte here compiles perfectly and
+    /// clamps to 1.0, which forces every translucent fill in the artwork opaque -- with
+    /// no warning and nothing to see until a piece of artwork is meant to show through
+    /// another.  That is exactly how it was found: the panel body is 35% dark over the
+    /// background image, and the background never appeared.
     static Color nvgCol(unsigned int c, float opacity)
     {
         return Color(int(c & 0xff), int((c >> 8) & 0xff), int((c >> 16) & 0xff),
-                     int(((c >> 24) & 0xff) * opacity));
+                     float((c >> 24) & 0xff) / 255.0f * opacity);
     }
 
     /// The LCD, built from character codes.  Codes 0x00-0x0F come from the firmware's own
@@ -1033,6 +1073,8 @@ private:
     }
 
     NSVGimage *m_svg = nullptr;
+    NanoImage m_background;
+    bool m_backgroundTried = false;
     bool m_dirty = true;
     const bool m_countFrames = std::getenv("VOLTAIRE_FPS") != nullptr;
 

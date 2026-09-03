@@ -64,12 +64,16 @@ ttl:
 # Everything in generated/ is a build product: the panel geometry and artwork come from the
 # Inkscape SVG, the LCD character set from MatrixSans.  Neither is checked in, so a fresh
 # clone rebuilds them rather than inheriting a stale copy.
-GENERATED = generated/panel_geometry.h generated/panel_svg.h generated/u110_cgrom.h
+GENERATED = generated/panel_geometry.h generated/panel_svg.h \
+            generated/panel_background.h generated/u110_cgrom.h
 
 generated: $(GENERATED)
 
-generated/panel_geometry.h generated/panel_svg.h: ../resources/graphics/overall_panel_inkscape.svg tools/panel_export.py
-	@tools/panel_export.py --text-to-path
+# panel_export.py needs Inkscape to flatten text to paths and rsvg-convert to render the
+# artwork's raster layer -- nanosvg can draw neither.  Both are regeneration tools, not
+# runtime ones: what ships is the flattened SVG and the pre-rendered PNG, embedded.
+generated/panel_geometry.h generated/panel_svg.h generated/panel_background.h: ../resources/graphics/overall_panel_inkscape.svg tools/panel_export.py
+	@tools/panel_export.py --text-to-path --background
 
 generated/u110_cgrom.h: ../tools/make_lcd_cgrom.py
 	@mkdir -p generated

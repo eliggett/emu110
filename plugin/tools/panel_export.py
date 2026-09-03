@@ -10,6 +10,10 @@ composes every transform down to canvas coordinates, and emits
 
     plugin/generated/panel_geometry.h     geometry as constexpr tables
     plugin/generated/panel_geometry.json  the same, for tooling and debugging
+    plugin/generated/panel_flat.svg       the vector artwork, text flattened
+    plugin/generated/panel_svg.h          the same, embedded as a C string
+    plugin/generated/panel_background.png rasters, pre-rendered by rsvg-convert
+    plugin/generated/panel_background.h   the same, embedded as bytes
 
 It also LINTS the artwork against nanosvg's subset.  nanosvg ignores what it
 does not understand, silently, so an unsupported construct shows up as a missing
@@ -28,7 +32,11 @@ Elements are recognised by their Inkscape label:
 Usage:
     plugin/tools/panel_export.py                 # extract
     plugin/tools/panel_export.py --check         # lint only, non-zero on error
-    plugin/tools/panel_export.py --text-to-path  # regenerate the paths layer
+    plugin/tools/panel_export.py --text-to-path  # also flatten text to paths
+    plugin/tools/panel_export.py --background    # also pre-render the rasters
+
+--text-to-path needs Inkscape and --background needs rsvg-convert.  Both are
+needed only to REGENERATE; building from a clean tree runs them once.
 """
 import argparse
 import json
@@ -49,6 +57,9 @@ INK = 'http://www.inkscape.org/namespaces/inkscape'
 ET.register_namespace('', SVG)
 ET.register_namespace('inkscape', INK)
 ET.register_namespace('sodipodi', 'http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd')
+# An <image> carries its data in xlink:href.  Without this registration ElementTree
+# invents a prefix, and rsvg-convert then renders a background with nothing in it.
+ET.register_namespace('xlink', 'http://www.w3.org/1999/xlink')
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SVG_PATH = os.path.join(ROOT, 'resources/graphics/overall_panel_inkscape.svg')
@@ -64,6 +75,47 @@ SKIP_LAYERS = {'Foreground Text as Text', 'Example_LCD_Testing_only'}
 UNSUPPORTED_TAGS = {'filter', 'clipPath', 'mask', 'pattern', 'use', 'image',
                     'switch', 'foreignObject', 'marker', 'symbol'}
 UNSUPPORTED_ATTRS = {'filter', 'clip-path', 'mask'}
+
+# ...with two exceptions, which this script HANDLES rather than warns about.
+#
+# nanosvg has no <image> element at all -- its element dispatch (plugin/src/nanosvg.h)
+# knows g, path, rect, circle, ellipse, line, polyline, polygon and the gradients, and
+# skips everything else without a word.  So the artwork is split in two at export time:
+# every <image>, with its transform and its clip-path, is rendered ONCE by rsvg-convert
+# into panel_background.png, and the vector remainder becomes panel_flat.svg.  The UI
+# draws the PNG and then the vectors over it.
+#
+# Two consequences worth knowing.  Rasters always end up BEHIND the vector artwork
+# whatever their z-order in Inkscape, because they are a separate layer by the time the
+# UI sees them.  And the background is resolution-limited where the vectors are not:
+# BACKGROUND_SCALE sets how much detail is kept, at roughly 660 KB per multiple.
+HANDLED_TAGS = {'image', 'clipPath'}
+BACKGROUND_SCALE = 2.0
+
+# Rendering the background needs a renderer that implements clip paths, which is the
+# whole reason not to do it in the UI: rsvg-convert already has one.
+RSVG = 'rsvg-convert'
+
+
+# ------------------------------------------------------------- editing aids
+
+def editing_aid_labels(root):
+    """Labels whose element is a human-editable SOURCE, not artwork to render.
+
+    An element labelled X is an aid when one labelled X_as_path exists: the path is
+    what draws, and X is what the path was originally made from.  Keeping the pair
+    is how the lettering stays editable in Inkscape.
+
+    The rule matters in two places.  The linter must not complain that X is <text>
+    nanosvg cannot draw -- it is not meant to be drawn.  And the flattener must not
+    convert X to a path, because that path is already there and MAY HAVE BEEN
+    ADJUSTED BY HAND since; regenerating it would silently throw the adjustment
+    away.  The artwork's own naming is what says so, so nothing here is a list to
+    keep up to date.
+    """
+    labels = {e.get(f'{{{INK}}}label') for e in root.iter()}
+    return {l[:-len('_as_path')] for l in labels
+            if l and l.endswith('_as_path') and len(l) > len('_as_path')}
 
 
 # ---------------------------------------------------------------- transforms
@@ -161,8 +213,10 @@ def scan(svg_path):
         canvas = (float(root.get('width', 0)), float(root.get('height', 0)))
 
     elements, pivots, warnings = [], {}, []
+    aids = editing_aid_labels(root)
+    rasters = []
 
-    def walk(node, mat, layer, in_skipped):
+    def walk(node, mat, layer, in_skipped, in_handled):
         tag = node.tag.split('}')[-1]
         label = node.get(f'{{{INK}}}label')
         eid = node.get('id')
@@ -171,9 +225,23 @@ def scan(svg_path):
             layer = label or eid
             in_skipped = layer in SKIP_LAYERS
 
+        # An element paired with an X_as_path is a source, not artwork.  Its whole
+        # subtree is exempt: it is neither drawn nor measured nor complained about.
+        if label in aids:
+            in_skipped = True
+
+        # Inside a <clipPath> or an <image>, geometry belongs to the background
+        # pipeline.  It is neither a control nor something nanosvg was ever going
+        # to draw, so linting it against nanosvg's subset says nothing useful.
+        if tag in HANDLED_TAGS:
+            in_handled = True
+
         mat = mat_mul(mat, parse_transform(node.get('transform')))
 
-        if not in_skipped:
+        if tag == 'image' and not in_skipped:
+            rasters.append(eid)
+
+        if not in_skipped and not in_handled:
             if tag in UNSUPPORTED_TAGS:
                 warnings.append(f'<{tag}> id={eid}: nanosvg ignores this entirely')
             for attr in UNSUPPORTED_ATTRS:
@@ -204,7 +272,7 @@ def scan(svg_path):
                     pivots[name] = dict(angle_deg=ang, x=gx, y=gy,
                                         shape_id=child.get('id'))
 
-        if label and not in_skipped:
+        if label and not in_skipped and not in_handled:
             if tag == 'rect':
                 try:
                     x, y, w, h = (float(node.get(k)) for k in ('x', 'y', 'width', 'height'))
@@ -234,9 +302,9 @@ def scan(svg_path):
                                         gx - rx, gy - ry, 2 * rx, 2 * ry))
 
         for child in node:
-            walk(child, mat, layer, in_skipped)
+            walk(child, mat, layer, in_skipped, in_handled)
 
-    walk(root, IDENTITY, None, False)
+    walk(root, IDENTITY, None, False, False)
 
     # off-canvas check
     W, H = canvas
@@ -245,7 +313,7 @@ def scan(svg_path):
             warnings.append(f'{e.label}: extends outside the canvas '
                             f'({e.x:.1f},{e.y:.1f} {e.w:.1f}x{e.h:.1f})')
 
-    return elements, pivots, warnings, canvas
+    return elements, pivots, warnings, canvas, rasters
 
 
 def invert_rotate(rot):
@@ -374,30 +442,37 @@ def emit_json(path, elements, pivots, canvas, svg_rel):
 def text_to_path(svg_path, verbose=True):
     """Build the flattened artwork the renderer actually loads.
 
-    Three things have to happen, in this order:
+    Four things have to happen, in this order:
 
       1. Drop the editing-aid layers.  'Foreground Text as Text' is the human's
          copy and 'Example_LCD_Testing_only' is scaffolding; both would draw on
          top of the real artwork.  This must happen BEFORE Inkscape runs, because
          --export-plain-svg strips inkscape:label and the layers become
          unidentifiable afterwards.
-      2. Let Inkscape convert the remaining text to paths.  nanosvg has no text
-         support whatsoever.
-      3. Drop anything that is still <text>.  nanosvg would ignore it silently,
-         so leaving it in would make rsvg-convert (our reference renderer)
-         disagree with what the plugin actually draws -- which defeats the point
-         of having a reference.
+      2. Drop every element paired with an X_as_path, for the same reason and one
+         more: Inkscape would convert it to a path, and that path is ALREADY in
+         the artwork, possibly adjusted by hand since it was made.  Flattening the
+         source again would quietly replace the adjusted one with a fresh copy.
+      3. Let Inkscape convert what remains to paths.  nanosvg has no text support
+         whatsoever.
+      4. Drop anything that is still <text>, and every <image>.  nanosvg would
+         ignore both silently, so leaving them in would make rsvg-convert (our
+         reference renderer) disagree with what the plugin actually draws -- which
+         defeats the point of having a reference.  The images are not lost; they
+         are the background layer, rendered separately by render_background().
     """
     tree = ET.parse(svg_path)
     root = tree.getroot()
 
+    aids = editing_aid_labels(root)
     dropped = []
 
     def prune(parent):
         for child in list(parent):
             label = child.get(f'{{{INK}}}label') or ''
             is_layer = child.get(f'{{{INK}}}groupmode') == 'layer'
-            if (is_layer and label in SKIP_LAYERS) or label.endswith('_duplicate'):
+            if ((is_layer and label in SKIP_LAYERS) or label.endswith('_duplicate')
+                    or label in aids):
                 dropped.append(label or child.get('id'))
                 parent.remove(child)
             else:
@@ -429,12 +504,14 @@ def text_to_path(svg_path, verbose=True):
             if child.tag == f'{{{SVG}}}text':
                 leftover.append(child.get('id') or '?')
                 parent.remove(child)
+            elif child.tag == f'{{{SVG}}}image':
+                parent.remove(child)          # drawn from panel_background.png
             else:
                 strip_text(child)
 
     strip_text(root)
+    tree.write(out, encoding='utf-8', xml_declaration=True)
     if leftover:
-        tree.write(out, encoding='utf-8', xml_declaration=True)
         for eid in leftover:
             sys.stderr.write(f'panel_export: warning: <text> id={eid} survived '
                              'text-to-path and was removed from the flat SVG; '
@@ -454,6 +531,84 @@ def text_to_path(svg_path, verbose=True):
     return out
 
 
+# ------------------------------------------------------------ raster layer
+
+def render_background(svg_path, out_dir, canvas, verbose=True):
+    """Pre-render every <image> in the artwork into one PNG the UI can draw.
+
+    Why a pre-render rather than image support in the UI: the background is not
+    just a bitmap, it is a bitmap under a transform AND a clip path, and rsvg
+    already implements both correctly.  Reimplementing clipping against NanoVG
+    to save one build-time dependency would be trading a solved problem for an
+    unsolved one.
+
+    The result is exactly the canvas rectangle, transparent wherever the clip
+    does not reach, so the UI draws it into the design rect with no geometry of
+    its own -- nothing here has to agree with anything there.
+    """
+    tree = ET.parse(svg_path)
+    root = tree.getroot()
+
+    # Keep <defs> (the clip paths live there), every <image>, and the group chain
+    # above each image -- the layer transforms are part of where it lands.
+    def keep(node):
+        tag = node.tag.split('}')[-1]
+        if tag in ('image', 'defs'):
+            return True
+        kept = False
+        for child in list(node):
+            if keep(child):
+                kept = True
+            else:
+                node.remove(child)
+        return kept or tag == 'svg'
+
+    keep(root)
+    if root.find(f'.//{{{SVG}}}image') is None:
+        if verbose:
+            sys.stderr.write('panel_export: no <image> in the artwork, '
+                             'no background rendered\n')
+        return None
+
+    os.makedirs(out_dir, exist_ok=True)
+    tmp = os.path.join(out_dir, '.panel_bg.svg')
+    tree.write(tmp, encoding='utf-8', xml_declaration=True)
+
+    png = os.path.join(out_dir, 'panel_background.png')
+    width = int(round(canvas[0] * BACKGROUND_SCALE))
+    r = subprocess.run([RSVG, '-w', str(width), tmp, '-o', png],
+                       capture_output=True, text=True)
+    os.unlink(tmp)
+    if r.returncode != 0:
+        sys.stderr.write(r.stderr or f'panel_export: {RSVG} failed\n')
+        return None
+
+    with open(png, 'rb') as f:
+        data = f.read()
+
+    # Embedded, like panel_svg.h and for the same reason: an installed .lv2 bundle
+    # has nothing beside it, and a panel that draws only from a source tree is a
+    # panel that works on the developer's machine alone.
+    hdr = os.path.join(out_dir, 'panel_background.h')
+    with open(hdr, 'w') as f:
+        f.write('// GENERATED by plugin/tools/panel_export.py -- do not edit.\n'
+                '//\n'
+                '// The artwork\'s raster layer, already transformed and clipped, %d bytes\n'
+                '// of PNG at %d px wide (%.1fx the design width).  nanosvg has no <image>\n'
+                '// element, so this is drawn under the vectors instead of inside them.\n'
+                '#pragma once\n\n'
+                'static const unsigned char kPanelBackgroundPng[] = {\n'
+                % (len(data), width, BACKGROUND_SCALE))
+        for i in range(0, len(data), 16):
+            f.write('    ' + ','.join('0x%02x' % b for b in data[i:i + 16]) + ',\n')
+        f.write('};\n')
+
+    if verbose:
+        print('  -> %s (%d KB)' % (os.path.relpath(png, ROOT), len(data) // 1024))
+        print('  -> %s' % os.path.relpath(hdr, ROOT))
+    return png
+
+
 # --------------------------------------------------------------------- main
 
 def main():
@@ -465,10 +620,12 @@ def main():
                     help='lint only; exit non-zero if the artwork has problems')
     ap.add_argument('--text-to-path', action='store_true',
                     help='also write generated/panel_flat.svg with text flattened')
+    ap.add_argument('--background', action='store_true',
+                    help='also pre-render the artwork\'s rasters to a PNG')
     ap.add_argument('-q', '--quiet', action='store_true')
     args = ap.parse_args()
 
-    elements, pivots, warnings, canvas = scan(args.svg)
+    elements, pivots, warnings, canvas, rasters = scan(args.svg)
     rel = os.path.relpath(args.svg, ROOT)
 
     for w in warnings:
@@ -477,7 +634,7 @@ def main():
     if args.check:
         if not args.quiet:
             print(f'{len(elements)} named elements, {len(pivots)} knob(s), '
-                  f'{len(warnings)} warning(s)')
+                  f'{len(rasters)} raster(s), {len(warnings)} warning(s)')
         return 1 if warnings else 0
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -485,6 +642,9 @@ def main():
     j = os.path.join(args.out_dir, 'panel_geometry.json')
     emit_header(h, elements, pivots, canvas, rel)
     emit_json(j, elements, pivots, canvas, rel)
+
+    bg = (render_background(args.svg, args.out_dir, canvas, not args.quiet)
+          if args.background else None)
 
     flat = text_to_path(args.svg, not args.quiet) if args.text_to_path else None
     if flat:
@@ -505,7 +665,8 @@ def main():
         print('  -> %s' % os.path.relpath(hdr, ROOT))
 
     if not args.quiet:
-        print(f'panel {canvas[0]:.2f} x {canvas[1]:.2f}, {len(elements)} elements')
+        print(f'panel {canvas[0]:.2f} x {canvas[1]:.2f}, {len(elements)} elements, '
+              f'{len(rasters)} raster(s)')
         print(f'  -> {os.path.relpath(h, ROOT)}')
         print(f'  -> {os.path.relpath(j, ROOT)}')
         if flat:

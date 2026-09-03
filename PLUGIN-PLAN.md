@@ -460,9 +460,29 @@ Staying inside its subset avoids a class of "why is that missing" bugs:
 - **No filters** — no blur, no drop shadow. Do glow and shadow in NanoVG code,
   where they can also react to state.
 - **No clip paths, no masks, no patterns.**
+- **No `<image>`** — see below.
 - **Fills, strokes, and linear/radial gradients only.**
 - Set the document size to the panel's design size (e.g. 960×320) and scale in
   code. One number to change later.
+
+**`[x]` Rasters are pre-rendered, not banned.** A background photograph is not a
+thing nanosvg can be talked into, and it is not a thing to do without either. So
+`panel_export.py --background` renders every `<image>` — transform and clip-path
+included — through **rsvg-convert** into `panel_background.png` once, embeds the
+bytes, and the UI draws it under the vector artwork with `nvgImagePattern`.
+
+The alternative was teaching the UI about images directly. Rejected: the image is
+a bitmap under a transform *and* a clip path, and rsvg implements both already;
+reimplementing clipping against NanoVG to save one regeneration-time dependency
+trades a solved problem for an unsolved one. The costs are that rasters land
+behind all vectors regardless of z-order, and that the background is
+resolution-limited where the vectors are not.
+
+**`[!]` Translucency is how the two layers meet**, so it has to actually work.
+DGL's `Color(int, int, int, float alpha)` takes RGB as bytes and alpha as 0-1;
+passing the alpha byte clamps to opaque, silently. That bug sat in the panel from
+the beginning and was invisible until a background needed to show through a
+35%-opaque body fill. See `plugin/README.md`.
 
 ### Structure — one file, named layers
 

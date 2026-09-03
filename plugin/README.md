@@ -54,11 +54,38 @@ reads `resources/graphics/overall_panel_inkscape.svg` and writes three things to
 | `panel_geometry.h` | every control as a `constexpr Rect`, in design units |
 | `panel_geometry.json` | the same, for tooling |
 | `panel_flat.svg` | the artwork the renderer loads: text flattened to paths, editing-aid layers removed |
+| `panel_svg.h` | the same, embedded as a C string |
+| `panel_background.png` | the artwork's rasters, pre-rendered with their transforms and clips |
+| `panel_background.h` | the same, embedded as bytes |
 
 It also **lints the artwork against nanosvg's subset**.  nanosvg silently ignores
 filters, clip paths, masks, patterns and text, so an unsupported construct
 becomes a missing element at runtime with no error anywhere.  `--check` exits
 non-zero if the artwork has problems, which makes it usable as a build step.
+
+Regenerating needs **Inkscape** (to flatten text) and **rsvg-convert** (to render
+the rasters).  Neither is needed to build from the generated files.
+
+### The artwork is split in two, because nanosvg has no `<image>`
+
+nanosvg's element dispatch knows `g`, `path`, `rect`, `circle`, `ellipse`, `line`,
+`polyline`, `polygon` and the gradients.  There is no `<image>` and no clip path,
+so a background photo drops out of the panel with nothing said anywhere.
+
+So the exporter splits the artwork at the seam: every `<image>`, with its transform
+and its clip-path, is rendered **once** by rsvg-convert into `panel_background.png`,
+and the vector remainder becomes `panel_flat.svg`.  The UI draws the PNG into the
+design rectangle and then the vectors over it.
+
+Pre-rendering rather than teaching the UI about images is deliberate — the image is
+not just a bitmap, it is a bitmap under a transform *and* a clip path, and rsvg
+already implements both.  Two consequences worth knowing:
+
+- Rasters always end up **behind** the vector artwork, whatever their z-order in
+  Inkscape.  They are a separate layer by the time the UI sees them.
+- The background is **resolution-limited** where the vectors are not.
+  `BACKGROUND_SCALE` in the exporter sets how much detail is kept, at roughly
+  660 KB per multiple of the design width.
 
 ### Conventions the exporter relies on
 
@@ -79,6 +106,14 @@ Text`** (the human's editable copy, whose flattened twin `Foreground Text as
 Paths` is what actually draws) and **`Example_LCD_Testing_only`**.  Anything
 labelled `*_duplicate` is dropped too.
 
+**An element labelled `X` is an editing aid when one labelled `X_as_path`
+exists.**  The path is what draws; `X` is what it was made from.  The exporter
+neither renders `X`, nor lints it against nanosvg's subset, nor lets Inkscape
+flatten it — that last one matters most: the path is *already in the artwork* and
+may have been adjusted by hand since it was made, and re-flattening the source
+would quietly replace the adjusted path with a fresh copy.  `logo_text` /
+`logo_text_as_path` is the pair this exists for.
+
 A knob's `rotate()` is read as its **zero position**, not as artwork: the needle
 is drawn where the SVG puts it when the parameter reads 0, and the code rotates
 from there.
@@ -93,7 +128,10 @@ rsvg-convert -w 1600 plugin/generated/panel_flat.svg -o /tmp/panel_ref.png
 
 This is worth doing because it is the only way to catch nanosvg quietly dropping
 something.  Compare against `panel_flat.svg`, never against the source artwork --
-the source still contains the editing-aid layers.
+the source still contains the editing-aid layers, and its rasters are drawn from
+`panel_background.png` rather than from the SVG.  Rendering the source is still
+useful for a different question: it shows the panel as the artwork MEANS it, which
+is what the two layers together should add up to.
 
 ## The null test
 
@@ -296,6 +334,35 @@ almost right, which is the hard kind of wrong.
 Related: the knob pointer is drawn in code so it can rotate, so the artwork's own copy is
 skipped by id (`kVolumeKnobPointerId`). Drawing both leaves the old pointer behind at its
 zero position.
+
+## `[!]` DGL's `Color` takes RGB as bytes and alpha as a FLOAT
+
+```cpp
+Color(int red, int green, int blue, float alpha = 1.0f)   // dgl/Color.hpp
+```
+
+Three integers and a float, which is not the shape anyone expects. Passing the alpha
+**byte** -- `Color(r, g, b, 88)` for 35% -- compiles without a murmur, converts 88 to
+88.0f, and clamps to fully opaque.
+
+Every translucent fill in the artwork had been forced opaque this way since the panel was
+first drawn, and nothing showed it: an opaque panel over an opaque ground looks exactly
+like a translucent panel over a similar ground. It surfaced only when a background image
+went in behind a body fill of `fill-opacity:0.35` and never appeared. The first suspicion
+was the new code -- the image, the pattern, the draw order -- and all of it was fine.
+
+What settled it was printing the colour rather than reasoning about it:
+
+```
+FILLDEBUG rect9: raw=0x581a1a1a op=1.000 -> rgba 0.102 0.102 0.102 1.000
+```
+
+`0x58` is 88 is 35%, and the alpha that came out the other side is 1.000. Three lines of
+`fprintf` after a long time spent on hypotheses that all had the same symptom.
+
+**When a value survives a conversion unchanged, print it.** The RGB channels being right
+is what made the bug invisible for so long; they go through the integer path and only the
+fourth argument does not.
 
 ## Real-time safety
 
