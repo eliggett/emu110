@@ -25,6 +25,11 @@
 // See the note in Voltaire110Plugin.cpp.
 #define DISTRHO_PLUGIN_WANT_STATE       1
 
+// The host must be able to ASK for the current state when it saves a session -- without
+// this it would only ever store whatever was last handed to setState(), which is the state
+// the session was LOADED with, not the one the user has since edited.
+#define DISTRHO_PLUGIN_WANT_FULL_STATE  1
+
 // The panel is drawn with NanoVG, which DGL already carries.  No widget toolkit: PUGL
 // uses raw X11/Cocoa/Win32 plus GL and nothing else, which is what keeps the plugin out
 // of a symbol fight with Ardour's own GTK.

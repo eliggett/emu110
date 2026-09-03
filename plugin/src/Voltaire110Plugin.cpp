@@ -76,6 +76,15 @@ std::vector<uint8_t> findRom(const char *const *names, size_t count, size_t want
     return {};
 }
 
+/// What the plugin keeps.  Only the NVRAM is saved into a session; the panel is live
+/// display pushed to the UI.
+enum States
+{
+    kStatePanel = 0,
+    kStateNvram,
+    kStateCount
+};
+
 enum Params
 {
     kParamVolume = 0,
@@ -114,7 +123,7 @@ class Voltaire110Plugin : public Plugin
 public:
     Voltaire110Plugin()
         // parameters, programs, STATES -- the third is what registers the "panel" blob.
-        : Plugin(kParamCount, 0, 1)
+        : Plugin(kParamCount, 0, kStateCount)
     {
         loadRoms();
         setupRate(getSampleRate());
@@ -239,19 +248,76 @@ protected:
 
     void initState(uint32_t index, State &state) override
     {
-        if (index != 0)
-            return;
-        state.key = "panel";
-        state.label = "Panel";
-        // Not host-readable: this is live machine state, not something to save in a
-        // session or show in a generic UI.
-        state.hints = kStateIsOnlyForUI;
-        state.defaultValue = "";
+        switch (index)
+        {
+        case kStatePanel:
+            state.key = "panel";
+            state.label = "Panel";
+            // Live display, pushed to the UI many times a second.  NOT host-readable:
+            // there is no sense in a session storing what the LCD happened to show.
+            state.hints = kStateIsOnlyForUI;
+            state.defaultValue = "";
+            break;
+
+        case kStateNvram:
+            state.key = "nvram";
+            state.label = "Battery-backed memory";
+            // The one thing worth keeping across a session: the user's patches and setup,
+            // exactly what the real unit's battery preserves.
+            state.hints = kStateIsHostReadable;
+            state.defaultValue = "";
+            break;
+        }
     }
 
-    // getState() belongs to DISTRHO_PLUGIN_WANT_FULL_STATE, which we do not want: this
-    // state is live machine display, not something a host should save or restore.
-    void setState(const char *, const char *) override { }
+    /// Asked by the host when it saves a session.
+    String getState(const char *key) const override
+    {
+        if (std::strcmp(key, "nvram") != 0)
+            return String();
+
+        const size_t need = m_core.saveState(nullptr, 0);
+        std::vector<uint8_t> raw(need);
+        if (m_core.saveState(raw.data(), raw.size()) != need)
+            return String();
+
+        std::vector<char> hex(need * 2 + 1);
+        encodeHex(raw.data(), need, hex.data());
+        return String(hex.data());
+    }
+
+    void setState(const char *key, const char *value) override
+    {
+        if (std::strcmp(key, "nvram") != 0 || value == nullptr || value[0] == '\0')
+            return;
+
+        const size_t n = std::strlen(value) / 2;
+        std::vector<uint8_t> raw(n);
+        for (size_t i = 0; i < n; i ++)
+        {
+            const int hi = hexNibble(value[i * 2]), lo = hexNibble(value[i * 2 + 1]);
+            if (hi < 0 || lo < 0)
+                return;
+            raw[i] = uint8_t((hi << 4) | lo);
+        }
+
+        // Restoring reboots the machine, which costs a fraction of a second of wall time.
+        // Fine here: a host restores state when it loads a session, not from the audio
+        // callback.
+        if (m_core.loadState(raw.data(), raw.size()))
+            d_stdout("Voltaire 110: restored %zu bytes of battery-backed memory.", raw.size());
+        else
+            d_stderr2("Voltaire 110: saved memory did not load -- wrong version or size. "
+                      "The machine keeps its own; nothing was overwritten.");
+    }
+
+    static int hexNibble(char c)
+    {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    }
 
     // ---- audio ---------------------------------------------------------------------
 

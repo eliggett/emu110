@@ -396,3 +396,28 @@ The patch lives in `plugin/patches/` and `make` applies it to the submodule, ide
 before building. DPF is not forked -- a fresh clone gets upstream DPF and the patch on top,
 and if upstream ever moves under it the build says so rather than silently producing a
 plugin whose panel does not update.
+
+## Session state
+
+What persists is the **NVRAM, and only the NVRAM** — the work/setup RAM at `0x2100`–`0x3FFF`
+and the 64 user patches at `0xE000`–`0xFFFF`. That is exactly what the real unit's battery
+holds; everything else comes back from ROM when the power does.
+
+Restoring therefore **reboots the machine**, which is what a U-110 does when it is switched
+off and on. It costs a fraction of a second of wall time (nothing forces realtime), and it
+is the only way to be consistent: the firmware caches the active patch into work RAM at
+`0x2800`, and the CPU's registers are not saved, so resuming in place would leave the
+machine half in one session and half in another.
+
+This is deliberately **not** a MAME-style machine snapshot. A snapshot would have to carry
+every device's internal state and the exact scheduler phase, and would break whenever any of
+that changed. The NVRAM layout is fixed by the hardware and cannot.
+
+`make selftest` round-trips it through the LV2 state extension the way a DAW does — save,
+instantiate a fresh plugin, restore, save again — and checks the user patch store byte for
+byte. It also checks the fresh instance *differs* before restoring, so the comparison cannot
+pass for the wrong reason.
+
+`[?]` Not yet carried: which ROMs and cards were loaded. Section 9 wants those stored by
+name and SHA-256 and re-resolved through the search path, so a session warns intelligently
+instead of loading something silently wrong.

@@ -876,7 +876,70 @@ void U110Core::snapshot(PanelState &out) const
 	out.card_present = u8(~m_impl->card_present & 0x0f);
 }
 
-size_t U110Core::saveState(uint8_t *, size_t) const { return 0; }
-bool   U110Core::loadState(const uint8_t *, size_t) { return false; }
+// What persists is the NVRAM, and only the NVRAM.
+//
+// The real U-110 is battery backed: IC10 holds the work and setup RAM, IC11 the 64 user
+// patches, and everything else comes back from ROM when the power does.  So the honest
+// model for a DAW session is the same one the hardware uses -- keep the two RAMs, and let
+// the firmware boot from them.  That is why this does not try to be a MAME-style machine
+// snapshot: a snapshot would also have to carry the CPU's registers, every device's
+// internal state and the exact scheduler phase, and it would break whenever any of that
+// changed.  The NVRAM layout is fixed by the hardware and cannot.
+//
+// The cost is that restoring reboots the machine, which is exactly what happens when a
+// U-110 is switched off and on.
+
+namespace {
+constexpr u32 kStateMagic = 0x55313130;      // "U110"
+constexpr u32 kStateVersion = 1;
+struct StateHeader
+{
+	u32 magic, version;
+	u32 workram_size, patchram_size;
+};
+}
+
+size_t U110Core::saveState(uint8_t *buf, size_t cap) const
+{
+	const size_t need = sizeof(StateHeader) + WORKRAM_SIZE + PATCHRAM_SIZE;
+	if (buf == nullptr || cap < need)
+		return need;                         // caller may pass cap 0 to size the buffer
+
+	StateHeader h { kStateMagic, kStateVersion, u32(WORKRAM_SIZE), u32(PATCHRAM_SIZE) };
+	std::memcpy(buf, &h, sizeof(h));
+	std::memcpy(buf + sizeof(h), m_impl->workram.data(), WORKRAM_SIZE);
+	std::memcpy(buf + sizeof(h) + WORKRAM_SIZE, m_impl->patchram.data(), PATCHRAM_SIZE);
+	return need;
+}
+
+bool U110Core::loadState(const uint8_t *buf, size_t n)
+{
+	if (buf == nullptr || n < sizeof(StateHeader))
+		return false;
+
+	StateHeader h;
+	std::memcpy(&h, buf, sizeof(h));
+	if (h.magic != kStateMagic || h.version != kStateVersion)
+		return false;
+	if (h.workram_size != WORKRAM_SIZE || h.patchram_size != PATCHRAM_SIZE)
+		return false;
+	if (n < sizeof(h) + h.workram_size + h.patchram_size)
+		return false;
+
+	std::memcpy(m_impl->workram.data(), buf + sizeof(h), WORKRAM_SIZE);
+	std::memcpy(m_impl->patchram.data(), buf + sizeof(h) + WORKRAM_SIZE, PATCHRAM_SIZE);
+
+	// Reboot into the restored memory.  The firmware caches the active patch into work RAM
+	// at 0x2800, and the CPU's own registers are not restored, so resuming in place would
+	// leave the machine half in one session and half in another.  Booting is both correct
+	// and what the hardware does; nothing forces realtime, so 5.4 s of emulated boot costs
+	// a fraction of a second.
+	if (m_impl->started)
+	{
+		reset();
+		runUntilIdle();
+	}
+	return true;
+}
 
 } // namespace voltaire

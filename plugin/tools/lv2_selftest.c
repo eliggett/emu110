@@ -17,6 +17,7 @@
 #include <lv2/buf-size/buf-size.h>
 #include <lv2/parameters/parameters.h>
 #include <lv2/worker/worker.h>
+#include <lv2/state/state.h>
 
 #include <dlfcn.h>
 
@@ -56,6 +57,34 @@ static LV2_Worker_Status schedule_work(LV2_Worker_Schedule_Handle h, uint32_t si
     g_work_size = size;
     return LV2_WORKER_SUCCESS;
 }
+/* Capture whatever the plugin stores. */
+static uint32_t saved_urid = 0, saved_type = 0, saved_flags = 0;
+static char saved_val[131072];
+static size_t saved_len = 0;
+static LV2_State_Status store_cb(LV2_State_Handle h, uint32_t key, const void *value,
+                                 size_t size, uint32_t type, uint32_t flags)
+{
+    (void)h;
+    if (size >= sizeof(saved_val)) return LV2_STATE_ERR_NO_SPACE;
+    memcpy(saved_val, value, size);
+    saved_val[size] = 0;
+    saved_len = size;
+    /* Keep the key, type and flags: a real host round-trips all three, and the plugin
+     * checks the type on the way back in. */
+    saved_urid = key; saved_type = type; saved_flags = flags;
+    return LV2_STATE_SUCCESS;
+}
+static const void *retrieve_cb(LV2_State_Handle h, uint32_t key, size_t *size,
+                               uint32_t *type, uint32_t *flags)
+{
+    (void)h;
+    if (key != saved_urid) { if (size) *size = 0; return NULL; }
+    if (size)  *size = saved_len;
+    if (type)  *type = saved_type;
+    if (flags) *flags = saved_flags;
+    return saved_len ? saved_val : NULL;
+}
+
 static LV2_Worker_Status work_respond(LV2_Worker_Respond_Handle h, uint32_t size, const void *data)
 { (void)h; (void)size; (void)data; return LV2_WORKER_SUCCESS; }
 
@@ -128,6 +157,7 @@ int main(int argc, char **argv)
     float btn[6] = { 0, 0, 0, 0, 0, 0 };
     const int want_fx = (argc > 5) && strcmp(argv[5], "fx") == 0;
     const int want_stream = (argc > 5) && strcmp(argv[5], "stream") == 0;
+    const int want_state_test = (argc > 5) && strcmp(argv[5], "state") == 0;
 
 
     d->connect_port(h, 0, outL);
@@ -291,6 +321,72 @@ int main(int argc, char **argv)
             pcm[written * 2 + 1] = (short)r;
             if (abs(l) > peak) peak = abs(l);
             if (abs(r) > peak) peak = abs(r);
+        }
+    }
+
+    /* Save and restore the way a DAW does: ask the plugin for its state through the LV2
+     * state extension, then hand it back to a FRESH instance and check it came through.
+     * This is what "reopen the session" actually exercises. */
+    if (want_state_test)
+    {
+        const LV2_State_Interface *si = d->extension_data
+                ? (const LV2_State_Interface *)d->extension_data(LV2_STATE__interface) : NULL;
+        if (si == NULL) { printf("state: plugin exposes no LV2 state interface\n"); }
+        else
+        {
+            saved_len = 0;
+            si->save(h, store_cb, NULL, 0, NULL);
+            printf("state: saved %zu bytes\n", saved_len);
+
+            /* A fresh instance, as reopening the session gives you. */
+            LV2_Handle h2 = d->instantiate(d, RATE, "./", features);
+            if (h2 == NULL) { printf("state: second instantiate FAILED\n"); }
+            else
+            {
+                d->connect_port(h2, 0, outL); d->connect_port(h2, 1, outR);
+                d->connect_port(h2, 2, ev_in); d->connect_port(h2, 3, ev_out);
+                d->connect_port(h2, 4, &latency);
+                d->connect_port(h2, 5, &volume); d->connect_port(h2, 6, &hf);
+                for (int i = 0; i < 6; i++) d->connect_port(h2, 7 + i, &btn[i]);
+
+                const size_t was = saved_len;
+                char *before = malloc(was + 1);
+                memcpy(before, saved_val, was + 1);
+
+                /* What the fresh instance holds WITHOUT a restore.  If this already
+                 * matched, the comparison below would prove nothing -- both instances boot
+                 * the same firmware and would reach the same factory patches. */
+                saved_len = 0;
+                si->save(h2, store_cb, NULL, 0, NULL);
+                char *virgin = malloc(saved_len + 1);
+                memcpy(virgin, saved_val, saved_len + 1);
+                const size_t hdr0 = 16 * 2, wr0 = 0x1f00 * 2, pr0 = 0x2000 * 2;
+                printf("state: before restoring, fresh vs saved: %s\n",
+                       memcmp(before + hdr0 + wr0, virgin + hdr0 + wr0, pr0) == 0
+                       ? "ALREADY IDENTICAL -- the check below would prove nothing"
+                       : "different, so the check below means something");
+                free(virgin);
+                /* put the saved data back where retrieve_cb will find it */
+                memcpy(saved_val, before, was + 1);
+                saved_len = was;
+
+                si->restore(h2, retrieve_cb, NULL, 0, NULL);
+
+                saved_len = 0;
+                si->save(h2, store_cb, NULL, 0, NULL);
+                printf("state: restored into a fresh instance, it now reports %zu bytes\n",
+                       saved_len);
+                /* The patch store is what must survive; work RAM is touched by booting. */
+                const size_t hdr = 16 * 2;            /* header, in hex characters */
+                const size_t wr  = 0x1f00 * 2;
+                const size_t pr  = 0x2000 * 2;
+                int same = (saved_len == was)
+                        && memcmp(before + hdr + wr, saved_val + hdr + wr, pr) == 0;
+                printf("state: user patch store %s across save/restore\n",
+                       same ? "SURVIVED byte for byte" : "DID NOT survive");
+                free(before);
+                d->cleanup(h2);
+            }
         }
     }
 
