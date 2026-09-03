@@ -49,9 +49,12 @@ static const struct { int len; unsigned char b[16]; } kFxSetup[] = {
 /* The panel, as the UI receives it: the plugin's PanelBlob, hex, inside a key/value
  * atom.  Decoding it here rather than scanning for a run of hex characters means the
  * test breaks LOUDLY if the struct grows, instead of quietly reading the wrong field. */
-#define PANEL_BYTES 100
+#define PANEL_BYTES 124
+#define PANEL_PART_MEDIA 100               /* six bytes, then six of tone, then six flags */
+#define PANEL_PART_TONE  106
 static unsigned char g_panel[PANEL_BYTES];
 static char g_patches[8192];              /* the patch names, one per line */
+static char g_tones[16384];               /* the tone list, "G media label" / "T name" */
 
 static int hexbyte(const char *p)
 {
@@ -116,6 +119,8 @@ static void absorb_events_out(void *ev_out, uint32_t urid_midi,
         }
         else if (strcmp(key, "patches") == 0 && strlen(val) < sizeof(g_patches))
             strcpy(g_patches, val);
+        else if (strcmp(key, "tones") == 0 && strlen(val) < sizeof(g_tones))
+            strcpy(g_tones, val);
     }
 }
 
@@ -354,6 +359,7 @@ int main(int argc, char **argv)
     const int want_stream = (argc > 5) && strcmp(argv[5], "stream") == 0;
     const int want_state_test = (argc > 5) && strcmp(argv[5], "state") == 0;
     const int want_patch_test = (argc > 5) && strcmp(argv[5], "patch") == 0;
+    const int want_tone_test  = (argc > 5) && strcmp(argv[5], "tone") == 0;
     int patch_checks = 0, patch_pass = 0;
 
 
@@ -402,8 +408,8 @@ int main(int argc, char **argv)
         /* Press EDIT/EXIT at 7 s and release at 8 s: the buttons are what drive the
          * machine's own menus, and this proves the whole loop from a host control port
          * through to the LCD. */
-        btn[1] = (!want_fx && !want_patch_test && done >= (long)(7.0 * RATE)
-                  && done < (long)(8.0 * RATE)) ? 1.0f : 0.0f;
+        btn[1] = (!want_fx && !want_patch_test && !want_tone_test
+                  && done >= (long)(7.0 * RATE) && done < (long)(8.0 * RATE)) ? 1.0f : 0.0f;
 
         if (want_fx) {
             const long step = (done - (long)(7.0 * RATE)) / BLOCK;
@@ -452,6 +458,36 @@ int main(int argc, char **argv)
             const double t = (double)done / RATE, dt = (double)BLOCK / RATE;
             if (t <= 9.0 && 9.0 < t + dt)
                 put_keyvalue(seq, urid_kv, "patchsel", "42");
+        }
+
+        /* Tones go to ONE PART, over the machine's own SysEx, with no button pressed and
+         * nothing assumed about what the display is showing.  The checks are made half a
+         * second later: eleven bytes have to clock in at 31250 baud and be parsed. */
+        if (want_tone_test)
+        {
+            const double t = (double)done / RATE, dt = (double)BLOCK / RATE;
+            if (t <= 9.0 && 9.0 < t + dt)
+                put_keyvalue(seq, urid_kv, "tonesel", "0 0 40");    /* part 1 <- SLAP 9 */
+            else if (t <= 10.0 && 10.0 < t + dt) {
+                patch_checks++;
+                patch_pass += (g_panel[PANEL_PART_MEDIA] == 0 && g_panel[PANEL_PART_TONE] == 40);
+                printf("tone: part 1 -> media %u tone %u\n",
+                       g_panel[PANEL_PART_MEDIA], g_panel[PANEL_PART_TONE]);
+            }
+            else if (t <= 11.0 && 11.0 < t + dt)
+                put_keyvalue(seq, urid_kv, "tonesel", "2 8 3");     /* part 3 <- a CARD tone */
+            else if (t <= 12.0 && 12.0 < t + dt) {
+                patch_checks++;
+                patch_pass += (g_panel[PANEL_PART_MEDIA + 2] == 8
+                               && g_panel[PANEL_PART_TONE + 2] == 3);
+                printf("tone: part 3 -> media %u tone %u (a card tone, which a program "
+                       "change cannot reach)\n",
+                       g_panel[PANEL_PART_MEDIA + 2], g_panel[PANEL_PART_TONE + 2]);
+                patch_checks++;
+                patch_pass += (g_panel[PANEL_PART_MEDIA] == 0 && g_panel[PANEL_PART_TONE] == 40);
+                printf("tone: part 1 still on media %u tone %u\n",
+                       g_panel[PANEL_PART_MEDIA], g_panel[PANEL_PART_TONE]);
+            }
         }
 
         if (want_patch_test)
@@ -774,6 +810,36 @@ int main(int argc, char **argv)
              100.0 * (double)slow_midi_lit / (double)(slow_total ? slow_total : 1), slow_total); }
     printf("events-out: %ld state blobs to the UI, %ld MIDI atoms to the host\n",
            state_atoms, midi_out_atoms);
+
+    if (want_tone_test)
+    {
+        /* The list: one group per media, the internal 99 and then whatever is mounted. */
+        const char *p = g_tones;
+        int groups = 0, in_group = 0, internal = 0, card_total = 0;
+        char first_card[64] = "";
+        while (*p) {
+            const char *nl = strchr(p, '\n');
+            const int n = nl ? (int)(nl - p) : (int)strlen(p);
+            if (p[0] == 'G') {
+                if (groups == 1) internal = in_group;
+                else if (groups > 1) card_total += in_group;
+                if (groups == 1) snprintf(first_card, sizeof(first_card), "%.*s", n - 2, p + 2);
+                in_group = 0;
+                groups++;
+                printf("tone: %.*s\n", n, p);
+            }
+            else in_group++;
+            if (!nl) break;
+            p = nl + 1;
+        }
+        if (groups == 1) internal = in_group; else card_total += in_group;
+        printf("tone: %d groups, %d internal tones, %d card tones (second group: %s)\n",
+               groups, internal, card_total, first_card);
+        patch_checks++;
+        patch_pass += (groups >= 2 && internal == 99);
+        printf("tone: %d of %d checks passed%s\n", patch_pass, patch_checks,
+               patch_pass == patch_checks ? "" : "   <-- FAILED");
+    }
 
     if (want_patch_test)
     {

@@ -50,6 +50,18 @@ struct PanelBlob
     uint8_t cgram[64];
     uint8_t leds, cursor_pos, cursor_flags;
     uint8_t patch;                  ///< 0-based, so the LCD's P-01 is 0
+    uint8_t part_media[6];          ///< 0 = internal, otherwise a card ID
+    uint8_t part_tone[6];           ///< tone within that media, counting from 0
+    uint8_t part_flags[6];          ///< (b & 0xE0) == 0xC0: the part is switched off
+    uint8_t part_chan[6];           ///< MIDI receive channel in the low nibble
+};
+
+/// One media's worth of tones: the internal wave ROM, or a mounted card.
+struct ToneGroup
+{
+    unsigned media = 0;
+    std::string label;
+    std::vector<std::string> names;
 };
 
 class Voltaire110UI : public UI
@@ -118,6 +130,37 @@ protected:
             return;
         }
 
+        // The tones, grouped by media.  "G <media> <label>" opens a group and "T <name>"
+        // is a tone in it; the marker is the first character rather than anything in the
+        // text, so a name is free to say whatever it says.
+        if (std::strcmp(key, "tones") == 0)
+        {
+            m_toneGroups.clear();
+            for (const char *p = value; *p != '\0'; )
+            {
+                const char *const nl = std::strchr(p, '\n');
+                const size_t len = nl != nullptr ? size_t(nl - p) : std::strlen(p);
+                if (len > 2 && p[0] == 'G')
+                {
+                    ToneGroup g;
+                    g.media = unsigned(std::atoi(p + 2));
+                    const char *sp = std::strchr(p + 2, ' ');
+                    if (sp != nullptr && size_t(sp + 1 - p) < len)
+                        g.label.assign(sp + 1, size_t(p + len - sp - 1));
+                    m_toneGroups.push_back(std::move(g));
+                }
+                else if (len > 2 && p[0] == 'T' && !m_toneGroups.empty())
+                    m_toneGroups.back().names.emplace_back(p + 2, len - 2);
+                if (nl == nullptr)
+                    break;
+                p = nl + 1;
+            }
+            if (m_toneGroup >= int(m_toneGroups.size()))
+                m_toneGroup = 0;
+            m_dirty = true;
+            return;
+        }
+
         if (std::strcmp(key, "panel") != 0)
             return;
         PanelBlob blob;
@@ -130,6 +173,10 @@ protected:
         m_cursorPos = blob.cursor_pos;
         m_cursorFlags = blob.cursor_flags;
         m_patch = blob.patch;
+        std::memcpy(m_partMedia, blob.part_media, sizeof(m_partMedia));
+        std::memcpy(m_partTone, blob.part_tone, sizeof(m_partTone));
+        std::memcpy(m_partFlags, blob.part_flags, sizeof(m_partFlags));
+        std::memcpy(m_partChan, blob.part_chan, sizeof(m_partChan));
         m_dirty = true;
     }
 
@@ -196,9 +243,11 @@ protected:
 
         restore();
 
-        // Outside the panel transform on purpose: the menu is in window pixels.
-        if (m_menuOpen)
-            drawMenu();
+        // Outside the panel transform on purpose: the menus are in window pixels.
+        if (m_menu == Menu::Patch)
+            drawPatchMenu();
+        else if (m_menu == Menu::Tone)
+            drawToneMenu();
 
         if (m_countFrames)
         {
@@ -226,14 +275,14 @@ protected:
 
     bool onMouse(const MouseEvent &ev) override
     {
-        // The menu is modal while it is up: it takes the click wherever it lands, so a
+        // A menu is modal while it is up: it takes the click wherever it lands, so a
         // click meant to dismiss it cannot also press whatever is underneath.
-        if (m_menuOpen)
+        if (m_menu == Menu::Patch)
         {
             if (!ev.press)
                 return true;
-            const int hit = menuHit(float(ev.pos.getX()), float(ev.pos.getY()));
-            m_menuOpen = false;
+            const int hit = patchHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            m_menu = Menu::None;
             m_menuHover = -1;
             if (hit >= 0 && size_t(hit) < m_patchNames.size())
             {
@@ -243,6 +292,43 @@ protected:
             }
             repaint();
             return true;
+        }
+
+        if (m_menu == Menu::Tone)
+        {
+            if (!ev.press)
+                return true;
+            const ToneHit hit = toneHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            switch (hit.kind)
+            {
+            case ToneHit::Part:
+                // Follow the part to wherever its tone lives, so the list opens showing
+                // where that part actually is rather than where you were last looking.
+                m_tonePart = hit.index;
+                for (size_t g = 0; g < m_toneGroups.size(); g ++)
+                    if (m_toneGroups[g].media == m_partMedia[m_tonePart])
+                        m_toneGroup = int(g);
+                repaint();
+                return true;
+            case ToneHit::Group:
+                m_toneGroup = hit.index;
+                repaint();
+                return true;
+            case ToneHit::Tone:
+            {
+                char msg[32];
+                std::snprintf(msg, sizeof(msg), "%d %u %d", m_tonePart,
+                              m_toneGroups[size_t(m_toneGroup)].media, hit.index);
+                setState("tonesel", msg);
+                m_menu = Menu::None;
+                repaint();
+                return true;
+            }
+            default:
+                m_menu = Menu::None;
+                repaint();
+                return true;
+            }
         }
 
         const float s = panelScale();
@@ -274,13 +360,15 @@ protected:
                         repaint();
                         return true;
                     }
-                    if (i == voltaire::panel::BUT_PATCH_MENU)
+                    if (i == voltaire::panel::BUT_PATCH_MENU
+                            || i == voltaire::panel::BUT_TONE)
                     {
-                        // Not a toggle: a click while the menu is up never reaches here,
+                        // Not a toggle: a click while a menu is up never reaches here,
                         // because the menu takes it first and closes on anything that is
                         // not one of its entries -- this button included.
-                        m_menuOpen = true;
+                        m_menu = i == voltaire::panel::BUT_TONE ? Menu::Tone : Menu::Patch;
                         m_menuHover = -1;
+                        m_toneHover = ToneHit();
                         repaint();
                         return true;
                     }
@@ -312,11 +400,18 @@ protected:
 
     bool onMotion(const MotionEvent &ev) override
     {
-        if (m_menuOpen)
+        if (m_menu == Menu::Patch)
         {
-            const int hit = menuHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            const int hit = patchHit(float(ev.pos.getX()), float(ev.pos.getY()));
             if (hit != m_menuHover)
             { m_menuHover = hit; repaint(); }
+            return true;
+        }
+        if (m_menu == Menu::Tone)
+        {
+            const ToneHit hit = toneHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            if (hit.kind != m_toneHover.kind || hit.index != m_toneHover.index)
+            { m_toneHover = hit; repaint(); }
             return true;
         }
         if (!m_dragKnob)
@@ -330,7 +425,7 @@ protected:
 
     bool onScroll(const ScrollEvent &ev) override
     {
-        if (m_menuOpen)
+        if (m_menu != Menu::None)
             return true;
         const auto &k = voltaire::panel::kVolumeKnob;
         const float s = panelScale();
@@ -346,9 +441,9 @@ protected:
 
     bool onKeyboard(const KeyboardEvent &ev) override
     {
-        if (!m_menuOpen || !ev.press || ev.key != kKeyEscape)
+        if (m_menu == Menu::None || !ev.press || ev.key != kKeyEscape)
             return false;
-        m_menuOpen = false;
+        m_menu = Menu::None;
         m_menuHover = -1;
         repaint();
         return true;
@@ -374,7 +469,7 @@ private:
 
     struct MenuLayout { float x, y, w, h, rowH, colW, headerH, fontSize; };
 
-    MenuLayout menuLayout() const
+    MenuLayout patchLayout() const
     {
         MenuLayout m;
         m.rowH = (float(getHeight()) - 12.0f) / float(kMenuRows + 2);
@@ -391,9 +486,9 @@ private:
 
     /// Which entry is under the pointer, or -1 for none -- including everywhere outside
     /// the menu, which is how a click lands on "close and choose nothing".
-    int menuHit(float px, float py) const
+    int patchHit(float px, float py) const
     {
-        const MenuLayout m = menuLayout();
+        const MenuLayout m = patchLayout();
         const float gx = px - (m.x + m.rowH * 0.5f);
         const float gy = py - (m.y + m.headerH);
         if (gx < 0.0f || gy < 0.0f)
@@ -404,9 +499,9 @@ private:
         return col * kMenuRows + row;
     }
 
-    void drawMenu()
+    void drawPatchMenu()
     {
-        const MenuLayout m = menuLayout();
+        const MenuLayout m = patchLayout();
 
         // The panel behind is dimmed, so the list reads as being in front of the
         // instrument rather than painted onto it.
@@ -461,6 +556,220 @@ private:
             std::snprintf(label, sizeof(label), "%02d %s", i + 1, m_patchNames[size_t(i)].c_str());
             fillColor(current ? Color(190, 255, 190) : Color(214, 216, 220));
             text(x + m.fontSize * 0.4f, y + m.rowH * 0.5f, label, nullptr);
+        }
+    }
+
+    // ---- the TONE menu ---------------------------------------------------------------
+    //
+    // A patch has six PARTS and each part names one TONE, so this menu is two choices:
+    // which part, then which tone.  The part tabs across the top show what each part is
+    // playing now, which is most of what anyone opens this for.
+    //
+    // Tones live on media -- the internal wave ROM, or a card -- and a part names its card
+    // by CATALOGUE ID rather than by slot (ROM-ANALYSIS.md section 6.7), which is why the
+    // second row of tabs is the card list and why picking one sends its media number
+    // rather than a slot.
+    //
+    // 99 internal tones do not fit a sixteen-row column the way 64 patches did, so the
+    // grid is thirteen rows of eight, filled column-major, and it stays that size when a
+    // card with sixteen tones is showing.  A layout that resized per card would move the
+    // tabs out from under the pointer that just clicked one.
+
+    static constexpr int kToneRows = 13;
+    static constexpr int kToneCols = 8;
+
+    struct ToneHit
+    {
+        enum Kind { None = 0, Part, Group, Tone };
+        int kind = None;
+        int index = -1;
+    };
+
+    struct ToneLayout
+    {
+        float x, y, w, h, rowH, colW, headerH, tabH, fontSize;
+        float partsY, groupsY, gridY;
+    };
+
+    ToneLayout toneLayout() const
+    {
+        ToneLayout m;
+        m.rowH = (float(getHeight()) - 12.0f) / float(kToneRows + 5);
+        m.rowH = m.rowH < 9.0f ? 9.0f : (m.rowH > 24.0f ? 24.0f : m.rowH);
+        m.fontSize = m.rowH * 0.68f;
+        m.colW = m.fontSize * 9.0f;
+        m.headerH = m.rowH * 1.6f;
+        m.tabH = m.rowH * 1.3f;
+        m.w = kToneCols * m.colW + m.rowH;
+        m.h = m.headerH + m.tabH * 2.0f + kToneRows * m.rowH + m.rowH * 0.5f;
+        m.x = std::floor((float(getWidth()) - m.w) * 0.5f);
+        m.y = std::floor((float(getHeight()) - m.h) * 0.5f);
+        m.partsY = m.y + m.headerH;
+        m.groupsY = m.partsY + m.tabH;
+        m.gridY = m.groupsY + m.tabH;
+        return m;
+    }
+
+    /// Where each media tab starts, so drawing and hit testing cannot disagree.
+    ///
+    /// The width is estimated from the character count rather than measured: measuring
+    /// needs the font set on the context, which the hit test has no business doing, and
+    /// two different answers here would put the tabs somewhere other than where they were
+    /// drawn.  0.66 em is about DejaVu's advance for the capitals and digits card names
+    /// are made of.
+    float groupTabX(const ToneLayout &m, size_t g) const
+    {
+        float x = m.x + m.rowH * 0.5f;
+        for (size_t i = 0; i < g && i < m_toneGroups.size(); i ++)
+            x += m.fontSize * 0.66f * float(m_toneGroups[i].label.size() + 3);
+        return x;
+    }
+
+    ToneHit toneHit(float px, float py) const
+    {
+        const ToneLayout m = toneLayout();
+        ToneHit hit;
+        if (px < m.x || px > m.x + m.w)
+            return hit;
+
+        if (py >= m.partsY && py < m.groupsY)
+        {
+            const int i = int((px - m.x) / (m.w / 6.0f));
+            if (i >= 0 && i < 6) { hit.kind = ToneHit::Part; hit.index = i; }
+            return hit;
+        }
+        if (py >= m.groupsY && py < m.gridY)
+        {
+            for (size_t g = 0; g < m_toneGroups.size(); g ++)
+                if (px >= groupTabX(m, g) && px < groupTabX(m, g + 1))
+                { hit.kind = ToneHit::Group; hit.index = int(g); break; }
+            return hit;
+        }
+        if (py >= m.gridY && m_toneGroup < int(m_toneGroups.size()))
+        {
+            const int col = int((px - (m.x + m.rowH * 0.5f)) / m.colW);
+            const int row = int((py - m.gridY) / m.rowH);
+            if (col < 0 || col >= kToneCols || row < 0 || row >= kToneRows)
+                return hit;
+            const int i = col * kToneRows + row;
+            if (size_t(i) < m_toneGroups[size_t(m_toneGroup)].names.size())
+            { hit.kind = ToneHit::Tone; hit.index = i; }
+        }
+        return hit;
+    }
+
+    /// What a part is playing, by name, or an empty string if its media is not mounted.
+    std::string partToneName(int part) const
+    {
+        for (const ToneGroup &g : m_toneGroups)
+            if (g.media == m_partMedia[part] && m_partTone[part] < g.names.size())
+                return g.names[m_partTone[part]];
+        return std::string();
+    }
+
+    /// A part whose flags read 0xCn is switched off in this patch and will not sound,
+    /// whatever tone it names.  ROM-ANALYSIS.md section 4.
+    bool partIsOff(int part) const { return (m_partFlags[part] & 0xE0) == 0xC0; }
+
+    void drawToneMenu()
+    {
+        const ToneLayout m = toneLayout();
+
+        beginPath();
+        rect(0, 0, getWidth(), getHeight());
+        fillColor(Color(0, 0, 0, 0.55f));
+        fill();
+
+        beginPath();
+        roundedRect(m.x, m.y, m.w, m.h, m.rowH * 0.35f);
+        fillColor(Color(26, 28, 32));
+        fill();
+        strokeColor(Color(96, 102, 112));
+        strokeWidth(1.0f);
+        stroke();
+
+        fontFace(m_font);
+        fontSize(m.fontSize * 1.05f);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        fillColor(Color(235, 235, 235));
+        text(m.x + m.rowH * 0.5f, m.y + m.headerH * 0.5f, "TONE", nullptr);
+
+        char buf[96];
+        fontSize(m.fontSize * 0.8f);
+        textAlign(ALIGN_RIGHT | ALIGN_MIDDLE);
+        fillColor(Color(150, 155, 165));
+        if (m_toneGroups.empty())
+            std::snprintf(buf, sizeof(buf), "waiting for the machine");
+        else
+            std::snprintf(buf, sizeof(buf), "part %d  |  MIDI channel %u%s", m_tonePart + 1,
+                          unsigned(m_partChan[m_tonePart] & 0x0f) + 1,
+                          partIsOff(m_tonePart) ? "  |  part is off in this patch" : "");
+        text(m.x + m.w - m.rowH * 0.5f, m.y + m.headerH * 0.5f, buf, nullptr);
+        if (m_toneGroups.empty())
+            return;
+
+        // The six parts, with what each is playing.
+        fontSize(m.fontSize * 0.92f);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        for (int p = 0; p < 6; p ++)
+        {
+            const float tw = m.w / 6.0f;
+            const float tx = m.x + tw * float(p);
+            const bool sel = p == m_tonePart;
+            if (sel || (m_toneHover.kind == ToneHit::Part && m_toneHover.index == p))
+            {
+                beginPath();
+                roundedRect(tx + 1.0f, m.partsY + 1.0f, tw - 2.0f, m.tabH - 2.0f, 2.0f);
+                fillColor(sel ? Color(58, 64, 76) : Color(40, 44, 52));
+                fill();
+            }
+            const std::string name = partToneName(p);
+            std::snprintf(buf, sizeof(buf), "%d %s", p + 1,
+                          name.empty() ? "--" : name.c_str());
+            // An off part is drawn dim: its tone is real, it just will not sound.
+            fillColor(partIsOff(p) ? Color(120, 124, 132)
+                                   : (sel ? Color(235, 235, 235) : Color(198, 202, 208)));
+            text(tx + m.fontSize * 0.5f, m.partsY + m.tabH * 0.5f, buf, nullptr);
+        }
+
+        // The media: internal first, then a tab per mounted card.
+        for (size_t g = 0; g < m_toneGroups.size(); g ++)
+        {
+            const float tx = groupTabX(m, g), tw = groupTabX(m, g + 1) - tx;
+            const bool sel = int(g) == m_toneGroup;
+            if (sel || (m_toneHover.kind == ToneHit::Group && m_toneHover.index == int(g)))
+            {
+                beginPath();
+                roundedRect(tx, m.groupsY + 1.0f, tw - 4.0f, m.tabH - 2.0f, 2.0f);
+                fillColor(sel ? Color(40, 96, 46) : Color(40, 44, 52));
+                fill();
+            }
+            fillColor(sel ? Color(210, 255, 210) : Color(190, 194, 202));
+            text(tx + m.fontSize * 0.6f, m.groupsY + m.tabH * 0.5f,
+                 m_toneGroups[g].label.c_str(), nullptr);
+        }
+
+        // The tones themselves.
+        const ToneGroup &grp = m_toneGroups[size_t(m_toneGroup)];
+        const bool onThisMedia = grp.media == m_partMedia[m_tonePart];
+        fontSize(m.fontSize);
+        for (size_t i = 0; i < grp.names.size() && i < size_t(kToneRows * kToneCols); i ++)
+        {
+            const float x = m.x + m.rowH * 0.5f + float(int(i) / kToneRows) * m.colW;
+            const float y = m.gridY + float(int(i) % kToneRows) * m.rowH;
+            const bool current = onThisMedia && i == m_partTone[m_tonePart];
+            const bool hover = m_toneHover.kind == ToneHit::Tone
+                    && m_toneHover.index == int(i);
+            if (current || hover)
+            {
+                beginPath();
+                roundedRect(x, y + 1.0f, m.colW - 2.0f, m.rowH - 2.0f, 2.0f);
+                fillColor(current ? Color(40, 96, 46) : Color(56, 60, 68));
+                fill();
+            }
+            std::snprintf(buf, sizeof(buf), "%02d %s", int(i) + 1, grp.names[i].c_str());
+            fillColor(current ? Color(190, 255, 190) : Color(214, 216, 220));
+            text(x + m.fontSize * 0.4f, y + m.rowH * 0.5f, buf, nullptr);
         }
     }
 
@@ -697,9 +1006,10 @@ private:
     {
         // A latching button shows its state, not a momentary press.  So does the PATCH
         // button while its menu is up.
-        if (m_menuOpen)
+        if (m_menu != Menu::None)
         {
-            const auto &b = voltaire::panel::kButton[voltaire::panel::BUT_PATCH_MENU];
+            const auto &b = voltaire::panel::kButton[m_menu == Menu::Tone
+                    ? voltaire::panel::BUT_TONE : voltaire::panel::BUT_PATCH_MENU];
             beginPath();
             roundedRect(b.x, b.y, b.w, b.h, b.h * 0.15f);
             fillColor(Color(255, 255, 255, 0.22f));
@@ -731,10 +1041,19 @@ private:
     uint32_t m_cgramIn = 0;
     uint8_t m_leds = 0, m_cursorPos = 0, m_cursorFlags = 0;
 
+    enum class Menu { None, Patch, Tone };
+    Menu m_menu = Menu::None;
+
     uint8_t m_patch = 0;
     std::vector<std::string> m_patchNames;
-    bool m_menuOpen = false;
     int m_menuHover = -1;
+
+    std::vector<ToneGroup> m_toneGroups;
+    uint8_t m_partMedia[6] = { 0 }, m_partTone[6] = { 0 };
+    uint8_t m_partFlags[6] = { 0 }, m_partChan[6] = { 0 };
+    int m_tonePart = 0, m_toneGroup = 0;
+    ToneHit m_toneHover;
+
     const char *m_font = "sans";
 
     float m_volume = 0.0f;

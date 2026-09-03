@@ -553,3 +553,71 @@ session, that one included, and hands the empty value straight back on restore �
 `atoi("")` is `0`, a valid patch number. Without a digit test in `setState()` every project
 would quietly reopen on P-01 no matter what was saved. `make selftest` selects P-43 before
 saving and checks the restored instance comes up on it, which is what caught this.
+
+---
+
+## The TONE menu
+
+A patch has six **parts** and each part names one **tone**, so the TONE button opens two
+choices: a row of tabs for the parts, showing what each is playing now, and under it the
+tones — the internal 99, plus a tab per mounted card.
+
+Nothing here reads the LCD or presses a button. Which part you are editing is the menu's
+own business, not the machine's cursor, so the answer never depends on what the display
+happens to be showing.
+
+### Reading the names
+
+A tone parameter record is 80 bytes and starts with its ten-character name
+(ROM-ANALYSIS.md §6.6), so the whole list is `0x1000 + 0x50*n` in the wave ROM or card
+image. `U110Core::readWaveRom` and `readCardRom` hand those over with the address and data
+scrambling already undone — the core holds the descrambled images anyway, and this is the
+only thing above it that wants to read them.
+
+**99 internal tones is a fixed count, not a scan.** Record 100 in bank 0 decodes to a
+perfectly printable `"JIG"`, because sample data begins there; a scan that stops at the
+first unreadable name overruns by dozens. Cards *are* scanned, and do terminate cleanly:
+SN-U110-08 has 28 and SN-U110-09 has 16, each followed by blank names. A card tab is
+labelled with what the image calls itself — `SN-U110-08` sits in plain text at offset 0x10
+of the dump — falling back to its catalogue number for a card somebody wrote themselves.
+
+### Changing a tone: two SysEx writes
+
+`[!]` **Writing the tone number into the part record does nothing.** It changes what the
+record *says* and not what plays: the sound comes from the 80-byte parameter record the
+firmware copies to `0x2880 + 0x50*part`, plus the twelve sample records it builds at
+`0x2A60` and the voice state at `0x3760`. The routine that does all that is at `0x80D3`
+and there is no way to call it from out here.
+
+That is not a guess. Two machines were booted from the same images and given the same
+tone, one over MIDI and one by copying the 80-byte record by hand: work RAM matched **byte
+for byte** across `0x2880`, and they still sounded different, because `0x2A60` and
+`0x3760` had not been rebuilt.
+
+So the menu asks the machine the way anything else would — a Roland DT1 write to the
+part's temporary tone parameters:
+
+| address | value |
+|---|---|
+| `00 1n 02` | tone media: `0` internal, otherwise a **card ID** (`8` for SN-U110-08) |
+| `00 1n 03` | tone number within that media, counting from 0 |
+
+`n` is the part. The firmware then does its own job properly, per part, and the LCD picks
+up its `TEMP:` prefix exactly as it would for an edit made by hand.
+
+**This is also the only route that reaches a card tone.** A MIDI program change carries a
+tone number and nothing to say which card it is on, and it addresses a *channel* — so on a
+patch with six parts on channel 1, it would change all six.
+
+#### `[!]` SETUP:MIDI:EXCLUSIVE can be switched off
+
+Bit 5 of `0x3C00`, and with it clear the machine discards every exclusive message without
+a word. The dispatcher reloads that byte for **every message** rather than caching it at
+boot (`561F: ldb 41, 3c00`), so the plugin checks it, holds it open for the 50 ms the two
+messages take to arrive, and puts it back exactly as it was. A user who has turned
+EXCLUSIVE off has turned it off against other gear on the MIDI bus, not against their own
+front panel.
+
+`make selftest` covers the list and both directions of the selection: 99 internal tones in
+the first group, a card group after it, a tone set on part 1, a **card** tone set on part 3,
+and part 1 still holding what it was given.

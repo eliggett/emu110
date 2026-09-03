@@ -578,6 +578,36 @@ six parts live on one MIDI channel (`.1.1.1.1.1.1`), key-split into six zones at
 60, 72 and 84, each with a distinct `+0x0B` value (`00, 80, 40, 60, A0, 20`) — the per-part
 pan that gives the patch its name.
 
+### 5.3.1 Setting a part's tone from outside, without touching the panel `[C]`
+
+Program change is per **channel**, reaches only the 99 internal tones, and hits every part
+listening on that channel — so it is not a way to address one part, and no way at all to
+reach a card tone: the message carries a tone number and nothing to say which card it is
+on.
+
+`[C]` **Roland exclusive does all of it.** The part parameters in the temporary area are
+addressable, `tools/u110_sysex.py` already carries the map, and two DT1 writes select any
+tone on any media for one part:
+
+| address | parameter |
+|---|---|
+| `00 1n 02` | tone **media** — `0` internal, otherwise a **card ID** (`0x08` for SN-U110-08) |
+| `00 1n 03` | tone **number** within that media, counting from 0 |
+
+with `n` the part, 0-5. The firmware then runs its own tone loader at `0x80D3`
+(`ROM-ANALYSIS.md` §6.6) and everything derived from a tone is rebuilt properly. Verified
+in emulation: `00 10 02 = 8` then `00 10 03 = 3` puts `BREATH VOX` from SN-U110-08 on part
+1, and leaves the other five parts alone. The display picks up the `TEMP:` prefix, as it
+does for any edit to the temporary patch.
+
+`[C]` **The one gate is SETUP:MIDI:EXCLUSIVE**, bit 5 of `0x3C00`. The dispatcher reloads
+it from RAM for **every message** (`561F: ldb 41, 3c00`), not once at boot, so clearing the
+bit silences exclusive immediately and setting it restores service just as fast. With it
+clear the message is discarded without a word — no error, no display, nothing.
+
+The device ID the machine answers to is one byte of battery-backed RAM at `0x3C01`; read
+it rather than assuming `0x0F`.
+
 ### 5.4 Output assignment — **solved from the Owner's Manual** `[C]` `[S]`
 
 `[S]` OM p.5 "Patch Setting Chart (Factory Preset)" gives, for every factory patch, each

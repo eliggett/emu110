@@ -1046,6 +1046,15 @@ menus:
 - **Tone browser** — every tone across the internal wave ROM and all mounted
   cards, grouped by card, names read straight from the directories. Selecting one
   sets the current part's tone.
+
+  **`[x]` Done.** The **TONE** button opens all of them: a row of tabs for the six
+  parts showing what each is playing, a row for the media (Internal, then one per
+  mounted card), and the tone list under them. Names come from the tone parameter
+  records — `U110Core::readWaveRom` reads the descrambled image, so no emulated
+  time is spent and nothing depends on what the LCD is showing. Selecting one
+  sends two Roland DT1 writes, `00 1n 02` and `00 1n 03`, which is the only route
+  that reaches a **card** tone: program change is per channel and carries no media.
+  See `analysis/SYSTEM-DESIGN.md` §5.3.1.
 - **Patch browser** — the 64 patches in `patchram`, names read from the patch
   records, plus the user patch directory (§10.5).
 
@@ -1199,9 +1208,11 @@ Extracted and headless should be a few percent — comfortable for many instance
    for the play screen's bars and digits and approximate for the boot logo, which is a
    ~19 fps CGRAM animation. Accepted on the owner's say-so; it lasts 370 ms.
 9. LV2 and CLAP targets; VST3 falls out.
-10. **Half done.** ~~Direct name reads and the patch half of the panel automaton~~
-    (§10.4) — the PATCH menu lists all 64 by name and loads one with a single emulated
-    `[INC]`. The tone browser and the bank files (§10.5) remain.
+10. **Mostly done.** ~~Direct name reads, and the patch and tone browsers~~ (§10.4) — the
+    PATCH menu lists all 64 by name and loads one with a single emulated `[INC]`; the TONE
+    menu lists the internal 99 plus every mounted card and sets any of them on any part
+    over SysEx. Neither needed the panel automaton in the end. The bank files (§10.5)
+    remain.
 11. ~~Inkscape panel and the vector UI (§6).~~ **Done.** nanosvg → NanoVG, geometry from
     `panel_geometry.h`, LCD drawn as dots from the baked table plus live CGRAM, knob
     rotated in code. No coordinate is typed into the UI source.

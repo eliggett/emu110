@@ -842,6 +842,33 @@ void U110Core::setButton(Button sw, bool down)
 uint8_t U110Core::readMem(uint16_t addr) const
 { return m_impl->program.read_byte(addr); }
 
+// The descrambled PCM space is laid out by roland_u110_data.h: internal bank b at
+// b * CARD_STRIDE, card slot s at s * CARD_STRIDE + CARD_OFFSET.  Both are CARD_SIZE long
+// and hold exactly what the firmware would read back through the tone generator's read
+// port, so a logical address indexes them directly.
+static size_t read_pcm(const std::vector<u8> &pcm, size_t base, u32 addr, u8 *dst, size_t n)
+{
+	if (addr >= CARD_SIZE)
+		return 0;
+	const size_t avail = std::min(n, size_t(CARD_SIZE - addr));
+	std::memcpy(dst, pcm.data() + base + addr, avail);
+	return avail;
+}
+
+size_t U110Core::readWaveRom(unsigned bank, u32 addr, u8 *dst, size_t n) const
+{
+	if (bank >= kNumWaveBanks || !dst)
+		return 0;
+	return read_pcm(m_impl->pcmrom, bank * CARD_STRIDE, addr, dst, n);
+}
+
+size_t U110Core::readCardRom(unsigned slot, u32 addr, u8 *dst, size_t n) const
+{
+	if (slot >= kNumCardSlots || !dst)
+		return 0;
+	return read_pcm(m_impl->pcmrom, slot * CARD_STRIDE + CARD_OFFSET, addr, dst, n);
+}
+
 void U110Core::writeMem(uint16_t addr, uint8_t value)
 { m_impl->program.write_byte(addr, value); }
 

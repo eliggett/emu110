@@ -214,9 +214,22 @@ public:
 
 	void snapshot(PanelState &out) const;
 
-	/// Read firmware RAM directly.  This is how the UI reads patch and tone NAMES without
-	/// spending emulated time driving the menus.
+	/// Read firmware RAM directly.  This is how the UI reads patch NAMES without spending
+	/// emulated time driving the menus.
 	uint8_t readMem(uint16_t addr) const;
+
+	/// Read a wave ROM bank or a mounted card AS THE FIRMWARE ADDRESSES IT -- the address
+	/// and data scrambling already undone, so `addr` is the logical offset the machine
+	/// asks for and not an offset into the dump.  Copies n bytes and returns how many were
+	/// actually available.
+	///
+	/// This is how the UI reads TONE names.  The alternative is driving the machine's own
+	/// menus and reading them off the LCD, which costs emulated time and depends on what
+	/// the display happens to be showing; the tone parameter records hold the names
+	/// (ROM-ANALYSIS.md section 6.6, 10 bytes at 0x1000 + 0x50 * tone) and reading them is
+	/// free.
+	size_t readWaveRom(unsigned bank, uint32_t addr, uint8_t *dst, size_t n) const;
+	size_t readCardRom(unsigned slot, uint32_t addr, uint8_t *dst, size_t n) const;
 
 	/// Write firmware RAM directly.  Beware: the firmware caches the active patch into
 	/// work RAM at 0x2800, so poking patchram behind its back leaves that cache stale.

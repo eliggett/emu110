@@ -1095,14 +1095,72 @@ the CPU permuted per §4.3.
 ```
 WAVE ROM / CARD LAYOUT  (logical addresses)
   0x0000-0x002F    48-byte ID header                              §6.5
-  0x0100 + 10*n    tone name directory, 10 bytes per tone          [C from code]
+  0x0100 + 10*n    SAMPLE records, 10 bytes each -- indexed by the      [C]
+                   sample numbers inside a tone record, NOT by tone
   0x1000 + 0x50*n  TONE PARAMETER RECORDS, 80 bytes each          decoded below
   beyond           PCM sample data                                 [I]
 ```
 
 **The tone name is the first 10 bytes of the parameter record.** That was deduced from the
-`" No Card! "` placeholder and is now confirmed directly. The separate directory at
-`0x0100` is a name-only index, cheaper to walk when scrolling a tone list.
+`" No Card! "` placeholder and is now confirmed directly.
+
+#### Correction: `0x0100` is not a tone name index `[C]`
+
+An earlier revision of this section called `0x0100 + 10*n` a "tone name directory, cheaper
+to walk when scrolling a tone list". **It holds no names at all** — decoding it produces
+binary, while the names decode perfectly at `0x1000 + 0x50*n`. What indexes it is the
+routine at `0x7FCA`:
+
+```asm
+7FDE: mulub 52, 51, #f0        ; part x 240
+7FE2: mulub 54, 50, #0a        ; slot x 10
+7FEB: add   56, 52, #2a60      ; -> work RAM 0x2A60 + 240*part + 10*slot
+7FF5: mulub 52, 51, #50        ; part x 80
+8000: ldbze 50, 289b[52]       ; tone record +0x1B: the SAMPLE numbers (§6.6)
+8005: cmpb  50, #ff            ; 0xFF -> slot unused
+800C: mulub 50, #0a            ; sample x 10
+800F: add   50, #0100          ; -> ROM 0x0100 + 10*sample
+```
+
+So `0x0100` is a table of **per-sample** records, indexed by the sample numbers a tone
+names, and the guess that it was a name index came from assuming a 10-byte stride meant a
+10-byte name. The stride was right and the contents were not.
+
+#### The tone loader, `0x80D3` `[C]`
+
+One part's worth of tone, and the reason a tone cannot be changed by writing the patch:
+
+```asm
+80D3: push ...                 ; R30 = part index
+80E8: scall 7d56               ; resolve the part's media -> bank / card slot (§6.7)
+80EA: cmpb  51, #ff            ; card named by the part is not mounted
+80EF: ld    50, #8109          ; -> " No Card! ", copied to 0x2880 + 0x50*part
+8118: lcall 7aec               ; else set up the tone generator's read port
+811B: mulub 56, 30, #50
+811F: add   56, #2880          ; destination: 0x2880 + 0x50*part
+8127: ldb   50, 2815[50]       ; the part record's tone number (§6.7)
+812C: mulub 50, #50
+812F: add   50, #1000          ; source: ROM 0x1000 + 0x50*tone
+8136..816F                     ; 80 bytes, one at a time through 0x1402
+8179: scall 7fca               ; x12: build the sample records at 0x2A60 (above)
+8182: scall 8015
+```
+
+**Writing a tone number into a part record changes nothing on its own.** What plays is the
+80-byte copy at `0x2880 + 0x50*part`, the twelve sample records at `0x2A60 + 0xF0*part`
+and the voice state at `0x3760`, and only `0x80D3` builds those. Copying the 80-byte
+record by hand was tried against a machine that had been told the same thing over MIDI:
+work RAM matched byte for byte across `0x2880`, and the two machines still sounded
+different, because `0x2A60` and `0x3760` had not been rebuilt. `SYSTEM-DESIGN.md` §5.3 has
+the way in that does work.
+
+#### How many tones `[C]`
+
+**99 internal, and that is a fixed number rather than something to scan for.** Record 100
+in `waverom0` decodes to the perfectly printable `"JIG"` — sample data begins there — so a
+scan that stops at the first unreadable name overruns by dozens. A **card** does terminate
+cleanly: `SN-U110-08` has 28 tones and `SN-U110-09` has 16, each followed by records whose
+name field is all spaces.
 
 #### All 99 internal tones decode
 

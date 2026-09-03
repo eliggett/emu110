@@ -207,6 +207,47 @@ constexpr unsigned kNumPatches      = 64;
 /// display adds one, so a 0 here reads as P-01 on the LCD.
 constexpr uint16_t kCurrentPatchAddr = 0x274A;
 
+/// TONES.  ROM-ANALYSIS.md section 6.6: a tone parameter record is 80 bytes inside the
+/// wave ROM or card, and the first ten of them are its name -- so the whole list can be
+/// read without driving the machine's menus and reading the LCD back.
+constexpr uint32_t kToneBase    = 0x1000;
+constexpr uint32_t kToneStride  = 0x50;
+constexpr unsigned kToneNameLen = 10;
+
+/// The internal wave ROM holds exactly 99, and that is a FIXED count rather than a scan:
+/// record 100 in bank 0 decodes to a perfectly printable "JIG" because sample data starts
+/// there.  99 is also the firmware's own limit -- program change reaches 0..98.
+constexpr unsigned kNumInternalTones = 99;
+
+/// A card holds however many it holds, so a card IS scanned, and stops at the first
+/// record without a usable name.  Both cards to hand end cleanly that way: SN-U110-08 has
+/// 28 tones and SN-U110-09 has 16, each followed by blanks.
+constexpr unsigned kMaxCardTones = 64;
+
+/// Where the firmware caches each slot's card ID: 0 = empty, 0xFF = the mount failed,
+/// otherwise the catalogue number (8 for SN-U110-08).  ROM-ANALYSIS.md section 6.5.
+///
+/// That byte is the same value a patch part record uses to name a card, which is the
+/// point: a part addresses a card by ID and not by slot, so the same patch works whichever
+/// slot the card is in.
+constexpr uint16_t kCardIdAddr = 0x2743;
+
+/// The six PART RECORDS inside the active patch's edit buffer at 0x2800, 16 bytes each.
+/// ROM-ANALYSIS.md sections 4 and 6.7.
+constexpr uint16_t kPartBase          = 0x2814;
+constexpr uint16_t kPartStride        = 0x10;
+constexpr unsigned kNumParts          = 6;
+constexpr uint16_t kPartMediaOffset   = 0x00;   ///< 0 = internal, otherwise a card ID
+constexpr uint16_t kPartToneOffset    = 0x01;   ///< tone within that media, counting from 0
+constexpr uint16_t kPartChannelOffset = 0x02;   ///< MIDI receive channel in the low nibble
+constexpr uint16_t kPartFlagsOffset   = 0x0B;   ///< (b & 0xE0) == 0xC0: the part is off
+
+/// SETUP:MIDI.  The receive switches gate what the machine will listen to; bit 5 is
+/// EXCLUSIVE, and with it clear every SysEx message is discarded in silence.
+constexpr uint16_t kRxSwitchAddr = 0x3C00;
+constexpr uint8_t  kRxExclusive  = 0x20;
+constexpr uint16_t kDeviceIdAddr = 0x3C01;
+
 /// What the plugin keeps.  Only the NVRAM is saved into a session; the panel is live
 /// display pushed to the UI.
 enum States
@@ -216,6 +257,8 @@ enum States
     kStateSettings,
     kStatePatches,
     kStatePatchSel,
+    kStateTones,
+    kStateToneSel,
     kStateCount
 };
 
@@ -430,6 +473,24 @@ protected:
             state.hints = kStateIsOnlyForDSP;
             state.defaultValue = "";
             break;
+
+        case kStateTones:
+            state.key = "tones";
+            state.label = "Tone names";
+            // Every tone the machine can reach: the internal 99 and whatever is on the
+            // mounted cards, grouped by which.  Read out of the ROMs, so it costs the
+            // emulation nothing.
+            state.hints = kStateIsOnlyForUI;
+            state.defaultValue = "";
+            break;
+
+        case kStateToneSel:
+            state.key = "tonesel";
+            state.label = "Select tone";
+            // "part media tone" from the UI.  See sendToneSelect().
+            state.hints = kStateIsOnlyForDSP;
+            state.defaultValue = "";
+            break;
         }
     }
 
@@ -440,6 +501,8 @@ protected:
             return getSettingsState();
         if (std::strcmp(key, "patches") == 0)
             return String(m_patchesText);
+        if (std::strcmp(key, "tones") == 0)
+            return String(m_tonesText);
         if (std::strcmp(key, "nvram") != 0)
             return String();
 
@@ -482,6 +545,20 @@ protected:
             const int n = std::atoi(value);
             if (n >= 0 && unsigned(n) < kNumPatches)
                 m_patchRequest.store(n, std::memory_order_relaxed);
+            return;
+        }
+
+        if (std::strcmp(key, "tonesel") == 0)
+        {
+            // "part media tone".  Same thread story as patchsel above, and the same reason
+            // for the digit test: the host stores this key and hands the empty value back.
+            unsigned part = 0, media = 0, tone = 0;
+            if (std::sscanf(value, "%u %u %u", &part, &media, &tone) != 3)
+                return;
+            if (part >= kNumParts || media > 0x1f || tone > 0x7f)
+                return;
+            m_toneRequest.store(int(part << 16 | media << 8 | tone),
+                                std::memory_order_relaxed);
             return;
         }
 
@@ -567,6 +644,7 @@ protected:
         // Before the render, so a button edge lands at the start of the block it belongs
         // to rather than at the start of the next one.
         tickPatchSelect(coreFrames);
+        tickToneSelect(coreFrames);
 
         // MIDI first, timestamped into the core block about to be rendered.  The host's
         // offsets are in HOST frames; the core counts in its own 32 kHz frames.
@@ -632,6 +710,11 @@ private:
         uint8_t cgram[64];
         uint8_t leds, cursor_pos, cursor_flags;
         uint8_t patch;              ///< 0-based, so the LCD's P-01 is 0
+        // What each part is playing, straight out of the active patch's part records.
+        uint8_t part_media[6];      ///< 0 = internal, otherwise a card ID
+        uint8_t part_tone[6];       ///< tone within that media, counting from 0
+        uint8_t part_flags[6];      ///< as the firmware keeps them; see kPartFlagsOffset
+        uint8_t part_chan[6];       ///< MIDI receive channel in the low nibble
     };
 
     static void encodeHex(const uint8_t *src, size_t n, char *dst)
@@ -692,6 +775,14 @@ private:
             blob.cursor_pos = st.cursor_pos;
             blob.cursor_flags = st.cursor_flags;
             blob.patch = m_core.readMem(kCurrentPatchAddr);
+            for (unsigned i = 0; i < kNumParts; i ++)
+            {
+                const uint16_t rec = uint16_t(kPartBase + kPartStride * i);
+                blob.part_media[i] = m_core.readMem(uint16_t(rec + kPartMediaOffset));
+                blob.part_tone[i]  = m_core.readMem(uint16_t(rec + kPartToneOffset));
+                blob.part_flags[i] = m_core.readMem(uint16_t(rec + kPartFlagsOffset));
+                blob.part_chan[i]  = m_core.readMem(uint16_t(rec + kPartChannelOffset));
+            }
             if (std::memcmp(&blob, &m_lastBlob, sizeof(blob)) != 0)
             {
                 m_lastBlob = blob;
@@ -710,6 +801,7 @@ private:
         }
 
         refreshPatchNames();
+        refreshToneNames();
     }
 
     /// The 64 patch names, as the machine has them, for the UI's menu.
@@ -745,6 +837,172 @@ private:
             return;
         std::memcpy(m_patchesText, text, at + 1);
         updateStateValue("patches", m_patchesText);
+    }
+
+    /// Every tone the machine can reach, for the UI's menu.
+    ///
+    /// One line per record so it can be read in a session file: "G <media> <label>" opens
+    /// a group and "T <name>" is a tone in it, the marker being the first character rather
+    /// than anything in the text, so a name may say whatever it likes.
+    ///
+    /// The names come out of the ROM images the core already holds, descrambled -- see
+    /// U110Core::readWaveRom.  The alternative was walking the machine's own TONE menu and
+    /// reading the LCD back, which costs emulated time and only works when the display is
+    /// on that page.
+    void refreshToneNames()
+    {
+        // Tones live in ROM and never change; what changes is which cards are mounted.
+        // The firmware's own cache of that is four bytes, so reading those and rebuilding
+        // only when they move keeps the whole list off the 20 Hz path in the ordinary
+        // case, which is every case after the machine has finished booting.
+        bool same = m_tonesText[0] != '\0';
+        for (unsigned slot = 0; slot < voltaire::kNumCardSlots; slot ++)
+        {
+            const uint8_t id = m_core.readMem(uint16_t(kCardIdAddr + slot));
+            same = same && id == m_cardIdSeen[slot];
+            m_cardIdSeen[slot] = id;
+        }
+        if (same)
+            return;
+
+        size_t at = 0;
+        appendToneGroup(at, 0, "Internal");
+        for (unsigned n = 0; n < kNumInternalTones; n ++)
+        {
+            uint8_t name[kToneNameLen];
+            m_core.readWaveRom(0, kToneBase + kToneStride * n, name, sizeof(name));
+            appendToneName(at, name);
+        }
+
+        for (unsigned slot = 0; slot < voltaire::kNumCardSlots; slot ++)
+        {
+            // The firmware's own view of what is mounted, not the plugin's: a card the
+            // machine refused (0xFF) has no tones to offer whatever the file was called.
+            const uint8_t media = m_core.readMem(uint16_t(kCardIdAddr + slot));
+            if (media == 0x00 || media == 0xff)
+                continue;
+
+            char label[32];
+            if (!m_cards[slot].label.empty())
+                std::snprintf(label, sizeof(label), "%s", m_cards[slot].label.c_str());
+            else
+                std::snprintf(label, sizeof(label), "Card %02u", media);
+            appendToneGroup(at, media, label);
+
+            for (unsigned n = 0; n < kMaxCardTones; n ++)
+            {
+                uint8_t name[kToneNameLen];
+                m_core.readCardRom(slot, kToneBase + kToneStride * n, name, sizeof(name));
+                bool blank = true;
+                for (const uint8_t c : name)
+                    blank = blank && (c == ' ' || c < 0x20 || c >= 0x7f);
+                if (blank)
+                    break;
+                appendToneName(at, name);
+            }
+        }
+        m_toneScratch[at] = '\0';
+
+        if (std::memcmp(m_toneScratch, m_tonesText, at + 1) == 0)
+            return;
+        std::memcpy(m_tonesText, m_toneScratch, at + 1);
+        updateStateValue("tones", m_tonesText);
+    }
+
+    void appendToneGroup(size_t &at, unsigned media, const char *label)
+    {
+        if (at + 48 >= sizeof(m_toneScratch))
+            return;
+        at += size_t(std::snprintf(m_toneScratch + at, sizeof(m_toneScratch) - at,
+                                   "G %u %s\n", media, label));
+    }
+
+    void appendToneName(size_t &at, const uint8_t *name)
+    {
+        if (at + kToneNameLen + 4 >= sizeof(m_toneScratch))
+            return;
+        m_toneScratch[at ++] = 'T';
+        m_toneScratch[at ++] = ' ';
+        const size_t start = at;
+        for (unsigned i = 0; i < kToneNameLen; i ++)
+            m_toneScratch[at ++] = (name[i] >= 0x20 && name[i] < 0x7f) ? char(name[i]) : '.';
+        while (at > start && m_toneScratch[at - 1] == ' ')
+            at --;
+        m_toneScratch[at ++] = '\n';
+    }
+
+    // ---- picking a tone for one part ------------------------------------------------
+    //
+    // Not by poking the part record.  Writing the tone number into the active patch does
+    // change what the record SAYS, and nothing else happens: the sound comes from the
+    // 80-byte parameter record the firmware copies to 0x2880 + 0x50 * part, plus the
+    // twelve sample records it then builds at 0x2A60 and the voice state at 0x3760.  The
+    // routine that does all that is at 0x80D3, and there is no way to call it from out
+    // here.  Copying the parameter record by hand gets the bytes right and the sound
+    // wrong, which was worth finding out once.
+    //
+    // So this asks the machine the way anything else would: a Roland SysEx DT1 write to
+    // the part's temporary tone parameters, address 00 1n 02 (media) and 00 1n 03 (tone
+    // number).  The firmware then does its own job properly, per PART, with no dependence
+    // on what the display is showing and no button pressing -- and it reaches CARD tones,
+    // which a MIDI program change cannot: program change carries a tone number and nothing
+    // to say which card it is on.
+    //
+    // The one gate is SETUP:MIDI:EXCLUSIVE, bit 5 of 0x3C00, which the firmware re-reads
+    // for every message at 0x561F.  With it clear the message is dropped in silence, so if
+    // the user has turned it off it is turned on for as long as the message takes to
+    // arrive and then put back exactly as it was.
+
+    /// Long enough for eleven bytes to clock in at 31250 baud and be parsed -- measured at
+    /// well under 30 ms of emulated time for the pair.
+    static constexpr uint32_t kSysexFrames = voltaire::kCoreSampleRate * 50 / 1000;
+
+    void tickToneSelect(uint32_t coreFrames)
+    {
+        if (m_rxRestoreWait != 0)
+        {
+            if (m_rxRestoreWait > coreFrames)
+                m_rxRestoreWait -= coreFrames;
+            else
+            {
+                m_rxRestoreWait = 0;
+                m_core.writeMem(kRxSwitchAddr, m_rxSaved);
+            }
+        }
+
+        const int want = m_toneRequest.exchange(-1, std::memory_order_relaxed);
+        if (want < 0 || !m_romsLoaded)
+            return;
+
+        const unsigned part  = unsigned(want) >> 16 & 0xff;
+        const unsigned media = unsigned(want) >> 8 & 0xff;
+        const unsigned tone  = unsigned(want) & 0xff;
+
+        const uint8_t rx = m_core.readMem(kRxSwitchAddr);
+        if ((rx & kRxExclusive) == 0)
+        {
+            // Only save the switches if we are not already holding them open, or a second
+            // request would record the value we ourselves put there.
+            if (m_rxRestoreWait == 0)
+                m_rxSaved = rx;
+            m_core.writeMem(kRxSwitchAddr, uint8_t(rx | kRxExclusive));
+        }
+        if (m_rxRestoreWait != 0 || (rx & kRxExclusive) == 0)
+            m_rxRestoreWait = kSysexFrames;
+
+        const uint8_t dev = m_core.readMem(kDeviceIdAddr) & 0x7f;
+        sendDt1(dev, 0x00, uint8_t(0x10 + part), 0x02, uint8_t(media));
+        sendDt1(dev, 0x00, uint8_t(0x10 + part), 0x03, uint8_t(tone));
+    }
+
+    /// One Roland DT1 write: F0 41 <dev> 23 12 <address> <data> <sum> F7, the checksum
+    /// covering address and data and summing to zero in seven bits.
+    void sendDt1(uint8_t dev, uint8_t a1, uint8_t a2, uint8_t a3, uint8_t value)
+    {
+        const int sum = a1 + a2 + a3 + value;
+        const uint8_t msg[] = { 0xf0, 0x41, dev, 0x23, 0x12, a1, a2, a3, value,
+                                uint8_t((128 - (sum & 0x7f)) & 0x7f), 0xf7 };
+        m_core.midiIn(msg, sizeof(msg), 0);
     }
 
     // ---- picking a patch by name ----------------------------------------------------
@@ -944,6 +1202,7 @@ private:
         unsigned    number  = 0;
         std::string path;
         std::string sha;
+        std::string label;      ///< what the image calls itself; see mountCard()
     };
 
     /// Read an image, mount it, and record what it was.  Returns false and leaves the slot
@@ -962,8 +1221,24 @@ private:
                       "image the machine can address.", slot, path.c_str(), img.size());
             return false;
         }
+        // What the card calls itself, from its own header: "SN-U110-08" and the like sit
+        // at offset 0x10 of the dump as plain text.  Only ever shown, never matched
+        // against anything -- a card somebody wrote themselves may say whatever it likes,
+        // and falls back to its catalogue number.
+        std::string label;
+        if (img.size() > 0x20)
+            for (size_t i = 0x10; i < 0x20; i ++)
+            {
+                const uint8_t c = img[i];
+                if (c < 0x20 || c >= 0x7f)
+                    break;
+                label.push_back(char(c));
+            }
+        while (!label.empty() && label.back() == ' ')
+            label.pop_back();
+
         m_cards[slot] = MountedCard { true, number, path,
-                                      voltaire::Sha256::of(img.data(), img.size()) };
+                                      voltaire::Sha256::of(img.data(), img.size()), label };
         return true;
     }
 
@@ -1199,6 +1474,17 @@ private:
     std::string m_pgmSha, m_pgmName, m_pgmFound;
 
     char m_patchesText[kNumPatches * (kPatchNameLen + 1) + 1] = { 0 };
+
+    // Room for the internal 99 plus a full complement of cards, at one short line each.
+    static constexpr size_t kTonesTextMax =
+            (kNumInternalTones + voltaire::kNumCardSlots * kMaxCardTones)
+                    * (kToneNameLen + 4) + (voltaire::kNumCardSlots + 1) * 48 + 1;
+    char m_tonesText[kTonesTextMax] = { 0 };
+    char m_toneScratch[kTonesTextMax] = { 0 };
+    std::atomic<int> m_toneRequest { -1 };
+    uint8_t m_cardIdSeen[voltaire::kNumCardSlots] = { 0 };
+    uint32_t m_rxRestoreWait = 0;
+    uint8_t m_rxSaved = 0;
     std::atomic<int> m_patchRequest { -1 };
     PatchStep m_patchStep = PatchStep::Idle;
     uint32_t m_patchWait = 0;
