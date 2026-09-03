@@ -57,32 +57,128 @@ static LV2_Worker_Status schedule_work(LV2_Worker_Schedule_Handle h, uint32_t si
     g_work_size = size;
     return LV2_WORKER_SUCCESS;
 }
-/* Capture whatever the plugin stores. */
-static uint32_t saved_urid = 0, saved_type = 0, saved_flags = 0;
-static char saved_val[131072];
-static size_t saved_len = 0;
+/* Capture whatever the plugin stores.
+ *
+ * A DICTIONARY, not a slot.  The plugin has more than one state key -- the machine's
+ * battery-backed memory and the settings-and-cards text -- and a host that keeps only the
+ * last one it was handed silently loses the other.  This host also round-trips the key,
+ * type and flags it was given: DPF checks the type coming back in, and returning 0 there
+ * makes the restore vanish with no error anywhere. */
+#define MAX_STATES 8
+static struct StateSlot {
+    uint32_t urid, type, flags;
+    size_t   len;
+    char    *val;
+} g_states[MAX_STATES];
+static int g_nstates = 0;
+
+static const char *urid_name(uint32_t urid);         /* defined below, with the map */
+
 static LV2_State_Status store_cb(LV2_State_Handle h, uint32_t key, const void *value,
                                  size_t size, uint32_t type, uint32_t flags)
 {
+    int i;
     (void)h;
-    if (size >= sizeof(saved_val)) return LV2_STATE_ERR_NO_SPACE;
-    memcpy(saved_val, value, size);
-    saved_val[size] = 0;
-    saved_len = size;
-    /* Keep the key, type and flags: a real host round-trips all three, and the plugin
-     * checks the type on the way back in. */
-    saved_urid = key; saved_type = type; saved_flags = flags;
+    for (i = 0; i < g_nstates; i++) if (g_states[i].urid == key) break;
+    if (i == g_nstates)
+    {
+        if (g_nstates == MAX_STATES) return LV2_STATE_ERR_NO_SPACE;
+        g_nstates++;
+        g_states[i].val = NULL;
+    }
+    free(g_states[i].val);
+    g_states[i].val = malloc(size + 1);
+    memcpy(g_states[i].val, value, size);
+    g_states[i].val[size] = 0;
+    g_states[i].len = size;
+    g_states[i].urid = key; g_states[i].type = type; g_states[i].flags = flags;
     return LV2_STATE_SUCCESS;
 }
 static const void *retrieve_cb(LV2_State_Handle h, uint32_t key, size_t *size,
                                uint32_t *type, uint32_t *flags)
 {
+    int i;
     (void)h;
-    if (key != saved_urid) { if (size) *size = 0; return NULL; }
-    if (size)  *size = saved_len;
-    if (type)  *type = saved_type;
-    if (flags) *flags = saved_flags;
-    return saved_len ? saved_val : NULL;
+    for (i = 0; i < g_nstates; i++) if (g_states[i].urid == key)
+    {
+        if (size)  *size  = g_states[i].len;
+        if (type)  *type  = g_states[i].type;
+        if (flags) *flags = g_states[i].flags;
+        return g_states[i].val;
+    }
+    if (size) *size = 0;
+    return NULL;
+}
+static void states_clear(void)
+{
+    int i;
+    for (i = 0; i < g_nstates; i++) { free(g_states[i].val); g_states[i].val = NULL; }
+    g_nstates = 0;
+}
+/* Find a stored key by the tail of its URI, e.g. "nvram". */
+static struct StateSlot *state_by_suffix(const char *suffix)
+{
+    int i;
+    const size_t n = strlen(suffix);
+    for (i = 0; i < g_nstates; i++)
+    {
+        const char *u = urid_name(g_states[i].urid);
+        const size_t l = strlen(u);
+        if (l >= n && strcmp(u + l - n, suffix) == 0) return &g_states[i];
+    }
+    return NULL;
+}
+/* The whole dictionary, copied aside so it outlives the next save.  Keeping the real
+ * urid/type/flags is the point: a host hands back exactly what it was given, and guessing
+ * the key URI here would test the guess rather than the plugin. */
+static struct StateSlot g_snapshot[MAX_STATES];
+static int g_nsnapshot = 0;
+static void snapshot_take(void)
+{
+    int i;
+    for (i = 0; i < g_nsnapshot; i++) free(g_snapshot[i].val);
+    g_nsnapshot = g_nstates;
+    for (i = 0; i < g_nstates; i++)
+    {
+        g_snapshot[i] = g_states[i];
+        g_snapshot[i].val = malloc(g_states[i].len + 1);
+        memcpy(g_snapshot[i].val, g_states[i].val, g_states[i].len + 1);
+    }
+}
+/* Hand the snapshot back, in the given order of keys. */
+static void snapshot_put(int reverse)
+{
+    int i;
+    states_clear();
+    for (i = 0; i < g_nsnapshot; i++)
+    {
+        const struct StateSlot *s = &g_snapshot[reverse ? g_nsnapshot - 1 - i : i];
+        store_cb(NULL, s->urid, s->val, s->len, s->type, s->flags);
+    }
+}
+static const struct StateSlot *snapshot_by_suffix(const char *suffix)
+{
+    int i;
+    const size_t n = strlen(suffix);
+    for (i = 0; i < g_nsnapshot; i++)
+    {
+        const char *u = urid_name(g_snapshot[i].urid);
+        const size_t l = strlen(u);
+        if (l >= n && strcmp(u + l - n, suffix) == 0) return &g_snapshot[i];
+    }
+    return NULL;
+}
+
+/* A copy that outlives the next save. */
+static char *state_dup(const char *suffix, size_t *len)
+{
+    struct StateSlot *s = state_by_suffix(suffix);
+    char *out;
+    if (s == NULL) { if (len) *len = 0; return NULL; }
+    out = malloc(s->len + 1);
+    memcpy(out, s->val, s->len + 1);
+    if (len) *len = s->len;
+    return out;
 }
 
 static LV2_Worker_Status work_respond(LV2_Worker_Respond_Handle h, uint32_t size, const void *data)
@@ -99,6 +195,10 @@ static LV2_URID map_uri(LV2_URID_Map_Handle h, const char *uri)
     if (g_nuris >= 128) return 0;
     g_uris[g_nuris] = strdup(uri);
     return g_nuris++;
+}
+static const char *urid_name(uint32_t urid)
+{
+    return (urid > 0 && urid < g_nuris && g_uris[urid]) ? g_uris[urid] : "<unmapped>";
 }
 
 int main(int argc, char **argv)
@@ -334,59 +434,195 @@ int main(int argc, char **argv)
         if (si == NULL) { printf("state: plugin exposes no LV2 state interface\n"); }
         else
         {
-            saved_len = 0;
+            struct StateSlot *slot;
+            char *nvram_before, *settings_before;
+            size_t nvram_len = 0, settings_len = 0;
+            int i;
+
+            /* Move the front-panel controls off their defaults first, so the settings
+             * key has something to prove.  Ports are read inside run(), so it takes a
+             * block for the plugin to notice. */
+            volume = 6.5f;
+            hf = 0.0f;
+            d->run(h, BLOCK);
+
+            states_clear();
             si->save(h, store_cb, NULL, 0, NULL);
-            printf("state: saved %zu bytes\n", saved_len);
+            printf("state: the plugin stored %d key%s\n",
+                   g_nstates, g_nstates == 1 ? "" : "s");
+            for (i = 0; i < g_nstates; i++)
+                printf("state:   %-56s %6zu bytes\n",
+                       urid_name(g_states[i].urid), g_states[i].len);
+
+            /* The settings key is text on purpose, so print it: if a project comes back
+             * wrong this is the line that says which images it expected. */
+            slot = state_by_suffix("settings");
+            if (slot != NULL)
+            {
+                const char *p = slot->val;
+                printf("state: settings key reads --\n");
+                while (*p)
+                {
+                    const char *nl = strchr(p, '\n');
+                    printf("state:   | %.*s\n", nl ? (int)(nl - p) : (int)strlen(p), p);
+                    if (!nl) break;
+                    p = nl + 1;
+                }
+            }
+
+            slot = state_by_suffix("settings");
+            printf("state: volume and HF correction %s\n",
+                   (slot && strstr(slot->val, "volume 6.5000")
+                         && strstr(slot->val, "hfcorrection 0"))
+                   ? "were saved as set"
+                   : "WERE NOT saved as set");
+
+            snapshot_take();
+            nvram_before    = state_dup("nvram", &nvram_len);
+            settings_before = state_dup("settings", &settings_len);
+            if (nvram_before == NULL)
+                printf("state: NO nvram key -- the machine's memory is not being saved\n");
 
             /* A fresh instance, as reopening the session gives you. */
             LV2_Handle h2 = d->instantiate(d, RATE, "./", features);
             if (h2 == NULL) { printf("state: second instantiate FAILED\n"); }
             else
             {
+                char *virgin;
+                size_t virgin_len = 0;
+                const size_t hdr = 16 * 2;            /* header, in hex characters */
+                const size_t wr  = 0x1f00 * 2;
+                const size_t pr  = 0x2000 * 2;
+
                 d->connect_port(h2, 0, outL); d->connect_port(h2, 1, outR);
                 d->connect_port(h2, 2, ev_in); d->connect_port(h2, 3, ev_out);
                 d->connect_port(h2, 4, &latency);
                 d->connect_port(h2, 5, &volume); d->connect_port(h2, 6, &hf);
-                for (int i = 0; i < 6; i++) d->connect_port(h2, 7 + i, &btn[i]);
-
-                const size_t was = saved_len;
-                char *before = malloc(was + 1);
-                memcpy(before, saved_val, was + 1);
+                for (i = 0; i < 6; i++) d->connect_port(h2, 7 + i, &btn[i]);
 
                 /* What the fresh instance holds WITHOUT a restore.  If this already
                  * matched, the comparison below would prove nothing -- both instances boot
                  * the same firmware and would reach the same factory patches. */
-                saved_len = 0;
+                states_clear();
                 si->save(h2, store_cb, NULL, 0, NULL);
-                char *virgin = malloc(saved_len + 1);
-                memcpy(virgin, saved_val, saved_len + 1);
-                const size_t hdr0 = 16 * 2, wr0 = 0x1f00 * 2, pr0 = 0x2000 * 2;
+                virgin = state_dup("nvram", &virgin_len);
                 printf("state: before restoring, fresh vs saved: %s\n",
-                       memcmp(before + hdr0 + wr0, virgin + hdr0 + wr0, pr0) == 0
+                       (virgin && nvram_before && virgin_len == nvram_len
+                        && memcmp(nvram_before + hdr + wr, virgin + hdr + wr, pr) == 0)
                        ? "ALREADY IDENTICAL -- the check below would prove nothing"
                        : "different, so the check below means something");
                 free(virgin);
-                /* put the saved data back where retrieve_cb will find it */
-                memcpy(saved_val, before, was + 1);
-                saved_len = was;
 
+                /* Put the saved data back where retrieve_cb will find it.  The order the
+                 * host STORED them in is reversed here to make the point that it does not
+                 * matter -- the plugin is asked for its keys in DPF's own order regardless,
+                 * which puts the machine's memory before the cards.  That is the awkward
+                 * way round, since the cards have to be in their slots before the machine
+                 * boots into the patches that name them, and it is the order that actually
+                 * happens; the plugin handles it by booting again once the cards arrive. */
+                snapshot_put(1);
                 si->restore(h2, retrieve_cb, NULL, 0, NULL);
 
-                saved_len = 0;
+                states_clear();
                 si->save(h2, store_cb, NULL, 0, NULL);
+                slot = state_by_suffix("nvram");
                 printf("state: restored into a fresh instance, it now reports %zu bytes\n",
-                       saved_len);
+                       slot ? slot->len : (size_t)0);
+
                 /* The patch store is what must survive; work RAM is touched by booting. */
-                const size_t hdr = 16 * 2;            /* header, in hex characters */
-                const size_t wr  = 0x1f00 * 2;
-                const size_t pr  = 0x2000 * 2;
-                int same = (saved_len == was)
-                        && memcmp(before + hdr + wr, saved_val + hdr + wr, pr) == 0;
-                printf("state: user patch store %s across save/restore\n",
-                       same ? "SURVIVED byte for byte" : "DID NOT survive");
-                free(before);
+                {
+                    const int same = slot && nvram_before && slot->len == nvram_len
+                            && memcmp(nvram_before + hdr + wr, slot->val + hdr + wr, pr) == 0;
+                    printf("state: user patch store %s across save/restore\n",
+                           same ? "SURVIVED byte for byte" : "DID NOT survive");
+                }
+                slot = state_by_suffix("settings");
+                {
+                    const int same = slot && settings_before
+                            && strcmp(slot->val, settings_before) == 0;
+                    printf("state: settings and cards %s across save/restore\n",
+                           same ? "came back identical" : "DID NOT come back identical");
+                    if (!same && slot && settings_before)
+                        printf("state:   wanted:\n%s\nstate:   got:\n%s\n",
+                               settings_before, slot->val);
+                }
                 d->cleanup(h2);
             }
+
+            /* A project that has MOVED.  Sessions travel between machines and people
+             * reorganise their ROM directories, so the recorded path is a first guess.
+             * Point it somewhere that does not exist and the plugin should still find the
+             * image by name on its search path -- and say so by reporting the real path
+             * back. */
+            if (settings_before != NULL && strstr(settings_before, "\ncard ") != NULL)
+            {
+                char *moved = malloc(strlen(settings_before) * 2 + 64);
+                const char *p = settings_before;
+                char *o = moved;
+                int rewrote = 0;
+                while (*p)
+                {
+                    const char *nl = strchr(p, '\n');
+                    const size_t n = nl ? (size_t)(nl - p) : strlen(p);
+                    if (strncmp(p, "card ", 5) == 0)
+                    {
+                        /* keep everything up to the path, then repoint the path */
+                        const char *slash = memchr(p, '/', n);
+                        if (slash != NULL)
+                        {
+                            const char *base = slash;
+                            const char *q;
+                            for (q = p; q < p + n; q++) if (*q == '/') base = q + 1;
+                            memcpy(o, p, (size_t)(slash - p)); o += slash - p;
+                            o += sprintf(o, "/nonexistent/moved/%.*s",
+                                         (int)(p + n - base), base);
+                            rewrote = 1;
+                        }
+                        else { memcpy(o, p, n); o += n; }
+                    }
+                    else { memcpy(o, p, n); o += n; }
+                    *o++ = '\n';
+                    if (!nl) break;
+                    p = nl + 1;
+                }
+                *o = 0;
+
+                if (rewrote)
+                {
+                    LV2_Handle h3 = d->instantiate(d, RATE, "./", features);
+                    if (h3 == NULL) printf("state: third instantiate FAILED\n");
+                    else
+                    {
+                        const struct StateSlot *sl = snapshot_by_suffix("settings");
+                        struct StateSlot *got;
+                        int i2;
+                        d->connect_port(h3, 0, outL); d->connect_port(h3, 1, outR);
+                        d->connect_port(h3, 2, ev_in); d->connect_port(h3, 3, ev_out);
+                        d->connect_port(h3, 4, &latency);
+                        d->connect_port(h3, 5, &volume); d->connect_port(h3, 6, &hf);
+                        for (i2 = 0; i2 < 6; i2++) d->connect_port(h3, 7 + i2, &btn[i2]);
+
+                        states_clear();
+                        if (sl) store_cb(NULL, sl->urid, moved, strlen(moved),
+                                         sl->type, sl->flags);
+                        d->connect_port(h3, 4, &latency);
+                        si->restore(h3, retrieve_cb, NULL, 0, NULL);
+
+                        states_clear();
+                        si->save(h3, store_cb, NULL, 0, NULL);
+                        got = state_by_suffix("settings");
+                        printf("state: cards named at a path that no longer exists were %s\n",
+                               (got && strcmp(got->val, settings_before) == 0)
+                               ? "found again on the search path"
+                               : "NOT recovered");
+                        d->cleanup(h3);
+                    }
+                }
+                free(moved);
+            }
+
+            free(nvram_before);
+            free(settings_before);
         }
     }
 

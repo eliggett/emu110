@@ -197,6 +197,19 @@ layout in the generated TTL. `tools/lv2_selftest.c` is a minimal LV2 host that l
 built bundle exactly as Ardour would, plays a note and writes a wav — so what gets tested
 is what a user loads.
 
+#### `[!]` Three bugs so far have been in the test host, not the plugin
+
+Each one made a *correct* plugin look broken, and each was silent:
+
+- The host returned `type = 0` from its retrieve callback. DPF checks the type and drops
+  the value, with no error anywhere; `setState()` simply never ran.
+- The host keyed retrieval on position rather than on the URID it was given.
+- The host kept **one** stored value, so the second state key overwrote the first — the
+  machine's memory came back and the cards silently did not.
+
+A real host round-trips key, type and flags, and keeps a dictionary. Anything less tests the
+host. When state does not come back, suspect this file first.
+
 ### The resampler
 
 `src/Resampler.hpp`, a Kaiser-windowed sinc polyphase at the exact rational ratio (2:3 to
@@ -375,10 +388,13 @@ assignment), so the blob is sent **only when it changes**. An idle machine sends
 navigating the menus costs a few allocations a second. Measured with `make rtaudit`:
 
 ```
-    malloc 82   free 82   over ~10 s of continuous playing = 8/s
+    malloc 44   free 44   over ~10 s of continuous playing -- two per blob sent
 ```
 
-Not zero, and worth knowing. Continuous data must not go this way -- a VU meter at 30 Hz
+The figure moves with how much the panel is doing, because that is what decides how many
+blobs get sent; two allocations per send is the constant. `make rtaudit` reports NOT CLEAN
+on account of it, and is left that way on purpose — an audit tuned until it passes stops
+being an audit. Not zero, and worth knowing. Continuous data must not go this way -- a VU meter at 30 Hz
 would be 60 allocations a second, forever, which is why meters stay on control ports.
 
 ### `[!]` A patch to DPF
@@ -418,6 +434,59 @@ instantiate a fresh plugin, restore, save again — and checks the user patch st
 byte. It also checks the fresh instance *differs* before restoring, so the comparison cannot
 pass for the wrong reason.
 
-`[?]` Not yet carried: which ROMs and cards were loaded. Section 9 wants those stored by
-name and SHA-256 and re-resolved through the search path, so a session warns intelligently
-instead of loading something silently wrong.
+### Cards, and the rest of the session
+
+The NVRAM is not everything a project needs. The front-panel volume and HF correction are
+in there too, and so is **which card image was in which slot** — patches name their tones by
+slot, so a project that comes back without its cards comes back reading `Illegal CARD`.
+
+That all goes in a second state key, `settings`, as **text**, so it can be read out of a
+session file when a project comes back wrong:
+
+```
+volume 6.5000
+hfcorrection 0
+pgm b9e60aaf... roland_u110_pgm_(15179960).bin
+card 0 8 fe8eb62e... /home/you/.local/share/u110/roms/sn-u110-08.bin
+card 1 9 c964b871... /home/you/.local/share/u110/roms/sn-u110-09.bin
+```
+
+Volume and HF correction are also ordinary automatable parameters, and in LV2 the host's
+control ports are the authority — they are saved with the session and they win on the first
+`run()`. Keeping them here as well costs nothing, makes the session self-describing, and
+covers a host that stores state but not ports.
+
+#### Finding cards
+
+A fresh instance mounts whatever card-shaped files are on the ROM search path, lowest number
+first. A file names a card if its name contains `sn-u110-NN` **anywhere**, with separators
+ignored — so `sn-u110-08.bin`, `SN_U110_02.BIN`, `my sn-u-110-03 copy.bin` and
+`roland_u220_waverom4_(sn-u110-08).bin` all work. Two digits, and not three: `sn-u110-081`
+is not silently read as card 8.
+
+There is **no catalogue of known cards and there will not be one.** Writing your own image is
+a supported thing to do, so the only thing a filename has to carry is which slot number the
+image claims to be. Nothing is checked against a database.
+
+#### Coming back to the same images
+
+The SHA-256 is recorded for one purpose: answering "is this the same file the project was
+saved with?". It is never a gate. Resolution goes recorded path, then the same basename on
+the search path, then any file claiming the same card number; if the bytes have changed since
+the project was saved, the image is mounted anyway with a warning saying so. Refusing to load
+somebody's edited card because it no longer matches a hash would make the checksum an
+obstacle rather than an explanation.
+
+The program ROM's hash is recorded the same way, and only ever produces a warning.
+
+#### `[!]` Two keys, and the order they arrive in
+
+The host restores `nvram` and `settings` in whatever order it likes — with DPF that is
+memory first — and the cards have to be in their slots **before** the machine boots into the
+patches that name them. So neither key applies itself: each records what it was given and
+asks for one reboot. Restoring both costs two boots, at a few tens of milliseconds each, and
+it runs when a project loads rather than from the audio callback.
+
+`make selftest` covers all of it: three keys stored and returned, the patch store byte for
+byte, the settings text identical, volume and HF correction saved as set, and a project whose
+card paths no longer exist finding its images again by name.

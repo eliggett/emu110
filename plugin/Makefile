@@ -23,7 +23,18 @@ LINK_FLAGS      += $(CURDIR)/$(CORE_LIB)
 # PipeWire Just Works.
 TARGETS = lv2_sep vst3 clap jack
 
-all: patches generated core $(TARGETS) ttl
+# ORDER MATTERS AND MAKE WILL NOT GUESS IT.  These were once prerequisites of one `all`,
+# which is not the same thing: under -j make runs prerequisites in parallel, so `core` --
+# whose whole job is to delete plugin binaries that are older than the archive -- would
+# delete a binary that another job had linked seconds earlier, and the build would report
+# success with no plugin on disk.  Nor is it enough to make `core` a prerequisite of the
+# link targets, since those are phony wrappers whose own prerequisites then run alongside
+# it.  Separate passes are what actually orders the work; the sub-makes inherit the
+# jobserver, so -j still applies inside each one.
+all:
+	@$(MAKE) --no-print-directory patches generated core
+	@$(MAKE) --no-print-directory $(TARGETS)
+	@$(MAKE) --no-print-directory ttl
 
 # DPF is a submodule and we do not fork it, so the one change we need travels as a patch
 # applied at build time.  DPF implements updateStateValue -- the DSP -> UI channel -- for
@@ -44,7 +55,7 @@ patches:
 # nothing declares it, so hosts load the plugin and report that it has no custom UI.  The
 # generator has to run AFTER the UI is linked, which is exactly the ordering that gets
 # missed when it is a separate manual step.
-ttl: $(TARGETS)
+ttl:
 	@dpf/utils/generate-ttl.sh > /dev/null 2>&1
 	@grep -q "ui:X11UI" bin/$(NAME).lv2/manifest.ttl \
 		&& echo "  LV2 manifest declares the UI" \

@@ -14,13 +14,19 @@
 
 #include "u110_core.h"
 #include "Resampler.hpp"
+#include "Sha256.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
+
+#include <dirent.h>
+#include <sys/stat.h>
 
 START_NAMESPACE_DISTRHO
 
@@ -31,17 +37,26 @@ namespace {
 /// plugin: the user supplies their own dumps.
 std::vector<std::string> romSearchPath()
 {
-    std::vector<std::string> out;
+    std::vector<std::string> bases;
     if (const char *env = std::getenv("U110_DATA_DIR"))
-        out.push_back(std::string(env) + "/roms");
+        bases.push_back(std::string(env) + "/roms");
     if (const char *xdg = std::getenv("XDG_DATA_HOME"))
-        out.push_back(std::string(xdg) + "/u110/roms");
+        bases.push_back(std::string(xdg) + "/u110/roms");
     if (const char *home = std::getenv("HOME"))
-        out.push_back(std::string(home) + "/.local/share/u110/roms");
-    out.push_back("/usr/share/u110/roms");
+        bases.push_back(std::string(home) + "/.local/share/u110/roms");
+    bases.push_back("/usr/share/u110/roms");
     // Development convenience: the project's own roms/ directory.
     if (const char *env = std::getenv("U110_SOURCE_ROMS"))
-        out.push_back(env);
+        bases.push_back(env);
+
+    // Section 9 puts cards in roms/cards/, but a flat roms/ is what most people end up
+    // with, so both are searched and neither is required.
+    std::vector<std::string> out;
+    for (const std::string &b : bases)
+    {
+        out.push_back(b);
+        out.push_back(b + "/cards");
+    }
     return out;
 }
 
@@ -64,16 +79,113 @@ std::vector<uint8_t> readFile(const std::string &path)
     return data;
 }
 
-std::vector<uint8_t> findRom(const char *const *names, size_t count, size_t wantSize)
+std::vector<uint8_t> findRom(const char *const *names, size_t count, size_t wantSize,
+                             std::string *foundName = nullptr)
 {
     for (const std::string &dir : romSearchPath())
         for (size_t i = 0; i < count; i ++)
         {
             std::vector<uint8_t> d = readFile(dir + "/" + names[i]);
             if (d.size() == wantSize)
+            {
+                if (foundName != nullptr)
+                    *foundName = names[i];
                 return d;
+            }
         }
     return {};
+}
+
+std::string baseName(const std::string &path)
+{
+    const size_t slash = path.find_last_of('/');
+    return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
+/// Does this filename name an SN-U110 card, and if so which one?
+///
+/// DELIBERATELY LOOSE.  There is no database of known cards here and there never will be:
+/// writing your own card image is a supported thing to do, so the only thing a name has to
+/// carry is which SLOT NUMBER the image claims to be.  Separators are thrown away before
+/// matching, so sn-u110-08.bin, SN_U110_08.BIN, "sn-u-110-08 (my edit).bin" and
+/// roland sn u110 08.rom all name card 8, and anything containing the string anywhere is
+/// enough.
+///
+/// The two digits must not be followed by a third, so a file called sn-u110-081 is not
+/// silently read as card 8.
+bool cardNumberFromName(const std::string &name, unsigned &number)
+{
+    std::string flat;
+    flat.reserve(name.size());
+    for (const char c : name)
+    {
+        if (c == '-' || c == '_' || c == ' ' || c == '.')
+            continue;
+        flat.push_back(char(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c));
+    }
+
+    static const std::string kTag = "snu110";
+    for (size_t at = flat.find(kTag); at != std::string::npos;
+         at = flat.find(kTag, at + 1))
+    {
+        const size_t d = at + kTag.size();
+        if (d + 1 >= flat.size())
+            continue;
+        const auto isDigit = [](char c)
+            { return std::isdigit(static_cast<unsigned char>(c)) != 0; };
+        if (!isDigit(flat[d]) || !isDigit(flat[d + 1]))
+            continue;
+        if (d + 2 < flat.size() && isDigit(flat[d + 2]))
+            continue;
+        number = unsigned(flat[d] - '0') * 10 + unsigned(flat[d + 1] - '0');
+        return true;
+    }
+    return false;
+}
+
+struct CardFile
+{
+    unsigned    number = 0;
+    std::string path;
+};
+
+/// Every card image on the search path, lowest number first, one per number.
+///
+/// Earlier directories win a tie, so the same ordering that resolves the program ROM also
+/// resolves a card the user has overridden locally.
+std::vector<CardFile> scanForCards()
+{
+    std::vector<CardFile> out;
+    for (const std::string &dir : romSearchPath())
+    {
+        DIR *d = ::opendir(dir.c_str());
+        if (d == nullptr)
+            continue;
+        while (const dirent *e = ::readdir(d))
+        {
+            const std::string name = e->d_name;
+            unsigned number = 0;
+            if (!cardNumberFromName(name, number))
+                continue;
+
+            const std::string path = dir + "/" + name;
+            struct stat st;
+            if (::stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+                continue;
+            if (st.st_size == 0 || size_t(st.st_size) > voltaire::kCardBytes)
+                continue;
+
+            bool seen = false;
+            for (const CardFile &c : out)
+                seen = seen || c.number == number;
+            if (!seen)
+                out.push_back(CardFile { number, path });
+        }
+        ::closedir(d);
+    }
+    std::sort(out.begin(), out.end(),
+              [](const CardFile &a, const CardFile &b) { return a.number < b.number; });
+    return out;
 }
 
 /// What the plugin keeps.  Only the NVRAM is saved into a session; the panel is live
@@ -82,6 +194,7 @@ enum States
 {
     kStatePanel = 0,
     kStateNvram,
+    kStateSettings,
     kStateCount
 };
 
@@ -262,8 +375,18 @@ protected:
         case kStateNvram:
             state.key = "nvram";
             state.label = "Battery-backed memory";
-            // The one thing worth keeping across a session: the user's patches and setup,
-            // exactly what the real unit's battery preserves.
+            // What the real unit's battery preserves: the user's patches and setup.
+            state.hints = kStateIsHostReadable;
+            state.defaultValue = "";
+            break;
+
+        case kStateSettings:
+            state.key = "settings";
+            state.label = "Settings and cards";
+            // Everything about the session that is NOT inside the machine: the front-panel
+            // controls, and WHICH images were mounted.  Text, on purpose -- a session file
+            // should be readable when you are trying to work out why a project came back
+            // sounding wrong.
             state.hints = kStateIsHostReadable;
             state.defaultValue = "";
             break;
@@ -273,6 +396,8 @@ protected:
     /// Asked by the host when it saves a session.
     String getState(const char *key) const override
     {
+        if (std::strcmp(key, "settings") == 0)
+            return getSettingsState();
         if (std::strcmp(key, "nvram") != 0)
             return String();
 
@@ -286,9 +411,27 @@ protected:
         return String(hex.data());
     }
 
+    // A host restores the two keys in whatever order it likes, and the cards have to be
+    // in their slots BEFORE the machine boots into the patches that reference them --
+    // otherwise every card tone in the restored setup comes back as "Illegal CARD".
+    //
+    // So neither key applies itself.  Each one records what it was given and then asks for
+    // one reboot, which mounts whatever cards are known and puts back whatever memory is
+    // known.  Restoring both keys costs two boots, at a few tens of milliseconds each, and
+    // this runs when a project loads rather than from the audio callback.
     void setState(const char *key, const char *value) override
     {
-        if (std::strcmp(key, "nvram") != 0 || value == nullptr || value[0] == '\0')
+        if (value == nullptr)
+            return;
+
+        if (std::strcmp(key, "settings") == 0)
+        {
+            setSettingsState(value);
+            rebootIntoRestoredState();
+            return;
+        }
+
+        if (std::strcmp(key, "nvram") != 0 || value[0] == '\0')
             return;
 
         const size_t n = std::strlen(value) / 2;
@@ -300,12 +443,26 @@ protected:
                 return;
             raw[i] = uint8_t((hi << 4) | lo);
         }
+        m_savedNvram = std::move(raw);
+        rebootIntoRestoredState();
+    }
 
-        // Restoring reboots the machine, which costs a fraction of a second of wall time.
-        // Fine here: a host restores state when it loads a session, not from the audio
-        // callback.
-        if (m_core.loadState(raw.data(), raw.size()))
-            d_stdout("Voltaire 110: restored %zu bytes of battery-backed memory.", raw.size());
+    void rebootIntoRestoredState()
+    {
+        if (!m_romsLoaded)
+            return;
+        if (m_savedNvram.empty())
+        {
+            // Cards changed but there is no saved memory -- an older session, or a project
+            // saved before any patch was edited.  The machine still has to come up again
+            // to see the slots.
+            m_core.reset();
+            m_core.runUntilIdle();
+            return;
+        }
+        if (m_core.loadState(m_savedNvram.data(), m_savedNvram.size()))
+            d_stdout("Voltaire 110: restored %zu bytes of battery-backed memory.",
+                     m_savedNvram.size());
         else
             d_stderr2("Voltaire 110: saved memory did not load -- wrong version or size. "
                       "The machine keeps its own; nothing was overwritten.");
@@ -537,13 +694,220 @@ private:
         }
     }
 
+    // ---- cards, and the rest of what a session has to remember ---------------------
+    //
+    // A card is mounted by FILE, not by catalogue.  Nothing here knows or cares what
+    // SN-U110-08 is supposed to contain -- writing your own image is a supported thing to
+    // do -- so a fresh instance mounts whatever card-shaped files it finds, and a restored
+    // instance mounts the exact files the session was saved with.
+    //
+    // The SHA-256 is recorded for that second case only, and it is never a gate: if the
+    // file has changed since the session was saved it is still mounted, with a warning
+    // saying so.  Refusing to load somebody's edited card because it no longer matches a
+    // hash would make the checksum an obstacle rather than an explanation.
+
+    struct MountedCard
+    {
+        bool        present = false;
+        unsigned    number  = 0;
+        std::string path;
+        std::string sha;
+    };
+
+    /// Read an image, mount it, and record what it was.  Returns false and leaves the slot
+    /// alone if the file cannot be read or the core rejects it.
+    bool mountCard(unsigned slot, unsigned number, const std::string &path)
+    {
+        std::vector<uint8_t> img = readFile(path);
+        if (img.empty())
+        {
+            d_stderr2("Voltaire 110: card slot %u: cannot read %s", slot, path.c_str());
+            return false;
+        }
+        if (m_core.loadCard(slot, img.data(), img.size()) != voltaire::LoadResult::Ok)
+        {
+            d_stderr2("Voltaire 110: card slot %u: %s is %zu bytes, which is not a card "
+                      "image the machine can address.", slot, path.c_str(), img.size());
+            return false;
+        }
+        m_cards[slot] = MountedCard { true, number, path,
+                                      voltaire::Sha256::of(img.data(), img.size()) };
+        return true;
+    }
+
+    void ejectCard(unsigned slot)
+    {
+        m_core.loadCard(slot, nullptr, 0);
+        m_cards[slot] = MountedCard();
+    }
+
+    /// A fresh instance: mount every card image on the search path, lowest number first.
+    void loadCards()
+    {
+        const std::vector<CardFile> found = scanForCards();
+        unsigned slot = 0;
+        for (const CardFile &c : found)
+        {
+            if (slot >= voltaire::kNumCardSlots)
+            {
+                d_stderr2("Voltaire 110: more than %u card images found; %s and any after "
+                          "it were left unmounted.",
+                          voltaire::kNumCardSlots, baseName(c.path).c_str());
+                break;
+            }
+            if (mountCard(slot, c.number, c.path))
+            {
+                d_stdout("Voltaire 110: card slot %u <- %s", slot, baseName(c.path).c_str());
+                slot ++;
+            }
+        }
+    }
+
+    /// Where a saved session's card image lives NOW.  Sessions travel between machines and
+    /// people reorganise their ROM directories, so the recorded path is a first guess, not
+    /// an address.
+    std::string resolveCardPath(const std::string &savedPath, unsigned number) const
+    {
+        struct stat st;
+        if (!savedPath.empty() && ::stat(savedPath.c_str(), &st) == 0 && S_ISREG(st.st_mode))
+            return savedPath;
+
+        const std::string want = baseName(savedPath);
+        for (const std::string &dir : romSearchPath())
+        {
+            const std::string cand = dir + "/" + want;
+            if (!want.empty() && ::stat(cand.c_str(), &st) == 0 && S_ISREG(st.st_mode))
+                return cand;
+        }
+
+        // Same card, different filename -- the usual case when a session moves between
+        // people, since nothing forces one spelling of the name.
+        for (const CardFile &c : scanForCards())
+            if (c.number == number)
+                return c.path;
+
+        return std::string();
+    }
+
+    String getSettingsState() const
+    {
+        std::string out;
+        char line[1024];
+
+        std::snprintf(line, sizeof(line), "volume %.4f\n", double(m_volumeDb));
+        out += line;
+        std::snprintf(line, sizeof(line), "hfcorrection %d\n", m_hfCorrection ? 1 : 0);
+        out += line;
+
+        // Informational: which firmware this session was made with.  v2.00 and v2.03 lay
+        // out patch memory the same way, so this only ever produces a warning, never a
+        // refusal -- but it is the first thing worth knowing if a project comes back odd.
+        if (!m_pgmSha.empty())
+        {
+            std::snprintf(line, sizeof(line), "pgm %s %s\n",
+                          m_pgmSha.c_str(), m_pgmName.c_str());
+            out += line;
+        }
+
+        for (unsigned i = 0; i < voltaire::kNumCardSlots; i ++)
+        {
+            if (!m_cards[i].present)
+                continue;
+            // The path goes last so it may contain spaces without needing quoting.
+            std::snprintf(line, sizeof(line), "card %u %u %s %s\n", i, m_cards[i].number,
+                          m_cards[i].sha.c_str(), m_cards[i].path.c_str());
+            out += line;
+        }
+        return String(out.c_str());
+    }
+
+    void setSettingsState(const char *text)
+    {
+        // The session is the authority on which cards were in the machine.  Anything the
+        // auto-scan mounted at construction is ejected first, so a project that was saved
+        // with no cards comes back with no cards -- otherwise a card image dropped into
+        // the ROM directory later would silently rewrite an old project's sound.
+        for (unsigned i = 0; i < voltaire::kNumCardSlots; i ++)
+            ejectCard(i);
+
+        std::string all(text);
+        size_t pos = 0;
+        while (pos <= all.size())
+        {
+            const size_t nl = all.find('\n', pos);
+            const std::string line = all.substr(pos, nl == std::string::npos
+                                                    ? std::string::npos : nl - pos);
+            pos = nl == std::string::npos ? all.size() + 1 : nl + 1;
+            if (line.empty())
+                continue;
+
+            float f = 0.0f;
+            int d = 0;
+            unsigned slot = 0, number = 0;
+            char sha[80] = { 0 };
+            int rest = 0;
+
+            if (std::sscanf(line.c_str(), "volume %f", &f) == 1)
+            {
+                m_volumeDb = f;
+                m_gainTarget = std::pow(10.0f, f / 20.0f);
+            }
+            else if (std::sscanf(line.c_str(), "hfcorrection %d", &d) == 1)
+            {
+                m_hfCorrection = d != 0;
+                m_core.setHfCorrection(m_hfCorrection);
+            }
+            else if (std::sscanf(line.c_str(), "pgm %79s %n", sha, &rest) == 1)
+            {
+                if (!m_pgmSha.empty() && m_pgmSha != sha)
+                    d_stderr2("Voltaire 110: this project was saved with a different "
+                              "program ROM (%s...). The one loaded is %s.... Patches will "
+                              "still load; sounds may differ.",
+                              std::string(sha).substr(0, 8).c_str(),
+                              m_pgmSha.substr(0, 8).c_str());
+            }
+            else if (std::sscanf(line.c_str(), "card %u %u %79s %n",
+                                 &slot, &number, sha, &rest) == 3
+                     && slot < voltaire::kNumCardSlots && rest > 0)
+            {
+                restoreCard(slot, number, sha, line.substr(size_t(rest)));
+            }
+        }
+    }
+
+    void restoreCard(unsigned slot, unsigned number, const std::string &wantSha,
+                     const std::string &savedPath)
+    {
+        const std::string path = resolveCardPath(savedPath, number);
+        if (path.empty())
+        {
+            d_stderr2("Voltaire 110: card slot %u is empty: this project used %s, which is "
+                      "not on the ROM search path. Tones from that card will read as "
+                      "\"Illegal CARD\" until it is put back.",
+                      slot, baseName(savedPath).c_str());
+            return;
+        }
+        if (!mountCard(slot, number, path))
+            return;
+
+        if (m_cards[slot].sha != wantSha)
+            d_stderr2("Voltaire 110: card slot %u: %s has changed since this project was "
+                      "saved (%s... now %s...). Mounted anyway.",
+                      slot, baseName(path).c_str(), wantSha.substr(0, 8).c_str(),
+                      m_cards[slot].sha.substr(0, 8).c_str());
+        else if (path != savedPath)
+            d_stdout("Voltaire 110: card slot %u <- %s (moved since the project was saved, "
+                     "but byte for byte the same image).", slot, path.c_str());
+    }
+
     void loadRoms()
     {
         static const char *const pgm[] = {
             "roland_u110_pgm_(15179960).bin", "roland_u110_pgm_15179960.bin",
             "U110v203.BIN", "u110_v203.bin", "U110v200.BIN", "u110_v200.bin",
         };
-        std::vector<uint8_t> rom = findRom(pgm, sizeof(pgm) / sizeof(pgm[0]), 0x10000);
+        std::vector<uint8_t> rom = findRom(pgm, sizeof(pgm) / sizeof(pgm[0]), 0x10000,
+                                           &m_pgmFound);
         if (rom.empty())
         {
             d_stderr2("Voltaire 110: no U-110 program ROM found. Put your own dumps in "
@@ -553,6 +917,8 @@ private:
         }
         if (m_core.loadProgramRom(rom.data(), rom.size()) != voltaire::LoadResult::Ok)
             return;
+        m_pgmSha = voltaire::Sha256::of(rom.data(), rom.size());
+        m_pgmName = m_pgmFound;
 
         for (unsigned b = 0; b < voltaire::kNumWaveBanks; b ++)
         {
@@ -568,6 +934,8 @@ private:
             }
             m_core.loadWaveRom(b, w.data(), w.size());
         }
+
+        loadCards();
 
         m_core.reset();
         m_romsLoaded = true;
@@ -593,6 +961,10 @@ private:
     unsigned m_lcdAccum = 0;
     char m_lastLcd[40] = { 0 };
     uint32_t m_clipHold = 0;
+    MountedCard m_cards[voltaire::kNumCardSlots];
+    std::vector<uint8_t> m_savedNvram;
+    std::string m_pgmSha, m_pgmName, m_pgmFound;
+
     PanelBlob m_lastBlob = {};
     char m_blobHex[sizeof(PanelBlob) * 2 + 1] = { 0 };
     uint32_t m_publishAccum = 0;

@@ -792,11 +792,26 @@ not `~/.config`.
 - **Search order**: `$U110_DATA_DIR` (override) → user base → system-wide
   (`/usr/share/u110`, `%PROGRAMDATA%`) → the directory beside the plugin binary.
   First hit wins; log which was used.
-- **Never bake absolute ROM paths into project state.** Store **name + SHA-256**
-  and re-resolve through the search path at load. Warn clearly on a hash
-  mismatch — the same image under a different filename should still load.
+- **The identity of an image is its name + SHA-256, never its path.** Project
+  state records the absolute path too, but only as a first guess and only for
+  the sake of being readable when something goes wrong: resolution falls back to
+  the same basename on the search path, then to any file claiming the same card
+  number, so a project still opens on a machine that has never seen that path.
+  A hash mismatch **warns and loads anyway** — see below.
+
+  `[x]` **Done.** `settings` state key, `plugin/src/Voltaire110Plugin.cpp`.
 - **Nothing is bundled.** The plugin ships with no ROM images at all; a first-run
   panel explains what is needed and where to put it.
+- **Cards are recognised by filename, not by catalogue.** A file names a card if
+  its name contains `sn-u110-NN` anywhere, separators ignored and case
+  irrelevant, with exactly two digits. A fresh instance mounts what it finds,
+  lowest number first. There is deliberately **no database of known cards**:
+  §8 of ROM-ANALYSIS puts card authoring within reach, and a user's own image
+  must work exactly like a factory dump. This is also why a hash mismatch cannot
+  refuse to load — the file having changed is a normal thing for somebody
+  iterating on their own card, and the checksum's job is to explain, not to gate.
+
+  `[x]` **Done.**
 - Config (window size, last-used directories, UI preferences) goes to
   `$XDG_CONFIG_HOME/u110/` — separate, and safe to delete.
 
