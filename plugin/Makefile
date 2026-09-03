@@ -103,6 +103,11 @@ selftest: all
 		bin/$(NAME).lv2/$(NAME)_dsp.so \
 		"https://github.com/eliggett/emu110/voltaire110" build/lv2_state.wav 0 state \
 		2>&1 | grep -E "^state:|restored"
+	@echo
+	@U110_DATA_DIR=$${U110_DATA_DIR:-$(CURDIR)/..} build/lv2_selftest \
+		bin/$(NAME).lv2/$(NAME)_dsp.so \
+		"https://github.com/eliggett/emu110/voltaire110" build/lv2_patch.wav 0 patch \
+		2>&1 | grep -E "^patch:"
 
 # Real-time safety.  The audio callback has a hard deadline and what matters is the worst
 # case, so anything that can block -- malloc, free, locks, getenv -- must not be reachable

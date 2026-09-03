@@ -1052,6 +1052,24 @@ menus:
 **Read names directly, not through the firmware.** Instant, no emulated time. Use
 the panel automaton only to *change* things.
 
+**`[x]` Done for patches.** The **PATCH** button opens the 64 names, read straight
+out of the bank the machine is playing from (`0xE000 + 128n + 4`), so a renamed
+patch shows its new name. They reach the UI as a `patches` state key, one per
+line, pushed only when they change.
+
+**Selecting one costs a single button press, not a reboot and not fifty-six
+presses.** The number the firmware increments is in work RAM at `0x274A`: set it
+to N-1, give the machine one `[INC]`, and the firmware lands on N and does the
+whole job itself — active patch buffer, routing registers, display. Writing
+`0x274A` alone changes nothing audible, since what is playing is the copy at
+`0x2800`. See `analysis/SYSTEM-DESIGN.md` §5.3, where the mechanism and the
+timings it needs are recorded.
+
+The automaton this needs is therefore small: `[INC]` means *edit a value* inside
+the menus, so it presses `[EXIT]` until the LCD's top line reads `P-NN:` or
+`TEMP:` — the play screen, which no menu page resembles — and only then pokes and
+presses. Button edges in emulated time, ticked from `run()`.
+
 **Show what is unavailable rather than hiding it.** A part selects its tone by
 **card ID, not slot** (ROM-ANALYSIS §6.7), and IDs run `I, 1…31` — which is
 exactly why 29 of 32 values legitimately display `" No Card! "` on the hardware
@@ -1181,7 +1199,9 @@ Extracted and headless should be a few percent — comfortable for many instance
    for the play screen's bars and digits and approximate for the boot logo, which is a
    ~19 fps CGRAM animation. Accepted on the owner's say-so; it lasts 370 ms.
 9. LV2 and CLAP targets; VST3 falls out.
-10. Panel automaton, direct name reads, bank files (§10.4, §10.5).
+10. **Half done.** ~~Direct name reads and the patch half of the panel automaton~~
+    (§10.4) — the PATCH menu lists all 64 by name and loads one with a single emulated
+    `[INC]`. The tone browser and the bank files (§10.5) remain.
 11. ~~Inkscape panel and the vector UI (§6).~~ **Done.** nanosvg → NanoVG, geometry from
     `panel_geometry.h`, LCD drawn as dots from the baked table plus live CGRAM, knob
     rotated in code. No coordinate is typed into the UI source.

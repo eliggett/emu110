@@ -29,6 +29,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <string>
 #include <vector>
 
 START_NAMESPACE_DISTRHO
@@ -48,6 +49,7 @@ struct PanelBlob
     uint8_t lcd[32];
     uint8_t cgram[64];
     uint8_t leds, cursor_pos, cursor_flags;
+    uint8_t patch;                  ///< 0-based, so the LCD's P-01 is 0
 };
 
 class Voltaire110UI : public UI
@@ -59,6 +61,17 @@ public:
         loadArtwork();
         std::memset(m_lcd, ' ', sizeof(m_lcd));
         std::memset(m_cgram, 0, sizeof(m_cgram));
+
+        // The panel itself carries no text -- the artwork's lettering is paths, and the
+        // LCD is dots -- so nothing needed a font until the patch menu did.  DPF ships
+        // DejaVu Sans inside the binary for exactly this.
+       #ifdef DGL_NO_SHARED_RESOURCES
+        createFontFromFile("sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+        m_font = "sans";
+       #else
+        loadSharedResources();
+        m_font = NANOVG_DEJAVU_SANS_TTF;
+       #endif
     }
 
     ~Voltaire110UI() override
@@ -86,7 +99,26 @@ protected:
     /// deciding whether a change was big enough to be worth forwarding.
     void stateChanged(const char *key, const char *value) override
     {
-        if (std::strcmp(key, "panel") != 0 || value == nullptr)
+        if (value == nullptr)
+            return;
+
+        // The patch list.  One name per line, already trimmed, in the machine's order.
+        if (std::strcmp(key, "patches") == 0)
+        {
+            m_patchNames.clear();
+            for (const char *p = value; *p != '\0'; )
+            {
+                const char *const nl = std::strchr(p, '\n');
+                m_patchNames.emplace_back(p, nl != nullptr ? size_t(nl - p) : std::strlen(p));
+                if (nl == nullptr)
+                    break;
+                p = nl + 1;
+            }
+            m_dirty = true;
+            return;
+        }
+
+        if (std::strcmp(key, "panel") != 0)
             return;
         PanelBlob blob;
         if (!decodeHex(value, reinterpret_cast<uint8_t *>(&blob), sizeof(blob)))
@@ -97,6 +129,7 @@ protected:
         m_leds = blob.leds;
         m_cursorPos = blob.cursor_pos;
         m_cursorFlags = blob.cursor_flags;
+        m_patch = blob.patch;
         m_dirty = true;
     }
 
@@ -163,6 +196,10 @@ protected:
 
         restore();
 
+        // Outside the panel transform on purpose: the menu is in window pixels.
+        if (m_menuOpen)
+            drawMenu();
+
         if (m_countFrames)
         {
             struct timespec t1;
@@ -189,6 +226,25 @@ protected:
 
     bool onMouse(const MouseEvent &ev) override
     {
+        // The menu is modal while it is up: it takes the click wherever it lands, so a
+        // click meant to dismiss it cannot also press whatever is underneath.
+        if (m_menuOpen)
+        {
+            if (!ev.press)
+                return true;
+            const int hit = menuHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            m_menuOpen = false;
+            m_menuHover = -1;
+            if (hit >= 0 && size_t(hit) < m_patchNames.size())
+            {
+                char n[8];
+                std::snprintf(n, sizeof(n), "%d", hit);
+                setState("patchsel", n);
+            }
+            repaint();
+            return true;
+        }
+
         const float s = panelScale();
         const float x = (ev.pos.getX() - (getWidth() - voltaire::panel::kDesignWidth * s) * 0.5f) / s;
         const float y = (ev.pos.getY() - (getHeight() - voltaire::panel::kDesignHeight * s) * 0.5f) / s;
@@ -215,6 +271,16 @@ protected:
                     {
                         m_hf = !m_hf;
                         setParam(kParamHfCorrection, m_hf ? 1.0f : 0.0f);
+                        repaint();
+                        return true;
+                    }
+                    if (i == voltaire::panel::BUT_PATCH_MENU)
+                    {
+                        // Not a toggle: a click while the menu is up never reaches here,
+                        // because the menu takes it first and closes on anything that is
+                        // not one of its entries -- this button included.
+                        m_menuOpen = true;
+                        m_menuHover = -1;
                         repaint();
                         return true;
                     }
@@ -246,6 +312,13 @@ protected:
 
     bool onMotion(const MotionEvent &ev) override
     {
+        if (m_menuOpen)
+        {
+            const int hit = menuHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            if (hit != m_menuHover)
+            { m_menuHover = hit; repaint(); }
+            return true;
+        }
         if (!m_dragKnob)
             return false;
         const float dy = float(m_dragY - ev.pos.getY());
@@ -257,6 +330,8 @@ protected:
 
     bool onScroll(const ScrollEvent &ev) override
     {
+        if (m_menuOpen)
+            return true;
         const auto &k = voltaire::panel::kVolumeKnob;
         const float s = panelScale();
         const float x = (ev.pos.getX() - (getWidth() - voltaire::panel::kDesignWidth * s) * 0.5f) / s;
@@ -269,7 +344,126 @@ protected:
         return true;
     }
 
+    bool onKeyboard(const KeyboardEvent &ev) override
+    {
+        if (!m_menuOpen || !ev.press || ev.key != kKeyEscape)
+            return false;
+        m_menuOpen = false;
+        m_menuHover = -1;
+        repaint();
+        return true;
+    }
+
 private:
+    // ---- the PATCH menu -------------------------------------------------------------
+    //
+    // Sixty-four patches, and the machine's own way to reach one is [INC] pressed as many
+    // times as it takes.  This is that list: four columns of sixteen, the current patch
+    // marked, one click to load.  The DSP does the loading -- see the note above
+    // tickPatchSelect() in the plugin -- and the LCD comes back with the new name, so
+    // nothing here has to guess whether the click took.
+    //
+    // Drawn in WINDOW PIXELS rather than the artwork's design units, which is the one
+    // place in this file that is true.  The panel is 779 x 213 units of artwork and a
+    // sixteen-row list does not fit above the button that opens it at any useful size;
+    // the menu is not part of the instrument, so it is sized to the window and centred
+    // over it, and stays legible when the panel is small.
+
+    static constexpr int kMenuCols = 4;
+    static constexpr int kMenuRows = 16;
+
+    struct MenuLayout { float x, y, w, h, rowH, colW, headerH, fontSize; };
+
+    MenuLayout menuLayout() const
+    {
+        MenuLayout m;
+        m.rowH = (float(getHeight()) - 12.0f) / float(kMenuRows + 2);
+        m.rowH = m.rowH < 9.0f ? 9.0f : (m.rowH > 26.0f ? 26.0f : m.rowH);
+        m.fontSize = m.rowH * 0.68f;
+        m.colW = m.fontSize * 9.0f;
+        m.headerH = m.rowH * 1.6f;
+        m.w = kMenuCols * m.colW + m.rowH;               // half a row of margin each side
+        m.h = m.headerH + kMenuRows * m.rowH + m.rowH * 0.5f;
+        m.x = std::floor((float(getWidth()) - m.w) * 0.5f);
+        m.y = std::floor((float(getHeight()) - m.h) * 0.5f);
+        return m;
+    }
+
+    /// Which entry is under the pointer, or -1 for none -- including everywhere outside
+    /// the menu, which is how a click lands on "close and choose nothing".
+    int menuHit(float px, float py) const
+    {
+        const MenuLayout m = menuLayout();
+        const float gx = px - (m.x + m.rowH * 0.5f);
+        const float gy = py - (m.y + m.headerH);
+        if (gx < 0.0f || gy < 0.0f)
+            return -1;
+        const int col = int(gx / m.colW), row = int(gy / m.rowH);
+        if (col >= kMenuCols || row >= kMenuRows)
+            return -1;
+        return col * kMenuRows + row;
+    }
+
+    void drawMenu()
+    {
+        const MenuLayout m = menuLayout();
+
+        // The panel behind is dimmed, so the list reads as being in front of the
+        // instrument rather than painted onto it.
+        beginPath();
+        rect(0, 0, getWidth(), getHeight());
+        fillColor(Color(0, 0, 0, 0.55f));
+        fill();
+
+        beginPath();
+        roundedRect(m.x, m.y, m.w, m.h, m.rowH * 0.35f);
+        fillColor(Color(26, 28, 32));
+        fill();
+        strokeColor(Color(96, 102, 112));
+        strokeWidth(1.0f);
+        stroke();
+
+        fontFace(m_font);
+        fontSize(m.fontSize * 1.05f);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        fillColor(Color(235, 235, 235));
+        text(m.x + m.rowH * 0.5f, m.y + m.headerH * 0.5f, "PATCH", nullptr);
+
+        fontSize(m.fontSize * 0.8f);
+        textAlign(ALIGN_RIGHT | ALIGN_MIDDLE);
+        fillColor(Color(150, 155, 165));
+        // The machine's own 64.  A bank of the user's own is the other half of this menu
+        // and is not written yet; saying which list this is now means the second one can
+        // arrive without the first changing meaning.
+        text(m.x + m.w - m.rowH * 0.5f, m.y + m.headerH * 0.5f,
+             m_patchNames.empty() ? "waiting for the machine" : "internal patches", nullptr);
+
+        if (m_patchNames.empty())
+            return;
+
+        fontSize(m.fontSize);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        char label[48];
+        for (int i = 0; i < kMenuCols * kMenuRows && size_t(i) < m_patchNames.size(); i ++)
+        {
+            const float x = m.x + m.rowH * 0.5f + float(i / kMenuRows) * m.colW;
+            const float y = m.y + m.headerH + float(i % kMenuRows) * m.rowH;
+            const bool current = i == int(m_patch);
+
+            if (current || i == m_menuHover)
+            {
+                beginPath();
+                roundedRect(x, y + 1.0f, m.colW - 2.0f, m.rowH - 2.0f, 2.0f);
+                // The patch the machine is on gets the LCD's green; the pointer is grey.
+                fillColor(current ? Color(40, 96, 46) : Color(56, 60, 68));
+                fill();
+            }
+            std::snprintf(label, sizeof(label), "%02d %s", i + 1, m_patchNames[size_t(i)].c_str());
+            fillColor(current ? Color(190, 255, 190) : Color(214, 216, 220));
+            text(x + m.fontSize * 0.4f, y + m.rowH * 0.5f, label, nullptr);
+        }
+    }
+
     float panelScale() const
     {
         const float sx = float(getWidth()) / voltaire::panel::kDesignWidth;
@@ -501,7 +695,16 @@ private:
 
     void drawButtonFeedback()
     {
-        // A latching button shows its state, not a momentary press.
+        // A latching button shows its state, not a momentary press.  So does the PATCH
+        // button while its menu is up.
+        if (m_menuOpen)
+        {
+            const auto &b = voltaire::panel::kButton[voltaire::panel::BUT_PATCH_MENU];
+            beginPath();
+            roundedRect(b.x, b.y, b.w, b.h, b.h * 0.15f);
+            fillColor(Color(255, 255, 255, 0.22f));
+            fill();
+        }
         if (m_hf)
         {
             const auto &f = voltaire::panel::kButton[voltaire::panel::BUT_FILTER];
@@ -527,6 +730,12 @@ private:
     uint8_t m_cgram[64];
     uint32_t m_cgramIn = 0;
     uint8_t m_leds = 0, m_cursorPos = 0, m_cursorFlags = 0;
+
+    uint8_t m_patch = 0;
+    std::vector<std::string> m_patchNames;
+    bool m_menuOpen = false;
+    int m_menuHover = -1;
+    const char *m_font = "sans";
 
     float m_volume = 0.0f;
     bool m_hf = true;

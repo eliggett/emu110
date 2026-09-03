@@ -17,6 +17,7 @@
 #include "Sha256.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -188,6 +189,24 @@ std::vector<CardFile> scanForCards()
     return out;
 }
 
+/// Where the firmware keeps its patches.  ROM-ANALYSIS.md sections 2.1 and 4.
+///
+/// 0xE000 is bank switched on CPU P2.7: normally the battery-backed user patch SRAM, and
+/// the EPROM's factory set only while the firmware is initialising memory from it.  The
+/// layout is identical in both -- 64 records of 128 bytes, with a 10-byte ASCII name at
+/// +4 -- so reading the live bank gives the names the machine will actually show: the
+/// factory list on a machine nobody has edited, and the user's own names once there are
+/// some.
+constexpr uint16_t kPatchBase       = 0xE000;
+constexpr uint16_t kPatchStride     = 128;
+constexpr uint16_t kPatchNameOffset = 4;
+constexpr unsigned kPatchNameLen    = 10;
+constexpr unsigned kNumPatches      = 64;
+
+/// Work RAM, battery backed: the patch the machine is on, counting from zero -- the
+/// display adds one, so a 0 here reads as P-01 on the LCD.
+constexpr uint16_t kCurrentPatchAddr = 0x274A;
+
 /// What the plugin keeps.  Only the NVRAM is saved into a session; the panel is live
 /// display pushed to the UI.
 enum States
@@ -195,6 +214,8 @@ enum States
     kStatePanel = 0,
     kStateNvram,
     kStateSettings,
+    kStatePatches,
+    kStatePatchSel,
     kStateCount
 };
 
@@ -338,7 +359,7 @@ protected:
                 if (down != m_buttons[b])
                 {
                     m_buttons[b] = down;
-                    m_core.setButton(voltaire::Button(b), down);
+                    applyButton(voltaire::Button(b));
                 }
             }
             break;
@@ -390,6 +411,25 @@ protected:
             state.hints = kStateIsHostReadable;
             state.defaultValue = "";
             break;
+
+        case kStatePatches:
+            state.key = "patches";
+            state.label = "Patch names";
+            // The 64 names as the machine has them, for the UI's PATCH menu.  Not saved
+            // into a session: they are already inside the memory that is.
+            state.hints = kStateIsOnlyForUI;
+            state.defaultValue = "";
+            break;
+
+        case kStatePatchSel:
+            state.key = "patchsel";
+            state.label = "Select patch";
+            // The other direction -- the UI asking for a patch by number.  Nothing to
+            // save and nothing to show: which patch is current is the machine's own
+            // business, and it comes back with the panel.
+            state.hints = kStateIsOnlyForDSP;
+            state.defaultValue = "";
+            break;
         }
     }
 
@@ -398,6 +438,8 @@ protected:
     {
         if (std::strcmp(key, "settings") == 0)
             return getSettingsState();
+        if (std::strcmp(key, "patches") == 0)
+            return String(m_patchesText);
         if (std::strcmp(key, "nvram") != 0)
             return String();
 
@@ -423,6 +465,25 @@ protected:
     {
         if (value == nullptr)
             return;
+
+        if (std::strcmp(key, "patchsel") == 0)
+        {
+            // This arrives on the LV2 worker thread, and on the UI's own thread
+            // everywhere else -- never on the audio thread.  So all that happens here is
+            // that a number is left for run() to pick up: the presses that actually
+            // select the patch have to be made in EMULATED time, which only run() has.
+            //
+            // A restored session hands back every key the host stored, and DPF stores
+            // this one too even though there is nothing in it: without the digit test an
+            // empty value would read as atoi("") == 0 and quietly select P-01 every time
+            // a project was reopened.
+            if (value[0] < '0' || value[0] > '9')
+                return;
+            const int n = std::atoi(value);
+            if (n >= 0 && unsigned(n) < kNumPatches)
+                m_patchRequest.store(n, std::memory_order_relaxed);
+            return;
+        }
 
         if (std::strcmp(key, "settings") == 0)
         {
@@ -503,6 +564,10 @@ protected:
         // Both channels are in lockstep by construction, so either may be asked.
         const uint32_t coreFrames = m_resampler[0].inputsFor(frames);
 
+        // Before the render, so a button edge lands at the start of the block it belongs
+        // to rather than at the start of the next one.
+        tickPatchSelect(coreFrames);
+
         // MIDI first, timestamped into the core block about to be rendered.  The host's
         // offsets are in HOST frames; the core counts in its own 32 kHz frames.
         for (uint32_t i = 0; i < midiEventCount; i ++)
@@ -566,6 +631,7 @@ private:
         uint8_t lcd[32];
         uint8_t cgram[64];
         uint8_t leds, cursor_pos, cursor_flags;
+        uint8_t patch;              ///< 0-based, so the LCD's P-01 is 0
     };
 
     static void encodeHex(const uint8_t *src, size_t n, char *dst)
@@ -625,6 +691,7 @@ private:
             blob.leds = uint8_t(uint32_t(st.leds) | (m_clipHold ? 0x08u : 0x00u));
             blob.cursor_pos = st.cursor_pos;
             blob.cursor_flags = st.cursor_flags;
+            blob.patch = m_core.readMem(kCurrentPatchAddr);
             if (std::memcmp(&blob, &m_lastBlob, sizeof(blob)) != 0)
             {
                 m_lastBlob = blob;
@@ -642,6 +709,171 @@ private:
             }
         }
 
+        refreshPatchNames();
+    }
+
+    /// The 64 patch names, as the machine has them, for the UI's menu.
+    ///
+    /// Pushed only when they change, like the panel blob, and that is what keeps the list
+    /// honest without anyone having to ask for it: it goes out as dots while the machine
+    /// is still booting, as the factory names a second later, and again if a restored
+    /// session brings back a bank whose patches have been renamed.
+    void refreshPatchNames()
+    {
+        char text[kNumPatches * (kPatchNameLen + 1) + 1];
+        size_t at = 0;
+        for (unsigned p = 0; p < kNumPatches; p ++)
+        {
+            const size_t start = at;
+            for (unsigned i = 0; i < kPatchNameLen; i ++)
+            {
+                const uint8_t c = m_core.readMem(
+                        uint16_t(kPatchBase + p * kPatchStride + kPatchNameOffset + i));
+                // Patch memory is RAM and holds whatever it holds -- zeros, until the
+                // firmware has copied the factory set into it.  A name is only ever
+                // shown, never interpreted, so anything unprintable becomes a dot rather
+                // than something that could break the encoding below.
+                text[at ++] = (c >= 0x20 && c < 0x7f) ? char(c) : '.';
+            }
+            while (at > start && text[at - 1] == ' ')
+                at --;                       // the names are padded out to ten
+            text[at ++] = '\n';
+        }
+        text[at] = '\0';
+
+        if (std::memcmp(text, m_patchesText, at + 1) == 0)
+            return;
+        std::memcpy(m_patchesText, text, at + 1);
+        updateStateValue("patches", m_patchesText);
+    }
+
+    // ---- picking a patch by name ----------------------------------------------------
+    //
+    // The machine has no "go to patch N".  Patches are front-panel only -- a MIDI program
+    // change selects a PART'S TONE, not a patch (SYSTEM-DESIGN.md section 5.3) -- so
+    // reaching P-57 by hand is 56 presses of [INC], which is the thing the menu exists to
+    // stop.
+    //
+    // What makes ONE press enough is that the number the firmware increments lives in
+    // work RAM at 0x274A.  Set it to N-1, give the machine a single [INC], and it lands
+    // on N and does the whole job itself: copies the record into the active patch buffer
+    // at 0x2800, reloads the eight output-routing registers, redraws the display -- all
+    // exactly as it would for a press somebody made.
+    //
+    // WRITING 0x274A ON ITS OWN CHANGES NOTHING.  What is playing is the copy at 0x2800,
+    // and only the firmware's own patch-load routine puts one there; the number by itself
+    // is just a number.  Rebooting would apply it -- that is what a restored session does
+    // -- but a reboot is a gap in the sound and throws away everything else in RAM.  One
+    // button press costs a fifth of a second and keeps the machine running.
+    //
+    // [INC] means something else in the menus, so nothing is pressed until the play
+    // screen is up: a machine showing a menu page is walked out of with [EXIT] first, one
+    // press at a time, checking after each.  All of it is button edges in EMULATED time,
+    // so this is a small state machine ticked from run() rather than anything that waits.
+
+    /// A press has to be held long enough for the firmware's debouncer at 0x4118 to see
+    /// it, and let go of long enough not to be taken for auto-repeat.  Measured on the
+    /// emulation: 20 ms already registers, and 1.2 s held runs the patch number away by
+    /// five.  This sits well inside both.
+    static constexpr uint32_t kPressFrames = voltaire::kCoreSampleRate *  60 / 1000;
+    static constexpr uint32_t kGapFrames   = voltaire::kCoreSampleRate * 180 / 1000;
+
+    /// Three [EXIT] presses reach the play screen from the deepest page in the firmware.
+    static constexpr unsigned kMaxExits = 6;
+
+    enum class PatchStep { Idle, Decide, HoldExit, HoldInc };
+
+    void tickPatchSelect(uint32_t coreFrames)
+    {
+        if (m_patchStep == PatchStep::Idle)
+        {
+            const int want = m_patchRequest.exchange(-1, std::memory_order_relaxed);
+            if (want < 0 || !m_romsLoaded)
+                return;
+            m_patchTarget = unsigned(want);
+            m_patchExits = 0;
+            m_patchStep = PatchStep::Decide;
+            m_patchWait = 0;
+        }
+
+        if (m_patchWait > coreFrames)
+        {
+            m_patchWait -= coreFrames;
+            return;
+        }
+        m_patchWait = 0;
+
+        switch (m_patchStep)
+        {
+        case PatchStep::Decide:
+            if (onPlayScreen())
+            {
+                // N-1, wrapping, so that the one press the firmware sees lands on N.
+                m_core.writeMem(kCurrentPatchAddr,
+                        uint8_t((m_patchTarget + kNumPatches - 1) % kNumPatches));
+                autoButton(voltaire::kButtonIncEnter, true);
+                m_patchStep = PatchStep::HoldInc;
+                m_patchWait = kPressFrames;
+            }
+            else if (m_patchExits ++ < kMaxExits)
+            {
+                autoButton(voltaire::kButtonEditExit, true);
+                m_patchStep = PatchStep::HoldExit;
+                m_patchWait = kPressFrames;
+            }
+            else
+            {
+                d_stderr2("Voltaire 110: could not get back to the play screen, so P-%02u "
+                          "was not selected. Press EXIT until the patch name shows and "
+                          "try again.", m_patchTarget + 1);
+                m_patchStep = PatchStep::Idle;
+            }
+            break;
+
+        case PatchStep::HoldExit:
+            autoButton(voltaire::kButtonEditExit, false);
+            m_patchStep = PatchStep::Decide;
+            m_patchWait = kGapFrames;
+            break;
+
+        case PatchStep::HoldInc:
+            autoButton(voltaire::kButtonIncEnter, false);
+            m_patchStep = PatchStep::Idle;
+            break;
+
+        case PatchStep::Idle:
+            break;
+        }
+    }
+
+    /// Is the machine showing the patch it is playing, rather than a menu?
+    ///
+    /// "P-01:Ac.Piano" normally, and "TEMP:" once a program change has replaced a part's
+    /// tone and made the patch a temporary edit.  No menu page starts with either -- they
+    /// read "Select Mode", "PATCH", "PATCH:COM", "PATCH:WRT" and so on -- so this cannot
+    /// be talked into pressing [INC] on a page where it would edit a value instead.
+    bool onPlayScreen() const
+    {
+        voltaire::PanelState st;
+        m_core.snapshot(st);
+        const uint8_t *const t = st.lcd;
+        if (std::memcmp(t, "TEMP:", 5) == 0)
+            return true;
+        return t[0] == 'P' && t[1] == '-' && t[4] == ':'
+                && t[2] >= '0' && t[2] <= '9' && t[3] >= '0' && t[3] <= '9';
+    }
+
+    /// The menu's own presses, kept apart from the user's.  A switch is down if either
+    /// says so, so a press made from the menu cannot cancel one being made by hand.
+    void autoButton(voltaire::Button b, bool down)
+    {
+        m_autoButtons[b] = down;
+        applyButton(b);
+    }
+
+    void applyButton(voltaire::Button b)
+    {
+        m_core.setButton(b, m_buttons[b] || m_autoButtons[b]);
     }
 
     /// Print the LCD when it changes, if asked.
@@ -958,12 +1190,19 @@ private:
     bool m_hfCorrection = true;
     bool m_romsLoaded = false;
     bool m_buttons[voltaire::kButtonCount] = { false };
+    bool m_autoButtons[voltaire::kButtonCount] = { false };
     unsigned m_lcdAccum = 0;
     char m_lastLcd[40] = { 0 };
     uint32_t m_clipHold = 0;
     MountedCard m_cards[voltaire::kNumCardSlots];
     std::vector<uint8_t> m_savedNvram;
     std::string m_pgmSha, m_pgmName, m_pgmFound;
+
+    char m_patchesText[kNumPatches * (kPatchNameLen + 1) + 1] = { 0 };
+    std::atomic<int> m_patchRequest { -1 };
+    PatchStep m_patchStep = PatchStep::Idle;
+    uint32_t m_patchWait = 0;
+    unsigned m_patchTarget = 0, m_patchExits = 0;
 
     PanelBlob m_lastBlob = {};
     char m_blobHex[sizeof(PanelBlob) * 2 + 1] = { 0 };

@@ -543,7 +543,28 @@ Three facts an automated run has to respect:
   address one absolutely.
 - Start from a scratch NVRAM directory (`-nvram_directory`) to get a deterministic P-01.
 
-`tools/select_patch.lua` does this (`U110_PATCH=4 mame u110 -nvram_directory /tmp/nv
+`[C]` **But one press is enough if you write the number first.** The count above is only
+needed if `0x274A` is left alone. Set it to N-1 and give the machine a *single* `[INC]`,
+and the firmware lands on N and does the whole job itself — copies the record into the
+active patch buffer at `0x2800`, reloads the eight routing registers at `0x1F00`, redraws
+the display — exactly as it would for a press somebody made. Writing `0x274A` on its own
+changes **nothing** audible: what is playing is the copy at `0x2800`, and only the
+firmware's patch-load routine puts one there.
+
+Three things measured on the emulation while building the plugin's patch menu around this:
+
+- **The debouncer is finer than 150 ms.** A press held for **20 ms** of emulated time
+  already registers. Held for 1.2 s it auto-repeats, advancing the patch number by five.
+  60 ms held and 180 ms released sits inside both.
+- **`[EXIT]` walks one level up per press**, and from the play screen it walks *in*, to
+  `Select Mode`. Three presses reach the play screen from the deepest page there is.
+- **The play screen is identifiable from the LCD alone.** Its top line reads `P-NN:` — or
+  `TEMP:` once a program change has replaced a part's tone — and no menu page starts with
+  either (`Select Mode`, `PATCH`, `PATCH:COM`, `PATCH:WRT`). That matters because `[INC]`
+  edits a value inside the menus, so anything pressing it programmatically needs to know
+  where it is first.
+
+`tools/select_patch.lua` presses `[INC]` the required number of times (`U110_PATCH=4 mame u110 -nvram_directory /tmp/nv
 -autoboot_script tools/select_patch.lua`). Two MAME Lua traps it documents: the handle from
 `add_machine_frame_notifier` **must be kept alive** or the callback is silently unsubscribed
 with no error, and the key state must be **re-asserted every frame** — releasing once and

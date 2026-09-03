@@ -46,6 +46,101 @@ static const struct { int len; unsigned char b[16]; } kFxSetup[] = {
     { 11, { 0xf0, 0x41, 0x0f, 0x23, 0x12, 0x00, 0x01, 0x18, 0x14, 0x53, 0xf7 } },  /* output mode 21 */
 };
 
+/* The panel, as the UI receives it: the plugin's PanelBlob, hex, inside a key/value
+ * atom.  Decoding it here rather than scanning for a run of hex characters means the
+ * test breaks LOUDLY if the struct grows, instead of quietly reading the wrong field. */
+#define PANEL_BYTES 100
+static unsigned char g_panel[PANEL_BYTES];
+static char g_patches[8192];              /* the patch names, one per line */
+
+static int hexbyte(const char *p)
+{
+    int v = 0, i;
+    for (i = 0; i < 2; i++) {
+        const char c = p[i];
+        if (c >= '0' && c <= '9') v = (v << 4) | (c - '0');
+        else if (c >= 'a' && c <= 'f') v = (v << 4) | (c - 'a' + 10);
+        else return -1;
+    }
+    return v;
+}
+
+/* The two-line display as text, for saying what the machine is actually showing. */
+static void panel_lcd(char *out)
+{
+    int i;
+    for (i = 0; i < 32; i++) {
+        const unsigned char c = g_panel[i];
+        out[i] = (c >= 0x20 && c < 0x7f) ? (char)c : '.';
+    }
+    out[32] = 0;
+}
+
+/* Put a DPF key/value message on the input sequence -- this is exactly what the plugin's
+ * own UI sends when someone picks a patch from the menu. */
+static void put_keyvalue(LV2_Atom_Sequence *seq, uint32_t urid_kv,
+                         const char *key, const char *val)
+{
+    const uint32_t klen = (uint32_t)strlen(key) + 1;
+    const uint32_t vlen = (uint32_t)strlen(val) + 1;
+    LV2_Atom_Event *e = (LV2_Atom_Event *)((char *)LV2_ATOM_CONTENTS(LV2_Atom_Sequence, seq));
+    e->time.frames = 0;
+    e->body.type = urid_kv;
+    e->body.size = klen + vlen;
+    memcpy(LV2_ATOM_BODY(&e->body), key, klen);
+    memcpy((char *)LV2_ATOM_BODY(&e->body) + klen, val, vlen);
+    seq->atom.size += (uint32_t)lv2_atom_pad_size(sizeof(LV2_Atom_Event) + klen + vlen);
+}
+
+/* Read whatever the plugin put on its events-out port: MIDI for the host, key/value
+ * messages for the UI.  Every one of those is "key\0value\0", so read it as one rather
+ * than hunting through the payload for something that looks right. */
+static void absorb_events_out(void *ev_out, uint32_t urid_midi,
+                              long *n_state, long *n_midi)
+{
+    LV2_Atom_Sequence *os = (LV2_Atom_Sequence *)ev_out;
+    LV2_ATOM_SEQUENCE_FOREACH(os, e)
+    {
+        const char *key, *val;
+        if (e->body.type == urid_midi) { if (n_midi) (*n_midi)++; continue; }
+        if (n_state) (*n_state)++;
+        key = (const char *)LV2_ATOM_BODY_CONST(&e->body);
+        val = key + strlen(key) + 1;
+        if (strcmp(key, "panel") == 0 && strlen(val) == PANEL_BYTES * 2) {
+            int i;
+            for (i = 0; i < PANEL_BYTES; i++) {
+                const int v = hexbyte(val + i * 2);
+                if (v < 0) break;
+                g_panel[i] = (unsigned char)v;
+            }
+        }
+        else if (strcmp(key, "patches") == 0 && strlen(val) < sizeof(g_patches))
+            strcpy(g_patches, val);
+    }
+}
+
+/* Run an instance on its own for a while, with empty input, and keep whatever it sends
+ * to the UI.  Used after a restore, to see what the machine came up showing. */
+static void run_quietly(const LV2_Descriptor *d, LV2_Handle h, void *ev_in, void *ev_out,
+                        uint32_t urid_seq, uint32_t urid_midi, double seconds)
+{
+    long b;
+    memset(g_panel, 0, sizeof(g_panel));
+    for (b = 0; b < (long)(seconds * RATE) / BLOCK; b++)
+    {
+        LV2_Atom_Sequence *is = (LV2_Atom_Sequence *)ev_in;
+        LV2_Atom_Sequence *os = (LV2_Atom_Sequence *)ev_out;
+        is->atom.type = urid_seq;
+        is->atom.size = sizeof(LV2_Atom_Sequence_Body);
+        is->body.unit = 0;
+        is->body.pad  = 0;
+        os->atom.type = urid_seq;
+        os->atom.size = ATOM_CAP - sizeof(LV2_Atom);
+        d->run(h, BLOCK);
+        absorb_events_out(ev_out, urid_midi, NULL, NULL);
+    }
+}
+
 /* A pending worker job, run between blocks the way a host would. */
 static unsigned char g_work[8192];
 static uint32_t g_work_size = 0;
@@ -258,6 +353,8 @@ int main(int argc, char **argv)
     const int want_fx = (argc > 5) && strcmp(argv[5], "fx") == 0;
     const int want_stream = (argc > 5) && strcmp(argv[5], "stream") == 0;
     const int want_state_test = (argc > 5) && strcmp(argv[5], "state") == 0;
+    const int want_patch_test = (argc > 5) && strcmp(argv[5], "patch") == 0;
+    int patch_checks = 0, patch_pass = 0;
 
 
     d->connect_port(h, 0, outL);
@@ -274,6 +371,8 @@ int main(int argc, char **argv)
     const uint32_t urid_seq   = map_uri(NULL, LV2_ATOM__Sequence);
     const uint32_t urid_frame = map_uri(NULL, LV2_ATOM__frameTime);
     const uint32_t urid_midi  = map_uri(NULL, LV2_MIDI__MidiEvent);
+    /* What DPF calls a key/value message, in both directions. */
+    const uint32_t urid_kv    = map_uri(NULL, "urn:distrho:KeyValueState");
 
     const long total = (long)(SECONDS * RATE);
     short *pcm = malloc(sizeof(short) * 2 * total);
@@ -284,7 +383,7 @@ int main(int argc, char **argv)
     long slow_total = 0, slow_midi_lit = 0;
     double next_slow = 0.0;
     unsigned last_midi = 0; long midi_edges = 0;
-    long state_atoms = 0, midi_out_atoms = 0; unsigned blob_leds = 0;
+    long state_atoms = 0, midi_out_atoms = 0;
 
     for (long done = 0; done < total; done += BLOCK)
     {
@@ -303,7 +402,7 @@ int main(int argc, char **argv)
         /* Press EDIT/EXIT at 7 s and release at 8 s: the buttons are what drive the
          * machine's own menus, and this proves the whole loop from a host control port
          * through to the LCD. */
-        btn[1] = (!want_fx && done >= (long)(7.0 * RATE)
+        btn[1] = (!want_fx && !want_patch_test && done >= (long)(7.0 * RATE)
                   && done < (long)(8.0 * RATE)) ? 1.0f : 0.0f;
 
         if (want_fx) {
@@ -341,6 +440,55 @@ int main(int argc, char **argv)
             seq->atom.size += (uint32_t)lv2_atom_pad_size(sizeof(LV2_Atom_Event) + 3);
         }
 
+        /* Choosing patches the way the UI does: a key/value message on the input port,
+         * and then nothing but time.  The plugin has to reach the patch by pressing the
+         * machine's own buttons in emulated time, so the check is deliberately made a
+         * second and a half later rather than on the next block. */
+        /* A session where the user chose a patch, which is the interesting kind.  P-43
+         * is far from the power-on P-01, so "it came back on the right one" cannot be
+         * satisfied by the machine simply booting. */
+        if (want_state_test)
+        {
+            const double t = (double)done / RATE, dt = (double)BLOCK / RATE;
+            if (t <= 9.0 && 9.0 < t + dt)
+                put_keyvalue(seq, urid_kv, "patchsel", "42");
+        }
+
+        if (want_patch_test)
+        {
+            const double t = (double)done / RATE;
+            const double dt = (double)BLOCK / RATE;
+            char lcd[33];
+            panel_lcd(lcd);
+
+            /* EDIT/EXIT pressed at 12 s puts the machine in its menus, which is the case
+             * that matters: [INC] edits a value there, so the plugin must walk back out
+             * to the play screen before it presses anything. */
+            btn[1] = (t >= 12.0 && t < 12.6) ? 1.0f : 0.0f;
+
+            if (t <= 9.0 && 9.0 < t + dt)
+                put_keyvalue(seq, urid_kv, "patchsel", "42");      /* P-43 Brass */
+            else if (t <= 11.0 && 11.0 < t + dt) {
+                patch_checks++;
+                patch_pass += (g_panel[99] == 42 && strncmp(lcd, "P-43:Brass", 10) == 0);
+                printf("patch: from the play screen -> [%.16s] patch byte %u\n",
+                       lcd, g_panel[99]);
+            }
+            else if (t <= 13.0 && 13.0 < t + dt) {
+                printf("patch: after EDIT/EXIT the machine shows [%.16s]\n", lcd);
+                patch_checks++;
+                patch_pass += (strncmp(lcd, "P-", 2) != 0);        /* i.e. in a menu */
+            }
+            else if (t <= 13.5 && 13.5 < t + dt)
+                put_keyvalue(seq, urid_kv, "patchsel", "0");       /* P-01 Ac.Piano */
+            else if (t <= 16.0 && 16.0 < t + dt) {
+                patch_checks++;
+                patch_pass += (g_panel[99] == 0 && strncmp(lcd, "P-01:Ac.Piano", 13) == 0);
+                printf("patch: from a menu page  -> [%.16s] patch byte %u\n",
+                       lcd, g_panel[99]);
+            }
+        }
+
         LV2_Atom_Sequence *oseq = (LV2_Atom_Sequence *)ev_out;
         oseq->atom.type = urid_seq;
         oseq->atom.size = ATOM_CAP - sizeof(LV2_Atom);
@@ -352,36 +500,7 @@ int main(int argc, char **argv)
         d->run(h, BLOCK);
         rt_arm(0);
 
-        /* Count what the plugin put on its events-out port.  MIDI goes to the host; the
-         * state blobs are what the UI would receive. */
-        {
-            LV2_Atom_Sequence *os = (LV2_Atom_Sequence *)ev_out;
-            LV2_ATOM_SEQUENCE_FOREACH(os, e)
-            {
-                if (e->body.type == urid_midi) { midi_out_atoms++; continue; }
-                state_atoms++;
-                /* The panel blob is hex inside the atom; find it and take the lamps,
-                 * which is the last field of the struct the plugin sends. */
-                {
-                    const char *p = (const char *)LV2_ATOM_BODY_CONST(&e->body);
-                    const uint32_t n = e->body.size;
-                    for (uint32_t k = 0; k + 198 <= n; k++) {
-                        int ok = 1;
-                        for (uint32_t j = 0; j < 198 && ok; j++) {
-                            const char c = p[k + j];
-                            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) ok = 0;
-                        }
-                        if (!ok) continue;
-                        /* byte 96 of the struct is `leds` -> hex chars 192..193 */
-                        const char hi = p[k + 192], lo = p[k + 193];
-                        const int v = ((hi <= '9' ? hi - '0' : hi - 'a' + 10) << 4)
-                                    | (lo <= '9' ? lo - '0' : lo - 'a' + 10);
-                        blob_leds = (unsigned)v & 0x0f;
-                        break;
-                    }
-                }
-            }
-        }
+        absorb_events_out(ev_out, urid_midi, &state_atoms, &midi_out_atoms);
 
         /* Run any scheduled work here -- off the audio thread, as a host would. */
         if (g_work_size != 0)
@@ -394,7 +513,7 @@ int main(int argc, char **argv)
         }
         {   /* Lamp bits, and how much of the run each was lit -- "ever seen" cannot show
              * a polarity mistake, and every lamp on this machine is active low. */
-            const unsigned l = blob_leds;
+            const unsigned l = g_panel[96] & 0x0f;      /* struct field `leds` */
             seen_leds |= l;
             blocks_total++;
             for (int b = 0; b < 4; b++) if (l & (1u << b)) lit_blocks[b]++;
@@ -546,6 +665,19 @@ int main(int argc, char **argv)
                         printf("state:   wanted:\n%s\nstate:   got:\n%s\n",
                                settings_before, slot->val);
                 }
+                /* And the patch the session was left on.  This is the check that
+                 * catches an empty "patchsel": the host stores that key like any other,
+                 * hands the empty value straight back on restore, and atoi("") is a
+                 * perfectly good zero -- which would silently reopen every project on
+                 * P-01 no matter what was saved. */
+                {
+                    char lcd[33];
+                    run_quietly(d, h2, ev_in, ev_out, urid_seq, urid_midi, 0.5);
+                    panel_lcd(lcd);
+                    printf("state: the restored session came up on [%.16s]%s\n", lcd,
+                           strncmp(lcd, "P-43:Brass", 10) == 0
+                                   ? "" : "   <-- NOT THE SAVED PATCH");
+                }
                 d->cleanup(h2);
             }
 
@@ -642,6 +774,30 @@ int main(int argc, char **argv)
              100.0 * (double)slow_midi_lit / (double)(slow_total ? slow_total : 1), slow_total); }
     printf("events-out: %ld state blobs to the UI, %ld MIDI atoms to the host\n",
            state_atoms, midi_out_atoms);
+
+    if (want_patch_test)
+    {
+        /* The list itself: 64 names, in the machine's order, as the menu shows them. */
+        int lines = 0;
+        const char *p = g_patches, *first = g_patches, *last = g_patches;
+        size_t firstn = 0, lastn = 0;
+        while (*p) {
+            const char *nl = strchr(p, '\n');
+            const size_t n = nl ? (size_t)(nl - p) : strlen(p);
+            if (lines == 0) { first = p; firstn = n; }
+            last = p; lastn = n;
+            lines++;
+            if (!nl) break;
+            p = nl + 1;
+        }
+        printf("patch: the list arrived with %d names, \"%.*s\" .. \"%.*s\"\n",
+               lines, (int)firstn, first, (int)lastn, last);
+        patch_checks++;
+        patch_pass += (lines == 64 && strncmp(first, "Ac.Piano", 8) == 0
+                       && strncmp(last, "Multi-Set5", 10) == 0);
+        printf("patch: %d of %d checks passed%s\n", patch_pass, patch_checks,
+               patch_pass == patch_checks ? "" : "   <-- FAILED");
+    }
     printf("peak: %d (%s)\n", peak, peak > 0 ? "PLUGIN MAKES SOUND" : "SILENT");
 
     FILE *o = fopen(wav, "wb");

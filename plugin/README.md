@@ -487,6 +487,69 @@ patches that name them. So neither key applies itself: each records what it was 
 asks for one reboot. Restoring both costs two boots, at a few tens of milliseconds each, and
 it runs when a project loads rather than from the audio callback.
 
-`make selftest` covers all of it: three keys stored and returned, the patch store byte for
-byte, the settings text identical, volume and HF correction saved as set, and a project whose
-card paths no longer exist finding its images again by name.
+`make selftest` covers all of it: the keys stored and returned, the patch store byte for
+byte, the settings text identical, volume and HF correction saved as set, a project whose
+card paths no longer exist finding its images again by name, and the session coming back on
+the patch it was left on.
+
+---
+
+## The PATCH menu
+
+Sixty-four patches, and the machine's own way to reach one is `[INC]` pressed as many times
+as it takes: P-57 is fifty-six presses. The **PATCH** button opens a list of all of them —
+four columns of sixteen, the current one marked, one click to load.
+
+### Reading the names
+
+Straight out of the machine's memory: 64 records of 128 bytes at `0xE000`, with a ten-byte
+ASCII name at `+4` (ROM-ANALYSIS.md §4). No emulated time is spent driving menus to collect
+them, and nothing is hard-coded — a patch the user has renamed shows its new name, because
+what is read is the bank the machine is playing from, not a table in this repository.
+
+They travel to the UI as a `patches` state key, one name per line, pushed **only when they
+change**. That is what keeps the list honest without anyone asking for it: dots while the
+machine is still booting, the factory names a second later, and the user's own names again
+after a session restore brings back an edited bank.
+
+### Changing patch without rebooting the machine
+
+`[INC]` and `[DEC]` are the only things that select a patch — MIDI program change selects a
+*part's tone*, not a patch (SYSTEM-DESIGN.md §5.3) — and they wrap modulo 64, so no number
+of presses can home the selection.
+
+What makes **one** press enough is that the number the firmware increments lives in work RAM
+at `0x274A`. Set it to N-1, give the machine a single `[INC]`, and it lands on N and does the
+whole job itself: copies the record into the active patch buffer at `0x2800`, reloads the
+eight output-routing registers, redraws the LCD — all exactly as it would for a press
+somebody made.
+
+**Writing `0x274A` on its own changes nothing.** What is playing is the copy at `0x2800`, and
+only the firmware's own patch-load routine puts one there; the number by itself is just a
+number. Rebooting the machine would apply it — that is what a restored session does — but a
+reboot is a gap in the sound and throws away everything else in RAM. One button press costs a
+fifth of a second and keeps the machine running underneath it.
+
+#### `[!]` `[INC]` means something else in the menus
+
+On the play screen it selects a patch. On `PATCH:COM:OUT` it edits the output mode. So
+nothing is pressed until the play screen is up: a machine showing a menu page is walked out
+of with `[EXIT]` first, one press at a time, **checking after each** — three presses reach
+the play screen from the deepest page in the firmware.
+
+The check is the LCD's top line. The play screen reads `P-01:Ac.Piano`, or `TEMP:` once a
+program change has replaced a part's tone; every menu page reads something else — `Select
+Mode`, `PATCH`, `PATCH:COM`, `PATCH:WRT`. A guard that cannot be talked into pressing `[INC]`
+somewhere it would edit a value.
+
+All of it is button *edges in emulated time*, so it is a small state machine ticked from
+`run()` — a press held 60 ms and released for 180 ms, which sits well inside what the
+firmware's debouncer needs and well outside its auto-repeat.
+
+#### `[!]` An empty state key is a perfectly good zero
+
+The UI asks for a patch by setting a `patchsel` state key. DPF stores **every** key in the
+session, that one included, and hands the empty value straight back on restore — where
+`atoi("")` is `0`, a valid patch number. Without a digit test in `setState()` every project
+would quietly reopen on P-01 no matter what was saved. `make selftest` selects P-43 before
+saving and checks the restored instance comes up on it, which is what caught this.
