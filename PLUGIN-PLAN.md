@@ -1086,41 +1086,171 @@ exactly why 29 of 32 values legitimately display `" No Card! "` on the hardware
 *"needs card 08 (SN-U110-08) — not mounted"* instead of silently offering
 something that will not sound.
 
-### 10.5 User patch files
+### 10.5 User presets
 
-`patchram` is `0xE000`–`0xFFFF`, 8 KB, 64 patches → 128 bytes each. `[?]` Confirm
-no bank header eats into that.
+`patchram` is `0xE000`–`0xFFFF`, 8 KB, 64 patches → 128 bytes each, and the
+patch record layout is `analysis/SYSTEM-DESIGN.md` §5.4 and ROM-ANALYSIS §6.7.
+`[?]` Confirm no bank header eats into that.
 
-**Recommended format: our own container, not SysEx.**
+The 64 slots are what the *firmware* has. What the *user* wants is an unbounded
+library, shared between instances, with a full editor behind **DIVE**. Those are
+not the same thing, and the design below keeps them apart: **the library lives in
+files and is authoritative; the 64 slots are a working set the machine plays
+from.**
 
-The reasoning: the RAM layout is *known*; the SysEx address map is *not* — the
-handler at `0x5B7F` is identified but its model ID and addresses are undecoded.
-Blocking a core feature on unfinished reverse engineering is the wrong trade.
+#### The mechanism is forced by three findings
+
+**You cannot hand-write the patch that is playing.** Copying a tone record into
+`0x2880` by hand produced byte-identical RAM and audibly different sound, because
+`0x2A60` (sample records) and `0x3760` (voice state) are built only by the
+firmware's tone loader at `0x80D3` (ROM-ANALYSIS §6.6). The same applies to the
+whole edit buffer at `0x2800`. **Every whole-patch change must go through the
+firmware's own patch-load routine** — which rules out the obvious shortcut of
+poking `0x2800` and carrying on.
+
+**But that routine is already driven, and it is cheap.** Poke `0x274A = N-1`,
+give one `[INC]`, and the firmware loads slot N *from `patchram` as it stands at
+that moment* — copy to `0x2800`, tone loader, routing registers at `0x1F00`,
+redraw (SYSTEM-DESIGN §5.3). So: write 128 bytes into a slot, then select it.
+No reboot, no gap in the sound, ~60 ms of emulated time, and it reuses the
+automaton §10.4 already ships.
+
+**SysEx carries patch memory at 2× expansion and is unproven in the write
+direction.** `BULK_PATCH_1_64`'s size field is `01 00 00` = `1 << 14` = **16384
+addressed units for 8192 stored bytes**, and the empirical dump agrees — 128
+packets, 17706 bytes, ≈128 data bytes each. The stored bytes are 7-bit expanded
+two for one, as they must be: a part's `+0x0B` byte takes values `0x80`, `0xA0`,
+`0xC0`. At 31250 baud that is ~86 ms of emulated time per patch and ~5.7 s per
+bank against `writeMem`'s nothing, it sits behind the `EXCLUSIVE` gate at
+`0x3C00`, and only the *read* direction (RQ1 → DT1) has ever been tested. As an
+in-process transport SysEx is worse on every axis.
+
+#### Decided: file-backed library, slot injection, firmware-driven load
+
+Four layers, one job each.
+
+**The library is files on disk.** A directory under
+`$XDG_DATA_HOME/voltaire110/patches`. Unbounded — 10,000 presets is 1.3 MB of
+records. Atomic writes (temp + `rename`) so a half-written file is never
+observed; rescan on menu open behind an index validated on mtime + size, so
+opening the browser never blocks.
+
+**One slot is the audition slot.** P-64 by default, configurable. Every library
+load writes there and selects it; the other 63 stay the machine's own bank,
+editable from the panel exactly as on hardware, and nothing the user stored is
+clobbered behind their back. Write the preset's name — truncated to the 10 ASCII
+bytes at `+0x04` — into the slot as it is injected, so the LCD reads
+`P-64:MyPatch` rather than lying about what is loaded. *Copy to slot n* stays an
+explicit action, for people who want panel `[INC]`/`[DEC]` to walk their own set.
+
+This gives session self-containment for free: `patchram` is already saved whole
+in the `nvram` state key (§9), so the audition slot's contents come back with the
+project **even if the library file has moved or gone**. Store the library entry's
+identity — name and hash — beside it for re-linking, never the path alone. Same
+discipline as the ROMs.
+
+**The UI reads the library; the DSP never touches the filesystem.** This matters
+more than it looks. The `patches` and `tones` name lists travel as state-key text
+blobs, and a library of thousands cannot go that way — allocation, and the atom
+port's size limit (§10.3). The UI scans the directory itself and sends down only
+the chosen preset: a `patchload` key of slot plus 128 bytes hex, ~260 characters,
+the same shape and size as the panel blob already going the other way, arriving
+on the worker thread like `patchsel` and `tonesel` do. No file I/O anywhere near
+the audio thread, and `rtaudit` is unaffected.
+
+**`0x2800` is the single source of truth for the current patch.** Read it back
+with `readMem` to capture a patch for saving. That is what stops panel edits and
+DIVE edits from diverging: both land in the edit buffer, and the plugin reads
+what is actually there instead of keeping a parallel model that can drift.
+
+Order matters when injecting — write the record, *then* trigger the select. The
+firmware reads a patch record only during a load, so the sequence makes a torn
+read impossible.
+
+#### Format: one chunked container
 
 | File | Contents |
 |---|---|
-| `.u110patch` | header + one 128-byte patch record |
-| `.u110bank` | header + the full 8 KB `patchram` image |
+| `.u110bank` | magic, version, then TLV chunks; **1..N** patch records |
 
-Header carries: magic, format version, a UTF-8 display name, the **required card
-IDs**, and the SHA-256 of the wave ROMs it was authored against. That last field
-is what lets the browser warn intelligently instead of loading something silently
-wrong.
+One extension, not two: a single patch is the `N = 1` case. Chunked rather than a
+fixed header, because the 80-byte tone record is still only partly decoded and
+fields will be added.
 
-**Add `.syx` import/export later**, once the SysEx map is decoded — that is the
-interop path to real hardware and to the U-110 patch collections already
-circulating. High user value, but it follows the RE, not the other way round.
+Chunks worth having: the raw 128-byte records — the only lossless representation
+available today; a UTF-8 display name **separate from** the machine's 10-byte
+name field, since one is for humans and the other is what the LCD shows; the
+**required card IDs, computed from the six part media bytes** rather than trusted
+from a header; the SHA-256 of the wave ROMs it was authored against; author,
+tags, timestamps.
 
-**Not JSON, yet.** Tempting for diffing and version control, but ROM-ANALYSIS
-notes the 80-byte tone record is only *partly* decoded — a JSON format today
-would be half named fields and half opaque byte blobs. Revisit when the decoding
-is complete; the binary format is the honest representation until then.
+Keep plugin chrome — HF correction, volume, output routing — **out** of the patch
+record, or at most in an optional chunk a reader may ignore. A preset that mixes
+machine state with plugin settings is not exchangeable, and it makes an A/B
+comparison dishonest.
 
-**Loading subtlety:** the firmware caches the active patch into work RAM at
-`0x2800`/`0x280E`, so poking `patchram` behind its back leaves it stale. Cleanest
-fix — write the bank, reset the CPU, then **spin the core at maximum speed**
-(nothing forces realtime) until the firmware reaches idle, and resume. A second of
-emulated boot costs a few milliseconds of wall time.
+Do not auto-mount cards; warn. The browser can say *"needs card 08 (SN-U110-08) —
+not mounted"* because it computed the requirement, and offer to mount the image
+if it knows one.
+
+#### Sharing between instances
+
+By the filesystem, and by nothing else. Instances share the library directory by
+construction — no IPC, no shared memory, no host involvement, and one instance's
+save is the next one's scan. Reject shared memory: sandboxes block it and it buys
+nothing for a store that is read-mostly.
+
+Exposing the library through the host's own preset systems — LV2 preset bundles,
+CLAP's preset-discovery factory — is worth doing later as an *export*, generated
+from the library. It is not the storage model: the formats differ per host and
+the least capable of them would set the ceiling.
+
+#### What SysEx is for
+
+Not internal transport. Two things it is uniquely good at:
+
+- **Per-parameter live edits**, `00 1n xx` and `00 01 xx` — immediate, no patch
+  reload, no gap. This is what already drives the tone menu (SYSTEM-DESIGN
+  §5.3.1) and what DIVE will edit through.
+- **`.syx` import and export**, the interop path to real hardware and to the
+  U-110 patch collections already circulating. High user value, and it needs the
+  2:1 packing above decoded first.
+
+#### Correction: an earlier reading here was wrong
+
+This section previously recommended our own container **because "the SysEx
+address map is not known — the handler at `0x5B7F` is identified but its model ID
+and addresses are undecoded."** That is now out of date: `tools/u110_sysex.py`
+carries the map, verified empirically against the emulator's MIDI OUT, and
+SYSTEM-DESIGN §5.3.1 uses it. The conclusion stands, but for the reasons
+above — the derived-state problem and the 2:1 wire cost — not for that one.
+
+#### What DIVE needs, and the one task that unblocks it
+
+The editor cannot be built on the current decode: of the 128-byte record we know
+`+0x04` (name), `+0x0E` (output mode) and, per part, `+0x00` media, `+0x01` tone,
+`+0x02` receive channel and `+0x0B` output assign / pan. The authoritative decode
+is the **SysEx parameter address map**, Owner's Manual §4.2.2, already partly
+transcribed in `tools/u110_sysex.py`.
+
+`[?]` **Build a differential decode harness.** For each address in the map, DT1 a
+known value and diff `0x2800` before and after. Mechanical, automatable, and it
+yields three things at once: the editor's parameter model, the byte offsets
+inside the record, and the named-field format that makes a JSON representation
+honest rather than half opaque blobs. It is also the prerequisite for `.syx`
+import, which has to resolve the same packing.
+
+#### Open
+
+- `[?]` Do DT1 **writes** to `02 nn 00` work at all, and must a panel
+  `Bulk Rceiv.` mode be armed first? Needed only for `.syx` import. A short
+  experiment.
+- `[?]` Is `0x2800` a straight 128-byte copy of the record, or does the firmware
+  write derived bytes back into it? Decides whether a captured patch can be
+  written to a slot unmodified.
+- Detect panel `WRITE` edits by CRCing the 8 KB at a low rate — once a second
+  from `run()`, or on menu open — so the library can offer to capture what the
+  user just stored.
 
 **DAW project state** holds both NVRAM regions (`workram` `0x2100`–`0x3FFF` and
 `patchram`) plus parameters and slot config, with ROMs referenced by name + hash
@@ -1211,8 +1341,9 @@ Extracted and headless should be a few percent — comfortable for many instance
 10. **Mostly done.** ~~Direct name reads, and the patch and tone browsers~~ (§10.4) — the
     PATCH menu lists all 64 by name and loads one with a single emulated `[INC]`; the TONE
     menu lists the internal 99 plus every mounted card and sets any of them on any part
-    over SysEx. Neither needed the panel automaton in the end. The bank files (§10.5)
-    remain.
+    over SysEx. Neither needed the panel automaton in the end. The user preset
+    library (§10.5) remains — designed, not built: files on disk, injected into an
+    audition slot, loaded by the same single `[INC]`.
 11. ~~Inkscape panel and the vector UI (§6).~~ **Done.** nanosvg → NanoVG, geometry from
     `panel_geometry.h`, LCD drawn as dots from the baked table plus live CGRAM, knob
     rotated in code. No coordinate is typed into the UI source.
