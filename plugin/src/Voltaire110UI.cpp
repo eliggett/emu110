@@ -247,8 +247,26 @@ protected:
     /// This is what makes the panel cost nothing while the machine sits idle, and redraw
     /// promptly while it is being driven -- no fixed refresh rate to compromise over,
     /// because a static display genuinely needs no frames at all.
+    /// Half a second on, half a second off, and only while a field is being typed into.
+    static constexpr double kCaretPeriod = 0.5;
+
     void uiIdle() override
     {
+        if (m_nameEdit)
+        {
+            struct timespec ts;
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            const double now = double(ts.tv_sec) + ts.tv_nsec * 1e-9;
+            if (now - m_caretAt >= kCaretPeriod)
+            {
+                m_caretAt = now;
+                m_caretOn = !m_caretOn;
+                m_dirty = true;
+            }
+        }
+        else if (!m_caretOn)
+            m_caretOn = true;
+
         // Asking is deferred to here rather than done at the click, because setState()
         // is a message to the DSP and a constructor has nowhere to send one yet.
         if (m_diveNeedRead)
@@ -570,6 +588,32 @@ protected:
     {
         if (m_menu != Menu::None)
             return true;
+
+        // A fader takes the wheel, one step of the parameter per notch.  One step rather
+        // than a proportional jump because the wheel is what you reach for when the drag
+        // put you nearly right: dragging is the coarse control and already covers the
+        // whole range in one gesture.
+        if (m_diveOpen)
+        {
+            float dx, dy;
+            toDesign(ev.pos.getX(), ev.pos.getY(), dx, dy);
+            const int ctl = diveControlHit(dx, dy);
+            if (ctl >= 0
+                    && voltaire::panel::kDiveControl[ctl].kind == voltaire::panel::DK_SLIDER)
+            {
+                const int raw = rawOf(ctl);
+                if (raw != kNoValue)
+                {
+                    const int step = ev.delta.getY() > 0.0f ? 1
+                                   : (ev.delta.getY() < 0.0f ? -1 : 0);
+                    if (step != 0)
+                        writeRaw(ctl, raw + step);
+                }
+                repaint();
+                return true;
+            }
+        }
+
         const auto &k = voltaire::panel::kVolumeKnob;
         float x, y;
         toDesign(ev.pos.getX(), ev.pos.getY(), x, y);
@@ -591,6 +635,7 @@ protected:
             {
                 if (m_nameCaret > 0)
                     m_nameBuf[-- m_nameCaret] = '\0';
+                showCaret();
                 repaint();
                 return true;
             }
@@ -627,8 +672,18 @@ protected:
             m_nameBuf[m_nameCaret ++] = char(c);
             m_nameBuf[m_nameCaret] = '\0';
         }
+        showCaret();
         repaint();
         return true;
+    }
+
+    /// Restart the blink, so the caret is solid under the character just typed.
+    void showCaret()
+    {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        m_caretAt = double(ts.tv_sec) + ts.tv_nsec * 1e-9;
+        m_caretOn = true;
     }
 
     void commitPatchName()
@@ -1216,12 +1271,20 @@ private:
         return i >= 0 ? &voltaire::dive::kParams[i] : nullptr;
     }
 
-    /// The value the machine last reported for a control, or -1 if it has not said.
+    /// Stands for "the machine has not said", which cannot be a value.
+    ///
+    /// This used to be -1, and master tune is the parameter that found the bug: it runs
+    /// -99..+99, so every negative setting read as unknown and the fader dropped to the
+    /// bottom.  A sentinel has to be outside the range of every parameter, not merely
+    /// outside the range of most of them.
+    static constexpr int kNoValue = -1000;
+
+    /// The value the machine last reported for a control, or kNoValue.
     int rawOf(int ctl) const
     {
         const voltaire::dive::Param *p = paramFor(ctl);
         if (p == nullptr)
-            return -1;
+            return kNoValue;
         switch (p->where)
         {
         case voltaire::dive::kPart:
@@ -1232,10 +1295,10 @@ private:
         case voltaire::dive::kRamBit:
         {
             if (!m_setupKnown)
-                return -1;
+                return kNoValue;
             const int off = int(p->addr) - 0x3C00;
             if (off < 0 || off >= int(sizeof(m_setup)))
-                return -1;
+                return kNoValue;
             const uint8_t b = m_setup[off];
             if (p->where == voltaire::dive::kRamBit)
                 return (b >> p->lo) & 1;
@@ -1244,7 +1307,7 @@ private:
             return int(b & 0x0f);                    // control channel, one nibble
         }
         default:
-            return -1;
+            return kNoValue;
         }
     }
 
@@ -1329,7 +1392,7 @@ private:
             if ((p->where == voltaire::dive::kPart
                  || p->where == voltaire::dive::kCommon
                  || p->where == voltaire::dive::kRam
-                 || p->where == voltaire::dive::kRamBit) && rawOf(i) < 0)
+                 || p->where == voltaire::dive::kRamBit) && rawOf(i) == kNoValue)
                 return true;
         }
         return false;
@@ -1422,7 +1485,7 @@ private:
             return;
 
         const int raw = rawOf(ctl);
-        if (raw < 0)
+        if (raw == kNoValue)
         { std::snprintf(out, n, "..."); return; }
         formatRaw(*p, raw, out, n);
     }
@@ -1462,7 +1525,7 @@ private:
     {
         const voltaire::dive::Param *p = paramFor(ctl);
         const int raw = rawOf(ctl);
-        if (p == nullptr || raw < 0)
+        if (p == nullptr || raw == kNoValue)
             return 0.0f;
         const int lo = (p->where == voltaire::dive::kRam
                         && p->show == voltaire::dive::kSigned)
@@ -1750,6 +1813,7 @@ private:
         // whatever the document says its units are.
         const float k = (m_svg->width > 1.0f)
                 ? (voltaire::panel::kDesignWidth / m_svg->width) : 1.0f;
+        const float px = k * panelScale();
         save();
         scale(k, k);
         for (NSVGshape *sh = m_svg->shapes; sh != nullptr; sh = sh->next)
@@ -1801,7 +1865,7 @@ private:
                                  lit ? sh->opacity * kDiveTabLit : sh->opacity));
                 fill();
             }
-            if (sh->stroke.type == NSVG_PAINT_COLOR && sh->strokeWidth > 0.0f)
+            if (strokeVisible(sh, px))
             {
                 strokeColor(nvgCol(sh->stroke.color, sh->opacity));
                 strokeWidth(sh->strokeWidth);
@@ -1846,6 +1910,7 @@ private:
         if (svg == nullptr)
             return;
         const float k = (svg->width > 1.0f) ? (w / svg->width) : 1.0f;
+        const float px = k * panelScale();
         save();
         scale(k, k);
         for (NSVGshape *sh = svg->shapes; sh != nullptr; sh = sh->next)
@@ -1870,7 +1935,7 @@ private:
                 fillColor(nvgCol(sh->fill.color, sh->opacity));
                 fill();
             }
-            if (sh->stroke.type == NSVG_PAINT_COLOR && sh->strokeWidth > 0.0f)
+            if (strokeVisible(sh, px))
             {
                 strokeColor(nvgCol(sh->stroke.color, sh->opacity));
                 strokeWidth(sh->strokeWidth);
@@ -1916,9 +1981,12 @@ private:
             const bool dim = p != nullptr && p->where == voltaire::dive::kUnmapped;
             if (m_nameEdit && p != nullptr && p->where == voltaire::dive::kName)
             {
-                // The caret is a block, the way the machine's own name editor draws it.
+                // The caret is a block that blinks, the way the machine's own name
+                // editor draws it.  The cell is occupied either way -- a space when the
+                // caret is off -- so the text does not shuffle sideways twice a second.
                 char withCaret[voltaire::dive::kNameLen + 2];
-                std::snprintf(withCaret, sizeof(withCaret), "%s_", m_nameBuf);
+                std::snprintf(withCaret, sizeof(withCaret), "%s%c", m_nameBuf,
+                              m_caretOn ? '_' : ' ');
                 drawCgromText(c.box, withCaret, Color(190, 255, 190));
                 beginPath();
                 roundedRect(c.box.x, c.box.y, c.box.w, c.box.h, c.box.h * 0.12f);
@@ -2072,6 +2140,23 @@ private:
             // windings, so preserving each subpath's own direction is the whole fix.
             pathWinding(subpathArea(p) >= 0.0f ? CCW : CW);
         }
+    }
+
+    /// Below this many window pixels a stroke is not drawn at all.
+    ///
+    /// NanoVG cannot draw a sub-pixel stroke: anything thinner than one device pixel is
+    /// promoted to a full one with the alpha reduced to compensate.  On a hairline that
+    /// is a poor trade -- Inkscape leaves a 0.26 unit stroke on text as a matter of
+    /// course, which renders as very nearly nothing in rsvg and as a visible dark rim
+    /// here, so the lettering came out looking outlined and heavy.  Dropping it is what
+    /// matches the reference render.
+    static constexpr float kMinStrokePx = 0.6f;
+
+    /// Is this stroke worth drawing at the size the panel is currently drawn at?
+    bool strokeVisible(const NSVGshape *sh, float unitsToPixels) const
+    {
+        return sh->stroke.type == NSVG_PAINT_COLOR
+            && sh->strokeWidth * unitsToPixels >= kMinStrokePx;
     }
 
     // How much less transparent a selected tab's background gets.  Three times the
@@ -2358,6 +2443,8 @@ private:
     char m_patchName[voltaire::dive::kNameLen + 1] = { 0 };
 
     bool m_nameEdit = false;     ///< the patch name field has the keyboard
+    bool m_caretOn = true;
+    double m_caretAt = 0.0;
     char m_nameBuf[voltaire::dive::kNameLen + 1] = { 0 };
     int m_nameCaret = 0;
     bool m_diveNeedRead = false; ///< the open page's values are stale

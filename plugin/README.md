@@ -241,6 +241,36 @@ The same shape of bug bit the last value on every page: the read used to publish
 fixed timer, and the final reply had not arrived yet, so PROGRAM CHANGE always read
 `...`.  It now waits for each answer and moves on only when it has it, or after 60 ms.
 
+### `[!]` A sentinel has to be outside EVERY range, not most of them
+
+`rawOf()` returned -1 for "the machine has not said yet".  Master tune runs -99..+99, so
+every negative setting read as unknown and the fader dropped to the bottom -- and it could
+not be dragged into the negative half, because the moment it got there it stopped being a
+value.  The sentinel is now -1000, which no parameter can reach.
+
+### `[!]` NanoVG cannot draw a hairline, and lettering is where that shows
+
+Inkscape leaves a `stroke:#000000; stroke-width:0.264583` on text as a matter of course.
+That is 0.37 window pixels at the default size, which rsvg draws as very nearly nothing.
+NanoVG cannot: anything under one device pixel is promoted to a full pixel with the alpha
+reduced to compensate, so every tab label came out with a dark rim and read as heavy and
+crowded.  Strokes thinner than 0.6 device pixels are now skipped, which is what matches
+the reference render.
+
+A residual remains and is worth knowing about, because it is the renderer and not the
+artwork.  Measuring stem widths on one scanline through "COMMON":
+
+| window | rsvg | plugin | excess |
+|---|---|---|---|
+| 1100 px | 6.9 px | 9.2 px | +2.3 px |
+| 2200 px | 13.8 px | 15.5 px | +1.8 px |
+
+The excess is roughly **constant in pixels**, not proportional -- doubling the window did
+not double it -- so it is NanoVG's antialiasing expansion, about a pixel per side, and not
+anything geometric.  It therefore matters less the larger the panel is drawn: a third of a
+stem at 1100 px, an eighth at 2200.  Turning shape antialiasing off would remove it
+exactly and give hard, jagged glyph edges instead, which is a worse trade.
+
 ### What is not wired yet
 
 - **WRITE** (Common).  Storing the temporary patch is the machine's own front-panel
