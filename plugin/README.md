@@ -349,6 +349,27 @@ The artwork is on Earth everywhere now, which is one fewer variable.
   drawn dimmed showing `--` and do nothing, because guessing a bit would write into the
   user's settings.
 
+## `[!]` A demand-driven panel still has to redraw when the window changes size
+
+`uiIdle()` turns a dirty flag into one repaint and an idle machine sets it for nothing,
+which is what keeps the panel free while the instrument sits there.  But **a resize is not
+a parameter change**, so nothing marked the panel dirty when the window changed size, and
+what stayed on screen was the old framebuffer at the new dimensions -- torn, or layered
+with earlier renderings, until some button press happened to dirty it.  There was no
+`onResize` handler at all.  There is now, and it does one thing.
+
+### Everything is clipped to the panel as it currently stands
+
+The artwork is a single document 676 units tall whether the DIVE drawer is open or not,
+and the background image spans all of it.  So a window taller than the shut panel showed
+the photograph carrying on below the instrument -- reported as "content below the main UI
+when the dive section is not even open", and reproducible by starting the UI at
+1100 x 500.
+
+One `scissor()` inside the panel transform fixes it, rather than teaching each piece its
+own limit: anything drawn there later is bounded too.  The menus are drawn after the
+`restore()`, in window pixels, so they are unaffected.
+
 ## The null test
 
 `plugin/tools/null_test.py` is the acceptance test and, because the device sources are

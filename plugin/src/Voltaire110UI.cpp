@@ -255,6 +255,20 @@ protected:
     /// Half a second on, half a second off, and only while a field is being typed into.
     static constexpr double kCaretPeriod = 0.5;
 
+    /// A resize has to force a repaint.
+    ///
+    /// The panel is demand-driven -- uiIdle() turns a dirty flag into one repaint, and
+    /// an idle machine sets it for nothing -- so a window that changes size while the
+    /// machine is quiet had nothing to make it draw again.  What was left on screen was
+    /// the old framebuffer at the new size: torn, or layered with whatever had been
+    /// drawn before, until any button press happened to dirty the panel.
+    void onResize(const ResizeEvent &ev) override
+    {
+        UI::onResize(ev);
+        m_dirty = true;
+        repaint();
+    }
+
     void uiIdle() override
     {
         if (m_nameEdit)
@@ -319,6 +333,14 @@ protected:
         save();
         translate(ox, oy);
         scale(s, s);
+
+        // Everything below is clipped to the panel as it stands right now.  The artwork
+        // is one document 676 units tall whether the drawer is open or not, and the
+        // background image spans all of it, so a window taller than the shut panel used
+        // to show the photograph carrying on below the instrument.  Clipping here rather
+        // than teaching each piece its own limit means anything added later is bounded
+        // too, and it is one line.
+        scissor(0.0f, 0.0f, voltaire::panel::kDesignWidth, designHeight());
 
         drawBackground();
         drawArtwork();
