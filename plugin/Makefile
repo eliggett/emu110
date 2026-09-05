@@ -55,7 +55,10 @@ patches:
 # nothing declares it, so hosts load the plugin and report that it has no custom UI.  The
 # generator has to run AFTER the UI is linked, which is exactly the ordering that gets
 # missed when it is a separate manual step.
-ttl:
+# lv2_ttl_generator is a DPF helper BINARY, and no target we build depends on it -- so on
+# a machine that has built here before it is simply present, and on a fresh clone the ttl
+# step dies with "No such file or directory" (exit 127) after everything else succeeded.
+ttl: dpf/utils/lv2_ttl_generator
 	@dpf/utils/generate-ttl.sh > /dev/null 2>&1
 	@grep -q "ui:X11UI" bin/$(NAME).lv2/manifest.ttl \
 		&& echo "  LV2 manifest declares the UI" \
@@ -103,6 +106,9 @@ core: generated
 			echo "  core is newer than $$f -- forcing a relink"; rm -f "$$f"; \
 		fi; \
 	done
+
+dpf/utils/lv2_ttl_generator:
+	@$(MAKE) --no-print-directory -C dpf/utils/lv2-ttl-generator > /dev/null
 
 .PHONY: core generated ttl patches
 

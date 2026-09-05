@@ -137,6 +137,12 @@ def main():
         for r in range(ROWS_LCD):
             rom[16 * code + r] = rows[r]
 
+    # The default lands in mame/roms/u110/, which exists on a machine that has run the
+    # MAME build but not in a fresh clone -- and the plugin build calls this for --header
+    # alone, so a missing directory must not stop it.
+    out_dir = os.path.dirname(args.out)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     with open(args.out, 'wb') as f:
         f.write(rom)
     print('wrote %s (%d bytes)' % (os.path.relpath(args.out, HERE), len(rom)))

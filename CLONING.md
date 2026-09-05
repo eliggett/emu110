@@ -35,7 +35,8 @@ sudo apt install build-essential git python3 pkg-config \
                  lv2-dev libjack-jackd2-dev \
                  libgl1-mesa-dev libx11-dev libxext-dev libxcursor-dev \
                  libcairo2-dev libdbus-1-dev \
-                 inkscape librsvg2-bin
+                 inkscape librsvg2-bin \
+                 python3-pil python3-fonttools
 ```
 
 What each is for:
@@ -50,6 +51,9 @@ What each is for:
   pre-render the two constructs nanosvg cannot draw. Nothing in `generated/` is
   checked in, so a fresh clone *does* need them on the first build. See
   `plugin/README.md` for why.
+- `python3-pil` and `python3-fonttools` — `tools/make_lcd_cgrom.py` bakes the LCD
+  character set out of MatrixSans Screen at build time. Same reasoning: the table
+  is generated, not checked in.
 
 Disk: `mame/` is about **2 GB** checked out, plus ~220 MB of history.
 
@@ -314,6 +318,9 @@ get a build that compiles and misbehaves.
 | standalone runs, panel never updates | patch `0001` is not in | check for the warning above; `make patches` |
 | build stops in `panel_export.py` | Inkscape or rsvg-convert missing | §1 |
 | `FileNotFoundError` in `render_raster` under `-j` | fixed in `50c6412` (grouped target `&:`) | pull |
+| `FileNotFoundError: .../mame/roms/u110/u110_lcd_cgrom.bin` | fixed — the CGROM tool now creates its output directory | pull |
+| everything links, then `ttl` fails with error 127 | fixed — `dpf/utils/lv2_ttl_generator` is now built on demand | pull |
+| `ModuleNotFoundError: PIL` / `fontTools is required` | the two Python packages in §1 | `sudo apt install python3-pil python3-fonttools` |
 | plugin loads but reports no ROMs | ROM search path | run from the repository, or set `U110_DATA_DIR` to it |
 
 ---
