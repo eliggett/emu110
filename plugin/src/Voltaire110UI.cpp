@@ -1823,6 +1823,7 @@ private:
         // whatever the document says its units are.
         const float k = (m_svg->width > 1.0f)
                 ? (voltaire::panel::kDesignWidth / m_svg->width) : 1.0f;
+        const float px = k * panelScale();
         save();
         scale(k, k);
         for (NSVGshape *sh = m_svg->shapes; sh != nullptr; sh = sh->next)
@@ -1853,7 +1854,7 @@ private:
                 // headroom left to read as "selected" from across a mix window.  The glow
                 // is the same path stroked twice at low alpha under the fill -- no filter,
                 // which nanosvg has no notion of anyway.
-                shapePath(sh);
+                shapePath(sh, px);
                 strokeColor(Color(120, 220, 255, 0.20f));
                 strokeWidth(2.6f);
                 stroke();
@@ -1865,7 +1866,7 @@ private:
                 continue;
             }
 
-            shapePath(sh);
+            shapePath(sh, px);
             if (sh->fill.type == NSVG_PAINT_COLOR)
             {
                 // A selected tab darkens by becoming less transparent, which is the one
@@ -1919,6 +1920,7 @@ private:
         if (svg == nullptr)
             return;
         const float k = (svg->width > 1.0f) ? (w / svg->width) : 1.0f;
+        const float px = k * panelScale();
         save();
         scale(k, k);
         for (NSVGshape *sh = svg->shapes; sh != nullptr; sh = sh->next)
@@ -1937,7 +1939,7 @@ private:
                 save();
                 translate(0.0f, tapOffset(slider) / k);
             }
-            shapePath(sh);
+            shapePath(sh, px);
             if (sh->fill.type == NSVG_PAINT_COLOR)
             {
                 fillColor(nvgCol(sh->fill.color, sh->opacity));
@@ -2127,9 +2129,61 @@ private:
                     kDiveRasterSize[p], 0);
     }
 
-    /// Lay a parsed SVG shape down as a NanoVG path.  Nothing is painted.
-    void shapePath(NSVGshape *sh)
+    /// How close a flattened curve has to stay to the real one, in WINDOW pixels.
+    ///
+    /// NanoVG flattens beziers itself, and its tolerance works out at half a device
+    /// pixel: `nvg__tesselateBezier` tests `(d2+d3)^2 < tessTol * |chord|^2`, which is a
+    /// distance test with `tessTol` standing in for the SQUARE of the tolerance, and
+    /// tessTol is 0.25.  Points are transformed before that runs, so the half pixel is a
+    /// half pixel on screen.
+    ///
+    /// On artwork that is mostly rectangles nobody would notice.  On lettering at 22 px
+    /// it is exactly visible: where a shallow curve meets a flat edge -- the top of an
+    /// "S", the shoulder of a "P" -- the chord lands half a pixel proud, and the eye
+    /// reads it as a notch or a stray dot.  rsvg-convert tessellates far finer and has
+    /// none of them, which is what made the two renders disagree.
+    ///
+    /// So the curves arrive already flattened, to a tenth of a pixel.  Subdividing
+    /// adaptively rather than uniformly means a nearly straight curve still costs two
+    /// segments, which most of a glyph's outline is.
+    static constexpr float kCurveTolerancePx = 0.1f;
+
+    /// Split one cubic until its chord is within tolerance, emitting line segments.
+    /// `tol2` is the squared tolerance in the units the points are given in.
+    void flattenCubic(float x1, float y1, float x2, float y2,
+                      float x3, float y3, float x4, float y4, float tol2, int level)
     {
+        if (level > 10)
+        {
+            lineTo(x4, y4);
+            return;
+        }
+        const float dx = x4 - x1, dy = y4 - y1;
+        const float d2 = std::fabs((x2 - x4) * dy - (y2 - y4) * dx);
+        const float d3 = std::fabs((x3 - x4) * dy - (y3 - y4) * dx);
+        if ((d2 + d3) * (d2 + d3) < tol2 * (dx * dx + dy * dy))
+        {
+            lineTo(x4, y4);
+            return;
+        }
+        const float x12 = (x1 + x2) * 0.5f, y12 = (y1 + y2) * 0.5f;
+        const float x23 = (x2 + x3) * 0.5f, y23 = (y2 + y3) * 0.5f;
+        const float x34 = (x3 + x4) * 0.5f, y34 = (y3 + y4) * 0.5f;
+        const float x123 = (x12 + x23) * 0.5f, y123 = (y12 + y23) * 0.5f;
+        const float x234 = (x23 + x34) * 0.5f, y234 = (y23 + y34) * 0.5f;
+        const float x1234 = (x123 + x234) * 0.5f, y1234 = (y123 + y234) * 0.5f;
+        flattenCubic(x1, y1, x12, y12, x123, y123, x1234, y1234, tol2, level + 1);
+        flattenCubic(x1234, y1234, x234, y234, x34, y34, x4, y4, tol2, level + 1);
+    }
+
+    /// Lay a parsed SVG shape down as a NanoVG path.  Nothing is painted.
+    ///
+    /// `px` is how many window pixels one unit of the shape's own coordinates covers,
+    /// which is what turns the pixel tolerance above into one this code can test.
+    void shapePath(NSVGshape *sh, float px)
+    {
+        const float tol = kCurveTolerancePx / (px > 0.0f ? px : 1.0f);
+        const float tol2 = tol * tol;
         beginPath();
         for (NSVGpath *p = sh->paths; p != nullptr; p = p->next)
         {
@@ -2137,7 +2191,7 @@ private:
             for (int i = 0; i < p->npts - 1; i += 3)
             {
                 const float *q = &p->pts[i * 2];
-                bezierTo(q[2], q[3], q[4], q[5], q[6], q[7]);
+                flattenCubic(q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7], tol2, 0);
             }
             if (p->closed)
                 closePath();
@@ -2206,6 +2260,7 @@ private:
         // units, so undo it for the duration.
         const float k = (m_svg->width > 1.0f)
                 ? (voltaire::panel::kDesignWidth / m_svg->width) : 1.0f;
+        const float px = k * panelScale();
         save();
         scale(1.0f / k, 1.0f / k);
         beginPath();

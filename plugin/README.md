@@ -294,6 +294,35 @@ reference has to be the *whole picture the plugin actually draws*, background an
 and regenerated from the current artwork, since a stale one shifts everything sideways and
 looks like a transform bug.
 
+### `[!]` NanoVG flattens curves to half a pixel, and on lettering that shows
+
+There WAS something wrong, and it is not what any of the above was chasing.  NanoVG
+tessellates beziers itself, and `nvg__tesselateBezier` tests
+
+```c
+if ((d2 + d3)*(d2 + d3) < ctx->tessTol * (dx*dx + dy*dy))
+```
+
+which is a distance test with `tessTol` standing in for the SQUARE of the tolerance.
+`tessTol` is 0.25, so the tolerance is **half a pixel** -- and points are transformed
+before that runs, so it is half a pixel on screen, not half a unit of artwork.
+
+On rectangles nobody would ever notice.  On lettering at 22 px it is plainly visible:
+where a shallow curve meets a flat edge -- the top of an "S", the shoulder of a "P", the
+bottom of a "D" -- the chord lands up to half a pixel proud of the true outline, and the
+eye reads it as a notch, a stray dot above a letter, or a curve gone faceted.
+`rsvg-convert` tessellates far finer, which is why the reference renders were clean and
+the plugin was not.
+
+The fix is to hand NanoVG geometry that is already flat enough: `shapePath()` subdivides
+each cubic adaptively to a tenth of a pixel and emits line segments.  Adaptive rather than
+uniform matters, because most of a glyph's outline is nearly straight and still costs two
+segments.  Redraw cost did not measurably change.
+
+This is also the one thing that could not have been found by comparing whole renders --
+both were of the *same* geometry, and the difference was in what the renderer did with it.
+It took a description of which letters were wrong and where.
+
 ### `[!]` Correction: the font was never the problem either
 
 An earlier version of this section claimed the artwork had switched from **Earth** to
