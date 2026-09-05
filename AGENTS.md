@@ -23,3 +23,9 @@ Document plans and methods as appropriate.
 Do not push to the repo. But do make commits. 
 
 Do not offer to run commands as root; tell the user what you need installed and it will generally be done for you. 
+
+## Compiling: 
+
+Please limit concurrent compile threads to -j5, this keeps the desktop responsive. 
+
+Please ask the user first if you want to draw windows on the desktop. 

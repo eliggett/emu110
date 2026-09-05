@@ -1,97 +1,36 @@
 # emu110 CURRENT issues
 
-## Amplitude:
-::IN PROGRESS::
-The amplitude when run through the mame emulator is far too quiet. We need to increase it. We must preserve the available precision when we do this, ie, not post-attenuation scaling. 
+## Audio artifacts: 
 
-## Envelope:
-There might still be some discrepancies in the envelope, but they are quite small and not worth fussing over just yet. 
+Sometimes there are little noises, especially with multi-tone parts. Likely some kind of timing issue with the emulated DSP. It's not something where I can give directions to reproduce it, and it is not all the time, more or less every ten minutes or so. 
 
-## Harmonic content: 
-There is an unexplained decrease in legit harmonic content at around 10 KHz. Since I don't hear there that well, I'm ok to let it go. 
+## Window:
 
-## Chorus and Tremolo (see analysis/EFFECTS.md)
-**Implemented.**  The device now carries the two LFO slots, runs them against the real
-firmware, and renders both effects on Voice Group 1.
-`listen/hardware/effects` is the first recording of either effect that exists -- no factory
-patch enables them, so hearing one at all needs `PATCH:COM:OUT #` set to an odd mode 21-49.
-The specification is now complete and measured:
+### window size redraw: 
+The window sometimes resizes and the graphics are messed up, often showing "layers" of prior renderings. Clicking on buttons such as "tone" will generally redraw the UI and the issue goes away. 
 
-- **LFO**: a symmetric triangle on ramp slots 0x20 (chorus) and 0x21 (tremolo), advancing
-  `2^(rate/8) * 4` per 32 kHz sample in BOTH directions.  Chorus 0.42-1.73 Hz, tremolo
-  1.67-6.93 Hz.  Depth 0 means the effect is off, not shallow.
-- **Tremolo** is an auto-pan: one channel gets the slot's level, the other its complement,
-  so the sum does not move.  0.4 to 30.1 dB of pan across the depth range.
-- **Chorus** is a delay tapped at `level >> 14` samples, 1 to 32 ms, with a tap in EACH
-  channel half an LFO period apart and a roughly 50/50 wet/dry mix.
 
-Rendered against the hardware capture the two agree closely -- LFO rates within 1%, the pan
-ratio at depth 15 measuring 0.040..0.960 against the hardware's 0.039..0.961, and the wet
-level within 0.4 dB.  Sections 8 and 9.
+### window shows more than it should: 
 
-The order of the two is now measured too -- delay first, pan last, which is also the only
-arrangement one 2K x 8 SRAM can support.
+Sometimes after a resize or even on the initial showing, the window will show content below the main UI when the "dive" section is not even open. This content is generally just the background image, or some of it anyway. 
 
-**Corrected 2026-09-02: the tap INTERPOLATES.**  It had been integer, on the reasoning that
-an eleven-wire address cannot be fractional -- true of the address, false of the output.  A
-delay that steps by whole samples clicks at every step, at a rate that scales with DEPTH:
-tens per second at depth 1, near a kilohertz at depth 15, where it ring-modulates the note.
-Reported from the plugin, confirmed spectrally, and linear interpolation drops the sidebands
-30 dB.  See EFFECTS.md section 11.
+### Rough transition when more tabs shown:
 
-Left undone, and neither part measured: the delay line holds floats where IC17 is eight bits
-wide, and the wet/dry mix is a flat 0.5 fitted from three readings that bracket 0.45-0.55.
+When the user clicks to one of the "P1"... "P6" tabs from "Set" or "Common", the second row of tabs appears. This is an abrupt transition that "shakes" the entire window. I think it would be better to just account for this space with a "faint" rendering of the second row of buttons always visible. Faint can mean more transparent. 
 
-One open discrepancy: switching the tremolo on UNDER a sounding note drops it 6.02 dB in the
-emulator, because the firmware's compensation is written at note-on and never again; the
-owner measures 3 dB on hardware.  New notes are not affected and match hardware to 0.01 dB.
-Section 10.
+## Setup UI:
 
-Still open: why these slots ramp symmetrically when the voices are 16:1 asymmetric.  That is
-not just an effects question -- if the voices' asymmetry is not really about ramp direction,
-`ENV_FALL_DIVISOR` is modelling the wrong thing.  Section 10.
+Many of the buttons appear to not be wired up yet. "Map edit", "Control Change", etc. 
 
-## MIDI output:
-**Implemented.**  The CPU's TXD is serialised to a `midi_port` at 31250 baud 8N1, mirroring
-the receiver, with a 16-byte FIFO between the CPU's byte-at-a-time model and the bit clock.
+## Patch Title Edit: 
 
-The firmware sends nothing unprompted -- no active sensing, and there is no keyboard -- so
-this carries SysEx replies and bulk dumps only.  Verified end to end against a real ALSA
-port: an RQ1 for chorus depth comes back as `F0 41 0F 23 12 00 01 1A 07 5E F7`, and a full
-`RQ1 02 00 00 / 01 00 00` produces **129 packets, 17706 bytes, byte-identical to the driver's
-own trace, 0 malformed and 0 bad checksums**, addressed `010000` then `020000`..`027F00`.
+The patch title edit cursor does not blink. 
 
-That unblocks `.syx` interop (PLUGIN-PLAN 10.5): a whole bank can now be read out of the
-machine.  Writing one back is untested.
+## Write button: 
 
-MIDI THRU is emulated too, and exactly as the hardware does it: a direct copy of the
-MIDI IN line state off the opto-isolator, with no CPU involvement.
+We need a method to write the preset that the user has edited. Write Protect is also something we need to be able to turn on/off. 
 
-## Spectral / reconstruction (see analysis/RECONSTRUCTION.md)
+## User Presets: 
 
-- **Marimba is 6-12 dB too dark at 6-9 kHz.**  Genuine recorded content, not images, so no
-  interpolation kernel touches it.  Largest single spectral error left.  Section 7.
-- **The output EQ correction is unexplained.**  A fitted -7.2 dB bell at 5.9 kHz that
-  measurably helps but is not derived from the circuit.  Leading candidate is the modelled
-  Sallen-Key resonance being +4.17 dB where the service notes say +2.17.  Fix the circuit
-  model first, then re-fit or delete.  Section 7.
-- **Samples played above their stored rate get no anti-aliasing.**  Structurally true,
-  checked against the hardware by ear and inaudible on both machines.  Documented, not
-  scheduled.  Section 2.
+Related to the above, we need an atomic read/write system to a plugin settings file which contains a database of user patches. The databasde of user patches can be enormous since we have a computer available to us. The patch button shall allow selection. You can repurpose OEM preset 64 as a "loader preset" with which to load the user-selected preset. A preset is a standard U-110 preset, entirely defined by sysex commands. Other attributes, such as filter and volume setting, are not sysex... if possible we can keep these as additional bits in the user preset. 
 
-## Plugin core (see PLUGIN-PLAN.md sections 3 and 4)
-
-**The null test is green.**  MAME's device sources compile unmodified against
-`plugin/compat/emu.h`, and `U110Core` renders **bit-identically to MAME** -- 864000 of
-864000 frames, worst error 0 LSB -- over a sequence with single notes across the keyboard,
-velocities, a chord, notes entering over sustained ones, pitch bend and CC7.  It is also
-exactly block-size independent (512 vs 64: 0 frames differ).
-
-Two conditions, both of them the plan's own: dither off at both ends (`U110_DITHER=0`), and
-MIDI replayed at MAME's own arrival times through `midiInAtTime()`.
-
-One constant difference remains and is not a defect: a **-1 sample output offset**, which
-is MAME's sound-manager output phase.  The harness measures and removes it; at that offset
-the two agree exactly for the whole render.
-
-Left to do: put the null test in CI, and implement `saveState` / `loadState` (stubs).
