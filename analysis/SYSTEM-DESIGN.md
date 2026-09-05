@@ -649,6 +649,44 @@ is not the name being displayed. The name is plain ASCII in the active patch buf
 `0x2804` and the patch list already reads it there; unlike a tone, nothing is derived
 from it, so it is the one thing the editor can write to RAM directly.
 
+### 5.3.3 SETUP lives in battery-backed RAM, and only partly where expected `[C]`
+
+None of the SETUP parameters has a SysEx address — §4.2.2's map covers the patch and its
+parts and stops there — so the editor reaches them through memory. `0x3C00`-`0x3C0F` is
+the block, and it reads `7F 0F 00 01 03 00 00 0C 0C 0D 12 0A 00 00 00 00` on a freshly
+initialised machine.
+
+Three addresses are now pinned, each by changing it and watching something else move:
+
+| Address | What | How it was shown |
+|---|---|---|
+| `0x3C00` bit 5 | **EXCLUSIVE** | clearing it makes every RQ1 go unanswered; setting it restores service |
+| `0x3C01` low nibble | **Control Channel**, zero-based | see below |
+| `0x3C02` | **Master Tune** | moves when a master-tune RPN is received |
+
+The control channel one is worth spelling out, because the same byte is the SysEx
+**device ID** and that is not a coincidence. It reads `0x0F` out of the box, and a
+master-tune RPN was accepted on MIDI channel **16** and ignored on the other fifteen.
+Poking the byte to `0x00` moved that acceptance to channel 1. So one nibble is both the
+control channel and the device ID -- which is why RQ1 with device `0x0F` has always
+worked here, and why a session that changes the control channel changes the device ID
+with it.
+
+`[?]` **The other five receive switches are NOT in `0x3C00` bits 0-4.** That was the
+obvious reading -- six switches, exclusive is bit 5, and the manual lists EXCLUSIVE
+sixth -- and it is wrong. With `0x3C00` set to `0x20`, so that every bit but EXCLUSIVE is
+clear, a program change on the control channel still changed the part's tone; the same
+test one bit at a time changed nothing either. Whatever gates CONTROL CHANGE, PROGRAM
+CHANGE, CH PRESSURE, POLY PRESS and PITCH BENDER is either cached out of this byte at
+boot or lives somewhere else entirely. Program change and control change are the only
+two of the five that can be observed from outside at all -- the other three affect the
+sound and nothing in memory -- so the way to settle this is to drive the front panel to
+SETUP:MIDI, toggle one, and diff RAM. Until then those five are drawn but inert.
+
+`0x3C03` reads `01` and is the right shape for MAP EDIT (1-6, default 1), but nothing has
+been done to confirm it, and the encoding of master tune (-99..+99 in one byte) is
+inferred rather than measured.
+
 ### 5.4 Output assignment — **solved from the Owner's Manual** `[C]` `[S]`
 
 `[S]` OM p.5 "Patch Setting Chart (Factory Preset)" gives, for every factory patch, each

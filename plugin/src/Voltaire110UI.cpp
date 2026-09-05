@@ -25,6 +25,7 @@
 #include "panel_background.h"
 #include "dive_pages.h"
 #include "u110_cgrom.h"
+#include "DiveParams.h"
 
 #include <cmath>
 #include <cstdio>
@@ -74,6 +75,7 @@ public:
         : UI(DISTRHO_UI_DEFAULT_WIDTH, DISTRHO_UI_DEFAULT_HEIGHT)
     {
         loadArtwork();
+        resolveDiveParams();
         // VOLTAIRE_DIVE=<tab> opens the drawer on that tab at startup.  The drawer is
         // otherwise only reachable by clicking, which a headless screenshot cannot do,
         // and a page whose layout nobody can look at is a page nobody checked.
@@ -81,11 +83,23 @@ public:
         {
             m_diveOpen = true;
             for (int t = 0; t < voltaire::panel::DIVETABID_COUNT; t ++)
-                if (sameName(d, voltaire::panel::kDiveTabName[t]))
-                    (voltaire::panel::kDiveTabRow[t] == 1 ? m_diveTab2 : m_diveTab1) = t;
+            {
+                if (!sameName(d, voltaire::panel::kDiveTabName[t]))
+                    continue;
+                if (voltaire::panel::kDiveTabRow[t] == 1)
+                {
+                    // A sub-tab only exists under a part, so naming one implies one.
+                    m_diveTab2 = t;
+                    if (!tabIsPart(m_diveTab1))
+                        m_diveTab1 = voltaire::panel::TAB_P1;
+                }
+                else
+                    m_diveTab1 = t;
+            }
             setSize(DISTRHO_UI_DEFAULT_WIDTH,
                     uint(DISTRHO_UI_DEFAULT_WIDTH * designHeight()
                          / voltaire::panel::kDesignWidth));
+            m_diveNeedRead = true;
         }
         std::memset(m_lcd, ' ', sizeof(m_lcd));
         std::memset(m_cgram, 0, sizeof(m_cgram));
@@ -134,6 +148,14 @@ protected:
             return;
 
         // The patch list.  One name per line, already trimmed, in the machine's order.
+        if (std::strcmp(key, "divevals") == 0)
+        {
+            if (std::getenv("VOLTAIRE_DIVE") != nullptr)
+                d_stdout("divevals [%s]", value);
+            applyDiveValues(value);
+            return;
+        }
+
         if (std::strcmp(key, "patches") == 0)
         {
             m_patchNames.clear();
@@ -191,6 +213,10 @@ protected:
         m_leds = blob.leds;
         m_cursorPos = blob.cursor_pos;
         m_cursorFlags = blob.cursor_flags;
+        // A patch change replaces every value the drawer is showing, so it is the one
+        // event that has to re-read the page rather than just repaint it.
+        if (m_diveOpen && blob.patch != m_patch)
+            m_diveNeedRead = true;
         m_patch = blob.patch;
         std::memcpy(m_partMedia, blob.part_media, sizeof(m_partMedia));
         std::memcpy(m_partTone, blob.part_tone, sizeof(m_partTone));
@@ -223,6 +249,23 @@ protected:
     /// because a static display genuinely needs no frames at all.
     void uiIdle() override
     {
+        // Asking is deferred to here rather than done at the click, because setState()
+        // is a message to the DSP and a constructor has nowhere to send one yet.
+        if (m_diveNeedRead)
+        {
+            m_diveNeedRead = false;
+            m_diveRetry = kDiveRetryIdles;
+            requestDiveValues();
+        }
+        else if (m_diveOpen && m_diveRetry > 0 && -- m_diveRetry == 0 && pageIncomplete())
+        {
+            // The machine takes about five and a half seconds to boot before it answers
+            // MIDI at all, and the drawer can be open before then -- a restored session
+            // opens it immediately.  So an unanswered read is retried rather than left
+            // showing dots forever.  It stops as soon as the page is complete.
+            m_diveRetry = kDiveRetryIdles;
+            requestDiveValues();
+        }
         if (!m_dirty)
             return;
         m_dirty = false;
@@ -269,6 +312,10 @@ protected:
             drawPatchMenu();
         else if (m_menu == Menu::Tone)
             drawToneMenu();
+        else if (m_menu == Menu::Value)
+            drawValueMenu();
+        else
+            drawDiveTooltip();
 
         if (m_countFrames)
         {
@@ -311,6 +358,19 @@ protected:
                 std::snprintf(n, sizeof(n), "%d", hit);
                 setState("patchsel", n);
             }
+            repaint();
+            return true;
+        }
+
+        if (m_menu == Menu::Value)
+        {
+            if (!ev.press)
+                return true;
+            const int hit = valueHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            m_menu = Menu::None;
+            m_menuHover = -1;
+            if (hit >= 0)
+                writeRaw(m_valueCtl, valueBase() + hit);
             repaint();
             return true;
         }
@@ -366,12 +426,27 @@ protected:
                 m_dragStart = m_volume;
                 return true;
             }
-            const int tab = diveTabHit(x, y);
+            if (m_nameEdit)
+        {
+            // Clicking away keeps what was typed, which is what every other text field
+            // in a plugin does; Escape is how you throw it away.
+            commitPatchName();
+        }
+
+        const int tab = diveTabHit(x, y);
             if (tab >= 0)
             {
                 (voltaire::panel::kDiveTabRow[tab] == 1 ? m_diveTab2 : m_diveTab1) = tab;
                 resizeToDrawer();
+                m_diveNeedRead = true;
                 repaint();
+                return true;
+            }
+
+            const int ctl = diveControlHit(x, y);
+            if (ctl >= 0)
+            {
+                pressDiveControl(ctl, y);
                 return true;
             }
             for (int i = 0; i < voltaire::panel::BUTTONID_COUNT; i ++)
@@ -404,6 +479,7 @@ protected:
                     {
                         m_diveOpen = !m_diveOpen;
                         resizeToDrawer();
+                        m_diveNeedRead = true;
                         repaint();
                         return true;
                     }
@@ -422,6 +498,11 @@ protected:
         // Release.  The panel buttons are MOMENTARY, unlike the host parameters they drive:
         // pressing and releasing here sends the edge pair the firmware's debouncer wants.
         m_dragKnob = false;
+        if (m_dragCtl >= 0)
+        {
+            m_dragCtl = -1;
+            repaint();
+        }
         if (m_held >= 0)
         {
             const int p = mapButton(m_held);
@@ -442,12 +523,39 @@ protected:
             { m_menuHover = hit; repaint(); }
             return true;
         }
+        if (m_menu == Menu::Value)
+        {
+            const int hit = valueHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            if (hit != m_menuHover)
+            { m_menuHover = hit; repaint(); }
+            return true;
+        }
         if (m_menu == Menu::Tone)
         {
             const ToneHit hit = toneHit(float(ev.pos.getX()), float(ev.pos.getY()));
             if (hit.kind != m_toneHover.kind || hit.index != m_toneHover.index)
             { m_toneHover = hit; repaint(); }
             return true;
+        }
+        m_tipX = float(ev.pos.getX());
+        m_tipY = float(ev.pos.getY());
+        if (m_dragCtl >= 0)
+        {
+            float x, y;
+            toDesign(ev.pos.getX(), ev.pos.getY(), x, y);
+            dragSliderTo(m_dragCtl, y);
+            repaint();
+            return true;
+        }
+        if (m_diveOpen)
+        {
+            float x, y;
+            toDesign(ev.pos.getX(), ev.pos.getY(), x, y);
+            const int over = diveControlHit(x, y);
+            if (over != m_hoverCtl)
+            { m_hoverCtl = over; repaint(); }
+            if (over >= 0)
+                repaint();          // the tooltip follows the pointer
         }
         if (!m_dragKnob)
             return false;
@@ -475,12 +583,71 @@ protected:
 
     bool onKeyboard(const KeyboardEvent &ev) override
     {
+        if (m_nameEdit && ev.press)
+        {
+            if (ev.key == kKeyEscape)
+            { m_nameEdit = false; repaint(); return true; }
+            if (ev.key == kKeyBackspace)
+            {
+                if (m_nameCaret > 0)
+                    m_nameBuf[-- m_nameCaret] = '\0';
+                repaint();
+                return true;
+            }
+            if (ev.key == kKeyEnter)
+            {
+                commitPatchName();
+                return true;
+            }
+            return true;                 // the field has the keyboard while it is open
+        }
         if (m_menu == Menu::None || !ev.press || ev.key != kKeyEscape)
             return false;
         m_menu = Menu::None;
         m_menuHover = -1;
         repaint();
         return true;
+    }
+
+    /// Typing into the patch name.
+    ///
+    /// The machine's own name editor offers one character set and no others, so anything
+    /// outside it is dropped rather than silently turned into something else -- a name
+    /// that came back different from what was typed would be worse than a key that did
+    /// nothing.
+    bool onCharacterInput(const CharacterInputEvent &ev) override
+    {
+        if (!m_nameEdit)
+            return false;
+        const uint c = ev.character;
+        if (c < 0x20 || c > 0x7e)
+            return true;
+        if (m_nameCaret < voltaire::dive::kNameLen)
+        {
+            m_nameBuf[m_nameCaret ++] = char(c);
+            m_nameBuf[m_nameCaret] = '\0';
+        }
+        repaint();
+        return true;
+    }
+
+    void commitPatchName()
+    {
+        char msg[voltaire::dive::kNameLen + 4];
+        std::snprintf(msg, sizeof(msg), "n%s", m_nameBuf);
+        setState("divewrite", msg);
+        std::snprintf(m_patchName, sizeof(m_patchName), "%-*s",
+                      voltaire::dive::kNameLen, m_nameBuf);
+        m_nameEdit = false;
+        m_dirty = true;
+        repaint();
+    }
+
+    static void trimTrailingSpaces(char *s)
+    {
+        size_t n = std::strlen(s);
+        while (n > 0 && s[n - 1] == ' ')
+            s[-- n] = '\0';
     }
 
 private:
@@ -531,6 +698,117 @@ private:
         if (col >= kMenuCols || row >= kMenuRows)
             return -1;
         return col * kMenuRows + row;
+    }
+
+    // ---- the value list -------------------------------------------------------------
+    //
+    // A menu button in the drawer opens the parameter's whole range as a list.  Key Range
+    // is 128 note names and Output Mode is 50 numbered routings, so this is columns of
+    // sixteen like the patch menu rather than a strip, and it is sized to what it holds.
+
+    int valueCount() const
+    {
+        const voltaire::dive::Param *p = paramFor(m_valueCtl);
+        if (p == nullptr)
+            return 0;
+        const bool tune = p->where == voltaire::dive::kRam
+                       && p->show == voltaire::dive::kSigned;
+        return tune ? (voltaire::dive::kMasterTuneMax - voltaire::dive::kMasterTuneMin + 1)
+                    : (int(p->hi) - int(p->lo) + 1);
+    }
+
+    int valueBase() const
+    {
+        const voltaire::dive::Param *p = paramFor(m_valueCtl);
+        if (p == nullptr)
+            return 0;
+        return (p->where == voltaire::dive::kRam && p->show == voltaire::dive::kSigned)
+                ? voltaire::dive::kMasterTuneMin : int(p->lo);
+    }
+
+    MenuLayout valueLayout(int &rows, int &cols) const
+    {
+        const int n = valueCount();
+        rows = n < kMenuRows ? (n > 0 ? n : 1) : kMenuRows;
+        cols = (n + rows - 1) / (rows > 0 ? rows : 1);
+        MenuLayout m;
+        m.rowH = (float(getHeight()) - 12.0f) / float(kMenuRows + 2);
+        m.rowH = m.rowH < 9.0f ? 9.0f : (m.rowH > 26.0f ? 26.0f : m.rowH);
+        m.fontSize = m.rowH * 0.68f;
+        m.colW = m.fontSize * 5.0f;
+        m.headerH = m.rowH * 1.6f;
+        m.w = float(cols) * m.colW + m.rowH;
+        m.h = m.headerH + float(rows) * m.rowH + m.rowH * 0.5f;
+        m.x = std::floor((float(getWidth()) - m.w) * 0.5f);
+        m.y = std::floor((float(getHeight()) - m.h) * 0.5f);
+        return m;
+    }
+
+    int valueHit(float px, float py) const
+    {
+        int rows = 0, cols = 0;
+        const MenuLayout m = valueLayout(rows, cols);
+        const float gx = px - (m.x + m.rowH * 0.5f);
+        const float gy = py - (m.y + m.headerH);
+        if (gx < 0.0f || gy < 0.0f)
+            return -1;
+        const int col = int(gx / m.colW), row = int(gy / m.rowH);
+        if (col >= cols || row >= rows)
+            return -1;
+        const int idx = col * rows + row;
+        return idx < valueCount() ? idx : -1;
+    }
+
+    void drawValueMenu()
+    {
+        const voltaire::dive::Param *p = paramFor(m_valueCtl);
+        if (p == nullptr)
+            return;
+        int rows = 0, cols = 0;
+        const MenuLayout m = valueLayout(rows, cols);
+        const int base = valueBase(), n = valueCount(), cur = rawOf(m_valueCtl);
+
+        beginPath();
+        rect(0, 0, getWidth(), getHeight());
+        fillColor(Color(0, 0, 0, 0.55f));
+        fill();
+
+        beginPath();
+        roundedRect(m.x, m.y, m.w, m.h, m.rowH * 0.35f);
+        fillColor(Color(26, 28, 32));
+        fill();
+        strokeColor(Color(96, 102, 112));
+        strokeWidth(1.0f);
+        stroke();
+
+        fontFace(m_font);
+        fontSize(m.fontSize * 1.05f);
+        fillColor(Color(0, 163, 224));
+        textAlign(ALIGN_CENTER | ALIGN_MIDDLE);
+        text(m.x + m.w * 0.5f, m.y + m.headerH * 0.55f,
+             prettyLabel(voltaire::panel::kDiveControl[m_valueCtl].label), nullptr);
+
+        fontSize(m.fontSize);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        for (int i = 0; i < n; i ++)
+        {
+            const int col = i / rows, row = i % rows;
+            const float x = m.x + m.rowH * 0.5f + float(col) * m.colW;
+            const float y = m.y + m.headerH + float(row) * m.rowH;
+            const bool current = (base + i) == cur;
+            if (i == m_menuHover || current)
+            {
+                beginPath();
+                roundedRect(x, y, m.colW - 2.0f, m.rowH - 1.0f, 3.0f);
+                fillColor(i == m_menuHover ? Color(0, 163, 224, 0.45f)
+                                           : Color(255, 255, 255, 0.10f));
+                fill();
+            }
+            char item[24];
+            formatRaw(*p, base + i, item, sizeof(item));
+            fillColor(current ? Color(190, 255, 190) : Color(214, 216, 220));
+            text(x + m.fontSize * 0.4f, y + m.rowH * 0.5f, item, nullptr);
+        }
     }
 
     void drawPatchMenu()
@@ -911,6 +1189,479 @@ private:
         return t == (voltaire::panel::kDiveTabRow[t] == 1 ? m_diveTab2 : m_diveTab1);
     }
 
+    // ---- the controls in the drawer --------------------------------------------------
+
+    /// Tie every control in the artwork to the row of kParams that says what it means.
+    ///
+    /// Done once, and loudly: a control nobody has written a parameter for would
+    /// otherwise just sit there doing nothing, which looks exactly like a bug in the
+    /// machine rather than a gap in the table.
+    void resolveDiveParams()
+    {
+        for (int i = 0; i < voltaire::panel::kDiveControlCount; i ++)
+        {
+            const auto &c = voltaire::panel::kDiveControl[i];
+            const char *page = voltaire::panel::kDivePageName[c.page];
+            const voltaire::dive::Param *p = voltaire::dive::find(page, c.label);
+            m_paramOf[i] = (p != nullptr) ? int(p - voltaire::dive::kParams) : -1;
+            if (p == nullptr)
+                d_stderr("DIVE: %s on page %s is in the artwork but not in DiveParams.h",
+                         c.label, page);
+        }
+    }
+
+    const voltaire::dive::Param *paramFor(int ctl) const
+    {
+        const int i = m_paramOf[ctl];
+        return i >= 0 ? &voltaire::dive::kParams[i] : nullptr;
+    }
+
+    /// The value the machine last reported for a control, or -1 if it has not said.
+    int rawOf(int ctl) const
+    {
+        const voltaire::dive::Param *p = paramFor(ctl);
+        if (p == nullptr)
+            return -1;
+        switch (p->where)
+        {
+        case voltaire::dive::kPart:
+            return m_partHave[p->addr & 0x1f] ? int(m_partVal[p->addr & 0x1f]) : -1;
+        case voltaire::dive::kCommon:
+            return m_commonHave[p->addr & 0x1f] ? int(m_commonVal[p->addr & 0x1f]) : -1;
+        case voltaire::dive::kRam:
+        case voltaire::dive::kRamBit:
+        {
+            if (!m_setupKnown)
+                return -1;
+            const int off = int(p->addr) - 0x3C00;
+            if (off < 0 || off >= int(sizeof(m_setup)))
+                return -1;
+            const uint8_t b = m_setup[off];
+            if (p->where == voltaire::dive::kRamBit)
+                return (b >> p->lo) & 1;
+            if (p->show == voltaire::dive::kSigned)
+                return int(int8_t(b));               // master tune, -99..+99
+            return int(b & 0x0f);                    // control channel, one nibble
+        }
+        default:
+            return -1;
+        }
+    }
+
+    static int clampRaw(const voltaire::dive::Param &p, int v)
+    {
+        if (p.where == voltaire::dive::kRam && p.show == voltaire::dive::kSigned)
+            return v < voltaire::dive::kMasterTuneMin ? voltaire::dive::kMasterTuneMin
+                 : (v > voltaire::dive::kMasterTuneMax ? voltaire::dive::kMasterTuneMax : v);
+        return v < int(p.lo) ? int(p.lo) : (v > int(p.hi) ? int(p.hi) : v);
+    }
+
+    /// Push a new value at the machine, and show it straight away.
+    ///
+    /// The local copy is updated without waiting to be told: the round trip is a few
+    /// milliseconds and a slider that only moved once the machine agreed would feel
+    /// like a slider with a fault.
+    void writeRaw(int ctl, int raw)
+    {
+        const voltaire::dive::Param *p = paramFor(ctl);
+        if (p == nullptr)
+            return;
+        raw = clampRaw(*p, raw);
+        char msg[64];
+        switch (p->where)
+        {
+        case voltaire::dive::kPart:
+            m_partVal[p->addr & 0x1f] = uint8_t(raw);
+            m_partHave[p->addr & 0x1f] = true;
+            std::snprintf(msg, sizeof(msg), "p%d %02x %d",
+                          divePart() < 0 ? 0 : divePart(), unsigned(p->addr), raw);
+            break;
+        case voltaire::dive::kCommon:
+            m_commonVal[p->addr & 0x1f] = uint8_t(raw);
+            m_commonHave[p->addr & 0x1f] = true;
+            std::snprintf(msg, sizeof(msg), "c%02x %d", unsigned(p->addr), raw);
+            break;
+        case voltaire::dive::kRam:
+        {
+            const int off = int(p->addr) - 0x3C00;
+            if (off < 0 || off >= int(sizeof(m_setup)))
+                return;
+            const uint8_t byte = (p->show == voltaire::dive::kSigned)
+                    ? uint8_t(int8_t(raw))
+                    : uint8_t((m_setup[off] & 0xf0) | (raw & 0x0f));
+            m_setup[off] = byte;
+            std::snprintf(msg, sizeof(msg), "r%04x %d", unsigned(p->addr), byte);
+            break;
+        }
+        case voltaire::dive::kRamBit:
+        {
+            const int off = int(p->addr) - 0x3C00;
+            if (off < 0 || off >= int(sizeof(m_setup)))
+                return;
+            m_setup[off] = uint8_t(raw ? (m_setup[off] | (1u << p->lo))
+                                       : (m_setup[off] & ~(1u << p->lo)));
+            std::snprintf(msg, sizeof(msg), "b%04x %d %d",
+                          unsigned(p->addr), int(p->lo), raw ? 1 : 0);
+            break;
+        }
+        default:
+            return;
+        }
+        setState("divewrite", msg);
+        m_dirty = true;
+    }
+
+    /// About a second at DPF's idle rate.
+    static constexpr int kDiveRetryIdles = 30;
+
+    /// Is anything on the open page still waiting for the machine to answer?
+    bool pageIncomplete() const
+    {
+        const int page = divePage();
+        if (page < 0)
+            return false;
+        for (int i = voltaire::panel::kDivePageFirst[page];
+             i < voltaire::panel::kDivePageFirst[page + 1]; i ++)
+        {
+            const voltaire::dive::Param *p = paramFor(i);
+            if (p == nullptr)
+                continue;
+            if ((p->where == voltaire::dive::kPart
+                 || p->where == voltaire::dive::kCommon
+                 || p->where == voltaire::dive::kRam
+                 || p->where == voltaire::dive::kRamBit) && rawOf(i) < 0)
+                return true;
+        }
+        return false;
+    }
+
+    /// Ask the DSP for everything the open page shows.
+    ///
+    /// Only what is on screen: the machine answers one RQ1 per parameter and there is no
+    /// ranged read, so asking for all 26 of a part's parameters to fill in five sliders
+    /// would cost five times what it needs to.
+    void requestDiveValues()
+    {
+        if (!m_diveOpen)
+            return;
+        const int page = divePage();
+        if (page < 0)
+            return;
+        const int part = divePart() < 0 ? 0 : divePart();
+        char buf[512];
+        int at = std::snprintf(buf, sizeof(buf), "%d", part);
+        for (int i = voltaire::panel::kDivePageFirst[page];
+             i < voltaire::panel::kDivePageFirst[page + 1]; i ++)
+        {
+            const voltaire::dive::Param *p = paramFor(i);
+            if (p == nullptr || at >= int(sizeof(buf)) - 8)
+                continue;
+            if (p->where == voltaire::dive::kPart)
+                at += std::snprintf(buf + at, sizeof(buf) - size_t(at), " p%02x",
+                                    unsigned(p->addr));
+            else if (p->where == voltaire::dive::kCommon)
+                at += std::snprintf(buf + at, sizeof(buf) - size_t(at), " c%02x",
+                                    unsigned(p->addr));
+        }
+        if (part != m_valuePart)
+        {
+            std::memset(m_partHave, 0, sizeof(m_partHave));
+            m_valuePart = part;
+        }
+        setState("diveread", buf);
+    }
+
+    /// "<part> p07=7f c18=15 r3c00=7f n=Ac.Piano" -- the machine's answer.
+    void applyDiveValues(const char *s)
+    {
+        int part = 0;
+        const char *q = s;
+        part = std::atoi(q);
+        if (part != m_valuePart)
+        {
+            std::memset(m_partHave, 0, sizeof(m_partHave));
+            m_valuePart = part;
+        }
+        while ((q = std::strchr(q, ' ')) != nullptr)
+        {
+            q ++;
+            if (*q == 'n' && q[1] == '=')
+            {
+                std::memset(m_patchName, 0, sizeof(m_patchName));
+                for (int i = 0; i < voltaire::dive::kNameLen && q[2 + i] != '\0'; i ++)
+                    m_patchName[i] = q[2 + i];
+                break;                                // the name runs to the end
+            }
+            unsigned addr = 0, val = 0;
+            if (std::sscanf(q + 1, "%x=%x", &addr, &val) != 2)
+                continue;
+            if (*q == 'p' && addr < 0x20)
+            { m_partVal[addr] = uint8_t(val); m_partHave[addr] = true; }
+            else if (*q == 'c' && addr < 0x20)
+            { m_commonVal[addr] = uint8_t(val); m_commonHave[addr] = true; }
+            else if (*q == 'r' && addr >= 0x3C00 && addr < 0x3C00 + sizeof(m_setup))
+            { m_setup[addr - 0x3C00] = uint8_t(val); m_setupKnown = true; }
+        }
+        m_dirty = true;
+    }
+
+    /// The value as it should read in the field: four or five characters, LCD style.
+    void formatValue(int ctl, char *out, size_t n) const
+    {
+        const voltaire::dive::Param *p = paramFor(ctl);
+        out[0] = '\0';
+        if (p == nullptr)
+            return;
+        if (p->where == voltaire::dive::kUnmapped)
+        { std::snprintf(out, n, "--"); return; }
+        if (p->where == voltaire::dive::kName)
+        { std::snprintf(out, n, "%s", m_patchName); return; }
+        if (p->where == voltaire::dive::kTone)
+        { std::snprintf(out, n, "%s", toneNameFor(divePart() < 0 ? 0 : divePart())); return; }
+        if (p->where == voltaire::dive::kAction)
+            return;
+
+        const int raw = rawOf(ctl);
+        if (raw < 0)
+        { std::snprintf(out, n, "..."); return; }
+        formatRaw(*p, raw, out, n);
+    }
+
+    /// One value of a parameter, as the field or the list would print it.
+    static void formatRaw(const voltaire::dive::Param &pp, int raw, char *out, size_t n)
+    {
+        const voltaire::dive::Param *p = &pp;
+        switch (p->show)
+        {
+        case voltaire::dive::kOnOff:
+            std::snprintf(out, n, raw ? "YES" : "NO");
+            break;
+        case voltaire::dive::kAssign:
+            if (raw >= 6) std::snprintf(out, n, "OFF");
+            else          std::snprintf(out, n, "%d", raw + 1);
+            break;
+        case voltaire::dive::kNote:
+        {
+            static const char *const kNames[12] = { "C", "C#", "D", "D#", "E", "F",
+                                                    "F#", "G", "G#", "A", "A#", "B" };
+            std::snprintf(out, n, "%s%d", kNames[raw % 12], raw / 12 - 1);
+            break;
+        }
+        case voltaire::dive::kSigned:
+        case voltaire::dive::kPolyPress:
+            std::snprintf(out, n, "%+d", voltaire::dive::display(*p, raw));
+            break;
+        default:
+            std::snprintf(out, n, "%d", voltaire::dive::display(*p, raw));
+            break;
+        }
+    }
+
+    /// Where a slider's tap sits, as 0 at the bottom graticule and 1 at the top.
+    float sliderFraction(int ctl) const
+    {
+        const voltaire::dive::Param *p = paramFor(ctl);
+        const int raw = rawOf(ctl);
+        if (p == nullptr || raw < 0)
+            return 0.0f;
+        const int lo = (p->where == voltaire::dive::kRam
+                        && p->show == voltaire::dive::kSigned)
+                ? voltaire::dive::kMasterTuneMin : int(p->lo);
+        const int hi = (p->where == voltaire::dive::kRam
+                        && p->show == voltaire::dive::kSigned)
+                ? voltaire::dive::kMasterTuneMax : int(p->hi);
+        if (hi <= lo)
+            return 0.0f;
+        return float(raw - lo) / float(hi - lo);
+    }
+
+    /// ...and the inverse, for a drag.
+    int sliderRawAt(int ctl, float fraction) const
+    {
+        const voltaire::dive::Param *p = paramFor(ctl);
+        if (p == nullptr)
+            return 0;
+        const bool tune = p->where == voltaire::dive::kRam
+                       && p->show == voltaire::dive::kSigned;
+        const int lo = tune ? voltaire::dive::kMasterTuneMin : int(p->lo);
+        const int hi = tune ? voltaire::dive::kMasterTuneMax : int(p->hi);
+        const float f = fraction < 0.0f ? 0.0f : (fraction > 1.0f ? 1.0f : fraction);
+        return lo + int(std::lround(f * float(hi - lo)));
+    }
+
+    /// How far, in design units, the artwork's tap has to move to show the value.
+    /// Zero is the bottom graticule and the travel's height is the top one, which is
+    /// what "the tap does not exceed the first or last line" means.
+    float tapOffset(int ctl) const
+    {
+        const auto &c = voltaire::panel::kDiveControl[ctl];
+        const float want = c.travel.y + c.travel.h * (1.0f - sliderFraction(ctl));
+        return want - (c.tap.y + c.tap.h * 0.5f);
+    }
+
+    /// The control under a design-space point on the open page, or -1.
+    int diveControlHit(float x, float y) const
+    {
+        if (!m_diveOpen)
+            return -1;
+        const int page = divePage();
+        if (page < 0)
+            return -1;
+        for (int i = voltaire::panel::kDivePageFirst[page];
+             i < voltaire::panel::kDivePageFirst[page + 1]; i ++)
+        {
+            const auto &c = voltaire::panel::kDiveControl[i];
+            voltaire::panel::Rect r = c.box;
+            if (c.kind == voltaire::panel::DK_SLIDER)
+            {
+                // A slider is grabbed anywhere along its travel, and the tap is narrow,
+                // so the hit box is the wider of the two with a little margin.
+                r.x = c.tap.x < c.box.x ? c.tap.x : c.box.x;
+                r.w = (c.tap.w > c.box.w ? c.tap.w : c.box.w);
+                r.y = c.travel.y - c.tap.h;
+                r.h = c.travel.h + c.tap.h * 2.0f;
+            }
+            if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h)
+                return i;
+        }
+        return -1;
+    }
+
+    /// A click on a control in the drawer.
+    void pressDiveControl(int ctl, float y)
+    {
+        const auto &c = voltaire::panel::kDiveControl[ctl];
+        const voltaire::dive::Param *p = paramFor(ctl);
+        if (p == nullptr || p->where == voltaire::dive::kUnmapped)
+            return;
+
+        if (c.kind == voltaire::panel::DK_SLIDER)
+        {
+            // Grabbing anywhere on the travel jumps there and starts a drag, which is
+            // what a fader does; there is no separate "click the tap first" step.
+            m_dragCtl = ctl;
+            dragSliderTo(ctl, y);
+            repaint();
+            return;
+        }
+
+        switch (p->where)
+        {
+        case voltaire::dive::kName:
+            // Edited in place rather than in a dialog: ten characters is not worth a
+            // window, and the field is already the right shape and the right font.
+            m_nameEdit = true;
+            std::snprintf(m_nameBuf, sizeof(m_nameBuf), "%s", m_patchName);
+            trimTrailingSpaces(m_nameBuf);
+            m_nameCaret = int(std::strlen(m_nameBuf));
+            repaint();
+            return;
+        case voltaire::dive::kTone:
+            m_tonePart = divePart() < 0 ? 0 : divePart();
+            for (size_t g = 0; g < m_toneGroups.size(); g ++)
+                if (m_toneGroups[g].media == m_partMedia[m_tonePart])
+                    m_toneGroup = int(g);
+            m_menu = Menu::Tone;
+            m_toneHover = ToneHit();
+            repaint();
+            return;
+        case voltaire::dive::kAction:
+            runDiveAction(uint8_t(p->addr));
+            repaint();
+            return;
+        default:
+            break;
+        }
+
+        if (p->show == voltaire::dive::kOnOff)
+        {
+            const int raw = rawOf(ctl);
+            writeRaw(ctl, raw > 0 ? 0 : 1);
+            repaint();
+            return;
+        }
+
+        // Everything else is a list to pick from.
+        m_valueCtl = ctl;
+        m_menu = Menu::Value;
+        m_menuHover = -1;
+        repaint();
+    }
+
+    /// The Common page's four routing presets, and the Basic page's Defaults.
+    ///
+    /// Left and right are Output Assign, not Output Mode: in mode 21 voice group 1 is
+    /// <L31> and group 2 is <R31> (OM Output Modes, and the note under the table), so
+    /// hard left is assign 1 and hard right assign 2 -- and only in a mode that has an
+    /// L/R pair at all, which is why they set the mode too.  These sit in a patch-level
+    /// box, so they move all six parts.
+    void runDiveAction(uint8_t action)
+    {
+        using namespace voltaire::dive;
+        switch (action)
+        {
+        case kActDefaults:
+        {
+            const int part = divePart() < 0 ? 0 : divePart();
+            writePartRaw(part, 0x00, 0);      // output assign -> voice group 1
+            writePartRaw(part, 0x01, 0);      // receive channel -> 1
+            writePartRaw(part, 0x05, 0);      // key range low  -> the bottom
+            writePartRaw(part, 0x06, 127);    // key range high -> the top
+            break;
+        }
+        case kActPresetEfx:
+            writeCommonRaw(0x18, kModeStereoEfx);
+            break;
+        case kActPresetDry:
+            writeCommonRaw(0x18, kModeCentreDry);
+            break;
+        case kActPresetLeft:
+        case kActPresetRight:
+            writeCommonRaw(0x18, kModeStereoEfx);
+            for (int part = 0; part < 6; part ++)
+                writePartRaw(part, 0x00, action == kActPresetLeft ? 0 : 1);
+            break;
+        case kActWrite:
+            // Storing the temporary patch is the machine's own WRITE procedure, driven
+            // from the front panel; there is no SysEx for it.  Not built yet, and saying
+            // so beats appearing to have saved something.
+            d_stderr("DIVE: WRITE is not wired up yet");
+            break;
+        default:
+            break;
+        }
+    }
+
+    void writePartRaw(int part, uint8_t addr, int value)
+    {
+        char msg[48];
+        std::snprintf(msg, sizeof(msg), "p%d %02x %d", part, unsigned(addr), value);
+        setState("divewrite", msg);
+        if (part == m_valuePart && addr < 0x20)
+        { m_partVal[addr] = uint8_t(value); m_partHave[addr] = true; }
+        m_dirty = true;
+    }
+
+    void writeCommonRaw(uint8_t addr, int value)
+    {
+        char msg[48];
+        std::snprintf(msg, sizeof(msg), "c%02x %d", unsigned(addr), value);
+        setState("divewrite", msg);
+        if (addr < 0x20)
+        { m_commonVal[addr] = uint8_t(value); m_commonHave[addr] = true; }
+        m_dirty = true;
+    }
+
+    /// Set a slider from a pointer position on the page.
+    void dragSliderTo(int ctl, float y)
+    {
+        const auto &c = voltaire::panel::kDiveControl[ctl];
+        if (c.travel.h <= 0.0f)
+            return;
+        const float f = 1.0f - (y - c.travel.y) / c.travel.h;
+        writeRaw(ctl, sliderRawAt(ctl, f));
+    }
+
     float panelScale() const
     {
         const float sx = float(getWidth()) / voltaire::panel::kDesignWidth;
@@ -1101,6 +1852,18 @@ private:
         {
             if (!(sh->flags & NSVG_FLAGS_VISIBLE))
                 continue;
+
+            // A slider tap is drawn where the VALUE is, not where Inkscape parked it.
+            // Shifting the artwork's own shape rather than drawing a replacement keeps
+            // whatever gradient and outline it was given.  Same idea as the knob pointer,
+            // which is rotated instead of moved.
+            const int slider = sliderForTapId(p, sh->id);
+            const bool moved = slider >= 0;
+            if (moved)
+            {
+                save();
+                translate(0.0f, tapOffset(slider) / k);
+            }
             shapePath(sh);
             if (sh->fill.type == NSVG_PAINT_COLOR)
             {
@@ -1113,8 +1876,165 @@ private:
                 strokeWidth(sh->strokeWidth);
                 stroke();
             }
+            if (moved)
+                restore();
         }
         restore();
+
+        drawDiveValues(p);
+    }
+
+    /// Which slider owns this shape, if it is a tap.  Only the open page is searched.
+    int sliderForTapId(int page, const char *id) const
+    {
+        if (id == nullptr || id[0] == '\0')
+            return -1;
+        for (int i = voltaire::panel::kDivePageFirst[page];
+             i < voltaire::panel::kDivePageFirst[page + 1]; i ++)
+        {
+            const char *t = voltaire::panel::kDiveControl[i].tap_id;
+            if (t != nullptr && std::strcmp(t, id) == 0)
+                return i;
+        }
+        return -1;
+    }
+
+    /// The numbers and words in the LCD-style fields.
+    void drawDiveValues(int page)
+    {
+        for (int i = voltaire::panel::kDivePageFirst[page];
+             i < voltaire::panel::kDivePageFirst[page + 1]; i ++)
+        {
+            const auto &c = voltaire::panel::kDiveControl[i];
+            if (c.kind == voltaire::panel::DK_SLIDER)
+                continue;
+            char text[24];
+            formatValue(i, text, sizeof(text));
+            if (text[0] == '\0')
+                continue;
+            const voltaire::dive::Param *p = paramFor(i);
+            const bool dim = p != nullptr && p->where == voltaire::dive::kUnmapped;
+            if (m_nameEdit && p != nullptr && p->where == voltaire::dive::kName)
+            {
+                // The caret is a block, the way the machine's own name editor draws it.
+                char withCaret[voltaire::dive::kNameLen + 2];
+                std::snprintf(withCaret, sizeof(withCaret), "%s_", m_nameBuf);
+                drawCgromText(c.box, withCaret, Color(190, 255, 190));
+                beginPath();
+                roundedRect(c.box.x, c.box.y, c.box.w, c.box.h, c.box.h * 0.12f);
+                strokeColor(Color(120, 220, 255, 0.75f));
+                strokeWidth(1.2f);
+                stroke();
+                continue;
+            }
+            drawCgromText(c.box, text, dim ? Color(70, 110, 72) : Color(150, 255, 150));
+        }
+    }
+
+    /// Text in the machine's own 5 x 7 dot font, centred in a rect.
+    ///
+    /// The same glyph table the LCD draws from, for the same reason the panel uses it
+    /// there: these fields are the machine talking, and it has one typeface.
+    void drawCgromText(const voltaire::panel::Rect &r, const char *s, const Color &on)
+    {
+        const int n = int(std::strlen(s));
+        if (n <= 0)
+            return;
+        const float byW = r.w * 0.84f / float(n * 6 - 1);
+        const float byH = r.h * 0.60f / 8.0f;
+        const float d = byW < byH ? byW : byH;
+        const float tw = d * float(n * 6 - 1), th = d * 8.0f;
+        const float x0 = r.x + (r.w - tw) * 0.5f;
+        const float y0 = r.y + (r.h - th) * 0.5f;
+        fillColor(on);
+        for (int i = 0; i < n; i ++)
+        {
+            const unsigned char ch = (unsigned char)s[i];
+            if (ch < 0x20 || ch >= 0x80)
+                continue;
+            const unsigned char *glyph = kU110Cgrom[ch - 0x20];
+            for (int row = 0; row < 8; row ++)
+            {
+                const unsigned bits = glyph[row];
+                for (int col = 0; col < 5; col ++)
+                {
+                    if (!((bits >> (4 - col)) & 1))
+                        continue;
+                    beginPath();
+                    rect(x0 + float(i * 6 + col) * d, y0 + float(row) * d,
+                         d * 0.88f, d * 0.88f);
+                    fill();
+                }
+            }
+        }
+    }
+
+    /// What the pointer is over, in words and in numbers, near the pointer.
+    ///
+    /// The artwork has no room for a value beside every slider -- there are eight across
+    /// the LFO page -- so the number appears where you are looking instead, both while
+    /// hovering and while dragging.
+    void drawDiveTooltip()
+    {
+        const int ctl = m_dragCtl >= 0 ? m_dragCtl : m_hoverCtl;
+        if (!m_diveOpen || ctl < 0)
+            return;
+        const auto &c = voltaire::panel::kDiveControl[ctl];
+        const voltaire::dive::Param *p = paramFor(ctl);
+        if (p == nullptr || p->where == voltaire::dive::kAction)
+            return;
+
+        char value[24];
+        formatValue(ctl, value, sizeof(value));
+        char line[64];
+        std::snprintf(line, sizeof(line), "%s  %s", prettyLabel(c.label), value);
+
+        fontFaceId(0);
+        fontSize(13.0f);
+        fontFace(m_font);
+        Rectangle<float> box;
+        textBounds(0, 0, line, nullptr, box);
+        const float pad = 6.0f;
+        const float w = box.getWidth() + pad * 2.0f, h = 20.0f;
+        float x = m_tipX + 14.0f, y = m_tipY - h - 8.0f;
+        if (x + w > float(getWidth()))  x = float(getWidth()) - w;
+        if (y < 0.0f)                   y = m_tipY + 18.0f;
+
+        beginPath();
+        roundedRect(x, y, w, h, 4.0f);
+        fillColor(Color(12, 14, 16, 0.92f));
+        fill();
+        strokeColor(Color(0, 163, 224, 0.55f));
+        strokeWidth(1.0f);
+        stroke();
+
+        fillColor(Color(214, 222, 228));
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        text(x + pad, y + h * 0.5f, line, nullptr);
+    }
+
+    /// "SB_ENV_Attack_Rate" -> "ENV Attack Rate".
+    static const char *prettyLabel(const char *label)
+    {
+        static char buf[48];
+        const char *s = std::strchr(label, '_');
+        s = (s != nullptr) ? s + 1 : label;
+        size_t i = 0;
+        for (; s[i] != '\0' && i < sizeof(buf) - 1; i ++)
+            buf[i] = s[i] == '_' ? ' ' : s[i];
+        buf[i] = '\0';
+        return buf;
+    }
+
+    /// The tone a part is playing, by name, for the Basic page's field.
+    const char *toneNameFor(int part) const
+    {
+        if (part < 0 || part >= 6)
+            return "";
+        for (const ToneGroup &g : m_toneGroups)
+            if (g.media == m_partMedia[part] && m_partTone[part] < g.names.size())
+                return g.names[m_partTone[part]].c_str();
+        return "";
     }
 
     void loadDivePage(int p)
@@ -1418,6 +2338,33 @@ private:
     NSVGimage *m_pageSvg[voltaire::panel::DIVEPAGE_COUNT] = { nullptr };
     NanoImage m_pageRaster[voltaire::panel::DIVEPAGE_COUNT];
     bool m_pageTried[voltaire::panel::DIVEPAGE_COUNT] = { false };
+
+    // One entry per control in the artwork: which row of kParams describes it, what the
+    // machine last said its value was, and whether it has said anything yet.  Resolved
+    // once at startup, so a control the table has no row for is reported then rather
+    // than being silently dead.
+    int m_paramOf[voltaire::panel::kDiveControlCount] = { 0 };
+
+    // Values are held by ADDRESS, not by control, because two pages share a control name
+    // and mean different parameters by it -- and because that is the shape the machine
+    // answers in.  m_valuePart says which part the part table describes.
+    uint8_t m_partVal[0x20] = { 0 };
+    bool m_partHave[0x20] = { false };
+    uint8_t m_commonVal[0x20] = { 0 };
+    bool m_commonHave[0x20] = { false };
+    int m_valuePart = -1;
+    uint8_t m_setup[4] = { 0 };
+    bool m_setupKnown = false;
+    char m_patchName[voltaire::dive::kNameLen + 1] = { 0 };
+
+    bool m_nameEdit = false;     ///< the patch name field has the keyboard
+    char m_nameBuf[voltaire::dive::kNameLen + 1] = { 0 };
+    int m_nameCaret = 0;
+    bool m_diveNeedRead = false; ///< the open page's values are stale
+    int m_diveRetry = 0;         ///< idles left before asking again
+    int m_dragCtl = -1;          ///< the slider being dragged, or -1
+    int m_hoverCtl = -1;         ///< what the pointer is over, for the tooltip
+    float m_tipX = 0.0f, m_tipY = 0.0f;
     bool m_dirty = true;
     const bool m_countFrames = std::getenv("VOLTAIRE_FPS") != nullptr;
 
@@ -1426,8 +2373,9 @@ private:
     uint32_t m_cgramIn = 0;
     uint8_t m_leds = 0, m_cursorPos = 0, m_cursorFlags = 0;
 
-    enum class Menu { None, Patch, Tone };
+    enum class Menu { None, Patch, Tone, Value };
     Menu m_menu = Menu::None;
+    int m_valueCtl = -1;          ///< which DIVE control the value list belongs to
 
     uint8_t m_patch = 0;
     std::vector<std::string> m_patchNames;

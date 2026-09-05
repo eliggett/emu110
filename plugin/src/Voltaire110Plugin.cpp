@@ -248,6 +248,9 @@ constexpr uint16_t kRxSwitchAddr = 0x3C00;
 constexpr uint8_t  kRxExclusive  = 0x20;
 constexpr uint16_t kDeviceIdAddr = 0x3C01;
 
+/// The active patch's own fields, inside the same edit buffer as the part records.
+constexpr uint16_t kActivePatch   = 0x2800;   ///< same layout as a stored patch
+
 /// What the plugin keeps.  Only the NVRAM is saved into a session; the panel is live
 /// display pushed to the UI.
 enum States
@@ -259,6 +262,9 @@ enum States
     kStatePatchSel,
     kStateTones,
     kStateToneSel,
+    kStateDiveVals,
+    kStateDiveRead,
+    kStateDiveWrite,
     kStateCount
 };
 
@@ -491,6 +497,29 @@ protected:
             state.hints = kStateIsOnlyForDSP;
             state.defaultValue = "";
             break;
+        case kStateDiveVals:
+            state.key = "divevals";
+            state.label = "DIVE values";
+            // The answers to the last diveread, plus the SETUP bytes and the patch
+            // name, which cost nothing because they are read straight out of RAM.
+            state.hints = kStateIsOnlyForUI;
+            state.defaultValue = "";
+            break;
+        case kStateDiveRead:
+            state.key = "diveread";
+            state.label = "Read DIVE values";
+            // "<part> p07 p08 c18 ..." -- the UI names what its open page needs.
+            state.hints = kStateIsOnlyForDSP;
+            state.defaultValue = "";
+            break;
+        case kStateDiveWrite:
+            state.key = "divewrite";
+            state.label = "Write a DIVE value";
+            // "p <part> <addr> <value>", "c <addr> <value>", "r <addr> <value>",
+            // "b <addr> <bit> <0|1>", or "n <name>".
+            state.hints = kStateIsOnlyForDSP;
+            state.defaultValue = "";
+            break;
         }
     }
 
@@ -559,6 +588,44 @@ protected:
                 return;
             m_toneRequest.store(int(part << 16 | media << 8 | tone),
                                 std::memory_order_relaxed);
+            return;
+        }
+
+        if (std::strcmp(key, "diveread") == 0)
+        {
+            // "<part> p07 p08 c18 ..." -- one token per value the open page wants.
+            // Left for run() to carry out, like every other request from the UI: the
+            // answers come back over MIDI in emulated time, which only run() has.
+            DiveJob job;
+            const char *s = value;
+            char *end = nullptr;
+            const long part = std::strtol(s, &end, 10);
+            if (end == s || part < 0 || part >= long(kNumParts))
+                return;
+            s = end;
+            while (*s != '\0' && job.n < kDiveMax)
+            {
+                while (*s == ' ') s ++;
+                const char kind = *s;
+                if (kind != 'p' && kind != 'c')
+                    break;
+                const long addr = std::strtol(s + 1, &end, 16);
+                if (end == s + 1 || addr < 0 || addr > 0x7f)
+                    break;
+                job.ask[job.n].kind = uint8_t(kind);
+                job.ask[job.n].addr = uint8_t(addr);
+                job.n ++;
+                s = end;
+            }
+            job.part = uint8_t(part);
+            m_diveJob = job;
+            m_diveJobReady.store(true, std::memory_order_release);
+            return;
+        }
+
+        if (std::strcmp(key, "divewrite") == 0)
+        {
+            queueDiveWrite(value);
             return;
         }
 
@@ -645,6 +712,7 @@ protected:
         // to rather than at the start of the next one.
         tickPatchSelect(coreFrames);
         tickToneSelect(coreFrames);
+        tickDive(coreFrames);
 
         // MIDI first, timestamped into the core block about to be rendered.  The host's
         // offsets are in HOST frames; the core counts in its own 32 kHz frames.
@@ -978,6 +1046,20 @@ private:
         const unsigned media = unsigned(want) >> 8 & 0xff;
         const unsigned tone  = unsigned(want) & 0xff;
 
+        openExclusive(kSysexFrames);
+
+        const uint8_t dev = m_core.readMem(kDeviceIdAddr) & 0x7f;
+        sendDt1(dev, 0x00, uint8_t(0x10 + part), 0x02, uint8_t(media));
+        sendDt1(dev, 0x00, uint8_t(0x10 + part), 0x03, uint8_t(tone));
+    }
+
+    /// Hold SETUP:MIDI:EXCLUSIVE open for `frames`, remembering what it was.
+    ///
+    /// The switch is the user's, and a machine with it off is a machine that has been
+    /// told not to listen; borrowing it for the length of a message and handing it back
+    /// is the only way to edit a parameter without overriding that.
+    void openExclusive(uint32_t frames)
+    {
         const uint8_t rx = m_core.readMem(kRxSwitchAddr);
         if ((rx & kRxExclusive) == 0)
         {
@@ -988,11 +1070,16 @@ private:
             m_core.writeMem(kRxSwitchAddr, uint8_t(rx | kRxExclusive));
         }
         if (m_rxRestoreWait != 0 || (rx & kRxExclusive) == 0)
-            m_rxRestoreWait = kSysexFrames;
+            m_rxRestoreWait = frames;
+    }
 
-        const uint8_t dev = m_core.readMem(kDeviceIdAddr) & 0x7f;
-        sendDt1(dev, 0x00, uint8_t(0x10 + part), 0x02, uint8_t(media));
-        sendDt1(dev, 0x00, uint8_t(0x10 + part), 0x03, uint8_t(tone));
+    /// One Roland RQ1 read request.  The machine answers with a DT1 carrying the value.
+    void sendRq1(uint8_t dev, uint8_t a1, uint8_t a2, uint8_t a3)
+    {
+        const int sum = a1 + a2 + a3 + 0 + 0 + 1;
+        const uint8_t msg[] = { 0xf0, 0x41, dev, 0x23, 0x11, a1, a2, a3, 0x00, 0x00, 0x01,
+                                uint8_t((128 - (sum & 0x7f)) & 0x7f), 0xf7 };
+        m_core.midiIn(msg, sizeof(msg), 0);
     }
 
     /// One Roland DT1 write: F0 41 <dev> 23 12 <address> <data> <sum> F7, the checksum
@@ -1003,6 +1090,274 @@ private:
         const uint8_t msg[] = { 0xf0, 0x41, dev, 0x23, 0x12, a1, a2, a3, value,
                                 uint8_t((128 - (sum & 0x7f)) & 0x7f), 0xf7 };
         m_core.midiIn(msg, sizeof(msg), 0);
+    }
+
+    // ---- the DIVE editor -------------------------------------------------------------
+    //
+    // Reading a value back is one RQ1 per parameter.  The 16-byte part record packs all
+    // 26 of a part's parameters into it and the packing is unmapped, but every address in
+    // the Owner's Manual's individual-parameter map answers an RQ1 with the value already
+    // decoded -- so the packing never has to be solved.  See SYSTEM-DESIGN 5.3.2, where
+    // each of these was read off the running machine.
+    //
+    // The size field is ignored on that map: asking for a part's 26 parameters at once
+    // returns exactly one byte.  So a page is one request per control, serially, which at
+    // 22 bytes on the wire each is a few milliseconds apiece -- cheap enough to redo on
+    // every tab click, and the reason not to reverse-engineer the record.
+    //
+    // SETUP has no SysEx address anywhere, so those go straight to battery-backed RAM,
+    // and so does the patch name: nothing is derived from it, unlike a tone.
+
+    /// How long to wait for one answer before giving up on it and asking the next
+    /// question.  A reply lands about 15 ms after the request starts clocking in -- 11
+    /// bytes out at 31250 baud, then the firmware's own turnaround -- and the wait ends
+    /// as soon as the answer is actually in, so this is only the failure case.
+    static constexpr uint32_t kRq1Timeout = voltaire::kCoreSampleRate * 60 / 1000;
+
+    static constexpr int kDiveMax = 48;
+
+    struct DiveAsk { uint8_t kind, addr; };     ///< 'p' a part parameter, 'c' patch common
+
+    struct DiveJob
+    {
+        uint8_t part = 0;
+        uint8_t n = 0;
+        DiveAsk ask[kDiveMax] = {};
+    };
+
+    /// One queued write.  'p'/'c' go out as SysEx, 'r'/'b' straight into RAM.
+    struct DiveWrite { uint8_t kind, part, value; uint16_t addr; uint8_t bit; };
+
+    void queueDiveWrite(const char *value)
+    {
+        DiveWrite w {};
+        unsigned a = 0, b = 0, v = 0, p = 0;
+        switch (value[0])
+        {
+        case 'p':
+            if (std::sscanf(value + 1, "%u %x %u", &p, &a, &v) != 3) return;
+            if (p >= kNumParts || a > 0x7f || v > 0x7f) return;
+            w = { 'p', uint8_t(p), uint8_t(v), uint16_t(a), 0 };
+            break;
+        case 'c':
+            if (std::sscanf(value + 1, "%x %u", &a, &v) != 2) return;
+            if (a > 0x7f || v > 0x7f) return;
+            w = { 'c', 0, uint8_t(v), uint16_t(a), 0 };
+            break;
+        case 'r':
+            if (std::sscanf(value + 1, "%x %u", &a, &v) != 2) return;
+            if (v > 0xff) return;
+            w = { 'r', 0, uint8_t(v), uint16_t(a), 0 };
+            break;
+        case 'b':
+            if (std::sscanf(value + 1, "%x %u %u", &a, &b, &v) != 3) return;
+            if (b > 7) return;
+            w = { 'b', 0, uint8_t(v ? 1 : 0), uint16_t(a), uint8_t(b) };
+            break;
+        case 'n':
+        {
+            // The patch name, straight into the edit buffer.  Ten characters, padded,
+            // and nothing outside the machine's own character set gets through.
+            const char *s = value + 1;
+            while (*s == ' ') s ++;
+            for (unsigned i = 0; i < kPatchNameLen; i ++)
+            {
+                const char c = s[i] != '\0' ? s[i] : ' ';
+                m_nameWrite[i] = (c >= 0x20 && c < 0x7f) ? uint8_t(c) : uint8_t(' ');
+                if (s[i] == '\0')
+                    for (unsigned j = i + 1; j < kPatchNameLen; j ++)
+                        m_nameWrite[j] = ' ';
+                if (s[i] == '\0')
+                    break;
+            }
+            m_nameWritePending.store(true, std::memory_order_release);
+            return;
+        }
+        default:
+            return;
+        }
+
+        const unsigned head = m_diveWrHead.load(std::memory_order_relaxed);
+        const unsigned next = (head + 1) % kDiveWriteQueue;
+        if (next == m_diveWrTail.load(std::memory_order_acquire))
+            return;                                  // full: drop rather than block
+        m_diveWrites[head] = w;
+        m_diveWrHead.store(next, std::memory_order_release);
+    }
+
+    void tickDive(uint32_t coreFrames)
+    {
+        if (!m_romsLoaded)
+            return;
+
+        // Nothing is answered until the machine has finished booting.  It takes about
+        // five and a half seconds, and a session that comes back with the drawer open
+        // asks before then -- at which point RAM reads as zeros, which is a perfectly
+        // plausible answer and therefore the worst possible one.  Saying nothing leaves
+        // the UI showing dots and asking again, which is the truth.
+        //
+        // Reaching the play screen once is the signal, and it is only needed once: a
+        // machine sitting in one of its own menus is still perfectly able to answer, and
+        // gating every read on the display would stall the drawer for as long as somebody
+        // left a menu open.
+        if (!m_machineUp)
+        {
+            if (!onPlayScreen())
+                return;
+            m_machineUp = true;
+        }
+
+        // Writes first, so a value the user just moved is in the machine before the read
+        // that would otherwise report the old one back at them.
+        drainDiveWrites();
+
+        if (m_nameWritePending.exchange(false, std::memory_order_acquire))
+            for (unsigned i = 0; i < kPatchNameLen; i ++)
+                m_core.writeMem(uint16_t(kActivePatch + kPatchNameOffset + i), m_nameWrite[i]);
+
+        if (!m_diveBusy)
+        {
+            if (!m_diveJobReady.exchange(false, std::memory_order_acquire))
+                return;
+            m_diveRun = m_diveJob;
+            m_diveAt = 0;
+            m_diveWait = 0;
+            m_diveRxLen = 0;
+            std::memset(m_diveHave, 0, sizeof(m_diveHave));
+            m_diveBusy = m_diveRun.n != 0;
+            if (!m_diveBusy)
+            {
+                publishDiveVals();                   // SETUP and the name, at least
+                return;
+            }
+        }
+
+        // Wait for the answer to the question already asked, not for a fixed delay.
+        // Publishing on a timer instead was the bug that left the last value on every
+        // page showing dots: the reply to the final request had not arrived yet.
+        if (m_diveAt > 0 && !m_diveHave[m_diveAt - 1])
+        {
+            if (m_diveWait > coreFrames)
+            {
+                m_diveWait -= coreFrames;
+                return;
+            }
+            // Timed out.  Move on rather than stalling the page on one dead address.
+        }
+
+        if (m_diveAt >= m_diveRun.n)
+        {
+            m_diveBusy = false;
+            publishDiveVals();
+            return;
+        }
+
+        openExclusive(kRq1Timeout);
+        const uint8_t dev = m_core.readMem(kDeviceIdAddr) & 0x7f;
+        const DiveAsk &a = m_diveRun.ask[m_diveAt];
+        sendRq1(dev, 0x00,
+                a.kind == 'p' ? uint8_t(0x10 + m_diveRun.part) : uint8_t(0x01), a.addr);
+        m_diveAt ++;
+        m_diveWait = kRq1Timeout;
+    }
+
+    void drainDiveWrites()
+    {
+        unsigned tail = m_diveWrTail.load(std::memory_order_relaxed);
+        const unsigned head = m_diveWrHead.load(std::memory_order_acquire);
+        if (tail == head)
+            return;
+        while (tail != head)
+        {
+            const DiveWrite &w = m_diveWrites[tail];
+            if (w.kind == 'r')
+                m_core.writeMem(w.addr, w.value);
+            else if (w.kind == 'b')
+            {
+                const uint8_t cur = m_core.readMem(w.addr);
+                const uint8_t bit = uint8_t(1u << w.bit);
+                const uint8_t now = uint8_t(w.value ? (cur | bit) : (cur & ~bit));
+                m_core.writeMem(w.addr, now);
+                // EXCLUSIVE is the switch this code borrows to speak at all.  If the user
+                // has just turned it off, the borrow must not put it back on afterwards.
+                if (w.addr == kRxSwitchAddr && w.bit == 5)
+                {
+                    m_rxSaved = now;
+                    m_rxRestoreWait = 0;
+                }
+            }
+            else
+            {
+                openExclusive(kSysexFrames);
+                const uint8_t dev = m_core.readMem(kDeviceIdAddr) & 0x7f;
+                sendDt1(dev, 0x00,
+                        w.kind == 'p' ? uint8_t(0x10 + w.part) : uint8_t(0x01),
+                        uint8_t(w.addr), w.value);
+            }
+            tail = (tail + 1) % kDiveWriteQueue;
+        }
+        m_diveWrTail.store(tail, std::memory_order_release);
+    }
+
+    /// Collect one byte of the machine's answer.  Only complete, well-formed DT1s whose
+    /// address is one this read asked for are kept; anything else is discarded, which is
+    /// what stops a stray reply being reported as a value.
+    void diveReplyByte(uint8_t b)
+    {
+        if (b == 0xf0)
+            m_diveRxLen = 0;
+        if (m_diveRxLen < sizeof(m_diveRx))
+            m_diveRx[m_diveRxLen ++] = b;
+        if (b != 0xf7 || m_diveRxLen != 11)
+            return;
+        if (m_diveRx[0] != 0xf0 || m_diveRx[1] != 0x41 || m_diveRx[3] != 0x23
+                || m_diveRx[4] != 0x12)
+            return;
+        const uint8_t a2 = m_diveRx[6], a3 = m_diveRx[7], v = m_diveRx[8];
+        if (m_diveRx[5] != 0x00)
+            return;
+        for (uint8_t i = 0; i < m_diveRun.n; i ++)
+        {
+            const DiveAsk &a = m_diveRun.ask[i];
+            const uint8_t want = a.kind == 'p' ? uint8_t(0x10 + m_diveRun.part) : 0x01;
+            if (a2 == want && a3 == a.addr)
+            {
+                m_diveVal[i] = v;
+                m_diveHave[i] = true;
+                return;
+            }
+        }
+    }
+
+    /// Everything the open page needs, in one string.  The SETUP bytes and the patch name
+    /// ride along because they are RAM reads and cost nothing.
+    void publishDiveVals()
+    {
+        char *p = m_diveText;
+        char *const end = m_diveText + sizeof(m_diveText) - 1;
+        p += std::snprintf(p, size_t(end - p), "%u", m_diveRun.part);
+        for (uint8_t i = 0; i < m_diveRun.n && p < end; i ++)
+        {
+            if (!m_diveHave[i])
+                continue;
+            p += std::snprintf(p, size_t(end - p), " %c%02x=%02x",
+                               char(m_diveRun.ask[i].kind), m_diveRun.ask[i].addr,
+                               m_diveVal[i]);
+        }
+        for (uint16_t a = kRxSwitchAddr; a <= kRxSwitchAddr + 3 && p < end; a ++)
+            p += std::snprintf(p, size_t(end - p), " r%04x=%02x", a, m_core.readMem(a));
+        if (p < end)
+        {
+            p += std::snprintf(p, size_t(end - p), " n=");
+            for (unsigned i = 0; i < kPatchNameLen && p < end; i ++)
+            {
+                const uint8_t c = m_core.readMem(
+                        uint16_t(kActivePatch + kPatchNameOffset + i));
+                *p ++ = (c >= 0x20 && c < 0x7f) ? char(c) : ' ';
+            }
+        }
+        *p = '\0';
+        updateStateValue("divevals", m_diveText);
     }
 
     // ---- picking a patch by name ----------------------------------------------------
@@ -1175,6 +1530,15 @@ private:
         const size_t n = m_core.midiOut(buf, sizeof(buf), offs);
         for (size_t i = 0; i < n; i ++)
         {
+            // While a DIVE read is in flight, what comes back is the answer to it.  The
+            // machine says nothing unprompted, and a read lasts a few milliseconds per
+            // value, so swallowing the stream for that long costs the host nothing it
+            // would otherwise have received.
+            if (m_diveBusy)
+            {
+                diveReplyByte(buf[i]);
+                continue;
+            }
             MidiEvent ev;
             ev.frame = 0;
             ev.size = 1;
@@ -1482,6 +1846,26 @@ private:
     char m_tonesText[kTonesTextMax] = { 0 };
     char m_toneScratch[kTonesTextMax] = { 0 };
     std::atomic<int> m_toneRequest { -1 };
+
+    // ---- the DIVE editor.  The job is written by setState on the UI's thread and taken
+    // by run() on the audio thread; the flag is what hands it over.  Writes go through a
+    // single-producer ring for the same reason.
+    static constexpr unsigned kDiveWriteQueue = 32;
+    DiveJob m_diveJob, m_diveRun;
+    std::atomic<bool> m_diveJobReady { false };
+    bool m_machineUp = false;
+    bool m_diveBusy = false;
+    uint8_t m_diveAt = 0;
+    uint32_t m_diveWait = 0;
+    uint8_t m_diveVal[kDiveMax] = { 0 };
+    bool m_diveHave[kDiveMax] = { false };
+    uint8_t m_diveRx[16] = { 0 };
+    size_t m_diveRxLen = 0;
+    char m_diveText[512] = { 0 };
+    DiveWrite m_diveWrites[kDiveWriteQueue] = {};
+    std::atomic<unsigned> m_diveWrHead { 0 }, m_diveWrTail { 0 };
+    uint8_t m_nameWrite[kPatchNameLen] = { 0 };
+    std::atomic<bool> m_nameWritePending { false };
     uint8_t m_cardIdSeen[voltaire::kNumCardSlots] = { 0 };
     uint32_t m_rxRestoreWait = 0;
     uint8_t m_rxSaved = 0;

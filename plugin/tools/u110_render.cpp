@@ -76,6 +76,8 @@ int main(int argc, char **argv)
     uint32_t blocksize = 512;
     std::string midi_events;        // "t,byte" per line, absolute emulated seconds
     bool dump_midi = false;         // print whatever the machine sends back
+    std::vector<std::string> peeks; // "t,addr,len"  -- print memory at an emulated time
+    std::vector<std::string> pokes; // "t,addr,value" -- write one byte at one
 
     for (int i = 1; i < argc; i ++)
     {
@@ -89,6 +91,8 @@ int main(int argc, char **argv)
         else if (a == "--block")   blocksize = uint32_t(std::atoi(next()));
         else if (a == "--midi-at")  midi_events = next();
         else if (a == "--midi-dump") dump_midi = true;
+        else if (a == "--peek")    peeks.push_back(next());
+        else if (a == "--poke")    pokes.push_back(next());
         else { std::fprintf(stderr, "unknown option %s\n", a.c_str()); return 2; }
     }
 
@@ -149,6 +153,25 @@ int main(int argc, char **argv)
     }
     size_t inject_pos = 0;
 
+    // Reading and writing memory at an exact emulated instant.  The machine answers
+    // questions about its patch over SysEx, but its SETUP lives in battery-backed RAM
+    // with no MIDI address at all, and the only way to find out which bit is which is
+    // to change one and see what stops working.
+    struct MemOp { double t; unsigned addr, arg; bool done; };
+    std::vector<MemOp> peek_ops, poke_ops;
+    for (const auto &s : peeks)
+    {
+        MemOp o { 0, 0, 1, false };
+        if (std::sscanf(s.c_str(), "%lf,%i,%i", &o.t, &o.addr, &o.arg) >= 2)
+            peek_ops.push_back(o);
+    }
+    for (const auto &s : pokes)
+    {
+        MemOp o { 0, 0, 0, false };
+        if (std::sscanf(s.c_str(), "%lf,%i,%i", &o.t, &o.addr, &o.arg) == 3)
+            poke_ops.push_back(o);
+    }
+
     // A byte handed in at offset N completes one byte time later, and MAME's trace records
     // COMPLETION, so aim earlier by that much.
     const double byte_time = 10.0 / 31250.0;
@@ -184,6 +207,24 @@ int main(int argc, char **argv)
             core.midiIn(off, 3, 0);
             note_off_sent = true;
         }
+
+        const double now = double(done) / rate;
+        for (auto &o : poke_ops)
+            if (!o.done && now >= o.t)
+            {
+                o.done = true;
+                core.writeMem(uint16_t(o.addr), uint8_t(o.arg));
+                std::printf("POKE %.3f %04X <- %02X\n", now, o.addr, o.arg);
+            }
+        for (auto &o : peek_ops)
+            if (!o.done && now >= o.t)
+            {
+                o.done = true;
+                std::printf("PEEK %.3f %04X", now, o.addr);
+                for (unsigned i = 0; i < o.arg; i ++)
+                    std::printf(" %02X", core.readMem(uint16_t(o.addr + i)));
+                std::printf("\n");
+            }
 
         core.renderStereo(l.data(), r.data(), n);
 

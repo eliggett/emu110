@@ -441,7 +441,11 @@ def scan(svg_path):
         # The anchor is measured even inside a guide layer.  It is not artwork --
         # it is the registration mark that says where a page sits on the panel, and
         # a guide layer is exactly where it belongs.
-        if label and (not in_skipped or label == ANCHOR) and not in_defs:
+        # A layer is a labelled <g> like any other, and measuring one would enter it in
+        # the tables as a control the size of everything it contains -- an LCD layer
+        # becomes an element called LCD.  Layers are structure, not artwork.
+        is_layer = node.get(f'{{{INK}}}groupmode') == 'layer'
+        if label and not is_layer and (not in_skipped or label == ANCHOR) and not in_defs:
             if tag == 'rect':
                 try:
                     x, y, w, h = (float(node.get(k)) for k in ('x', 'y', 'width', 'height'))
@@ -736,6 +740,7 @@ def emit_dive(A, canvas, tabs, rows, drawer, content, panel_by_label, pages, row
     A('struct DiveControl {')
     A('    const char *label;')
     A('    const char *id;')
+    A('    const char *tap_id;')
     A('    const char *text_id;')
     A('    int page;')
     A('    int kind;')
@@ -754,6 +759,7 @@ def emit_dive(A, canvas, tabs, rows, drawer, content, panel_by_label, pages, row
             kind = DIVE_KIND[e.label.split('_', 1)[0]]
             travel = (0.0, 0.0, 0.0, 0.0)
             tap = (0.0, 0.0, 0.0, 0.0)
+            tap_id = None
             if kind == 'DK_SLIDER':
                 b = p.travel.get(e.label)
                 if b is None:
@@ -763,16 +769,20 @@ def emit_dive(A, canvas, tabs, rows, drawer, content, panel_by_label, pages, row
                 if t is None:
                     continue
                 tap = (t.x, t.y, t.w, t.h)
+                # The tap's own id, so the UI can draw the artwork's tap at the value
+                # rather than where Inkscape parked it.  Same idea as the knob pointer.
+                tap_id = t.id
             tid = text_id_for(p.by_label, e.label)
-            rows_out.append((e, pi, kind, travel, tap,
+            rows_out.append((e, pi, kind, travel, tap, tap_id,
                              p.by_label[tid].id if tid else None))
     starts.append(len(rows_out))
 
     A('inline constexpr DiveControl kDiveControl[] = {')
-    for e, pi, kind, travel, tap, tid in rows_out:
-        A('    { "%s", "%s", %s, %d, %s,' % (e.label, e.id,
-                                             '"%s"' % tid if tid else 'nullptr',
-                                             pi, kind))
+    for e, pi, kind, travel, tap, tap_id, tid in rows_out:
+        A('    { "%s", "%s", %s, %s, %d, %s,'
+          % (e.label, e.id,
+             '"%s"' % tap_id if tap_id else 'nullptr',
+             '"%s"' % tid if tid else 'nullptr', pi, kind))
         A('      { %9.4ff, %9.4ff, %8.4ff, %8.4ff },' % (e.x, e.y, e.w, e.h))
         A('      { %9.4ff, %9.4ff, %8.4ff, %8.4ff },' % travel)
         A('      { %9.4ff, %9.4ff, %8.4ff, %8.4ff } },' % tap)

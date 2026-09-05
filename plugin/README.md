@@ -193,6 +193,63 @@ the source still contains the editing-aid layers, and its rasters are drawn from
 useful for a different question: it shows the panel as the artwork MEANS it, which
 is what the two layers together should add up to.
 
+## The DIVE editor
+
+The drawer's 46 controls are wired to the machine through two files.  The artwork says
+where a control is and what shape it takes; **`src/DiveParams.h`** says what it means --
+which parameter, what range, how to print it.  The key joining them is the Inkscape
+label, so renaming `SB_Part_Level` in Inkscape is caught at startup rather than silently
+editing the wrong parameter:
+
+```
+DIVE: SB_Part_Level on page level is in the artwork but not in DiveParams.h
+```
+
+Two pages share a control name -- `SB_Channel_Pressure_Sensitivity` is on both LEVEL and
+LFO and means a different parameter on each -- so the page is part of the key.
+
+### Reading is one RQ1 per value
+
+The 16-byte part record packs all 26 of a part's parameters and the packing is unmapped,
+but **every address in the Owner's Manual's individual-parameter map answers an RQ1 with
+the value already decoded**, so the packing never has to be solved.  See
+`analysis/SYSTEM-DESIGN.md` section 5.3.2.
+
+The size field on that map is ignored -- asking for a part's 26 parameters at once
+returns exactly one byte -- so a page refresh is one request per control, serially.  Only
+what is on screen is asked for.  SETUP has no SysEx address at all and comes from
+battery-backed RAM, and so does the patch name.
+
+Three keys carry it: `diveread` names what a page needs, `divewrite` sets one value, and
+`divevals` brings back the answers together with the SETUP bytes and the name, which are
+RAM reads and cost nothing.
+
+### `[!]` Zero is a plausible answer, which is what makes it dangerous
+
+The machine takes about five and a half seconds to boot, and a restored session can have
+the drawer open before then.  RAM read that early is all zeros -- and zeros are a
+perfectly reasonable-looking SETUP: control channel 1, master tune 0, every switch off.
+The first version published them, and the page looked right and was wrong.
+
+So the DSP answers nothing until the machine has reached its play screen once, and the UI
+shows `...` and asks again about once a second until it does.  The gate is one-shot on
+purpose: a machine sitting in one of its own menus can still answer perfectly well, and
+gating every read on the display would stall the drawer for as long as somebody left a
+menu open.
+
+The same shape of bug bit the last value on every page: the read used to publish on a
+fixed timer, and the final reply had not arrived yet, so PROGRAM CHANGE always read
+`...`.  It now waits for each answer and moves on only when it has it, or after 60 ms.
+
+### What is not wired yet
+
+- **WRITE** (Common).  Storing the temporary patch is the machine's own front-panel
+  procedure and has no SysEx; it logs and does nothing rather than appearing to save.
+- **Five SETUP switches and MAP EDIT.** Their gate is not in `0x3C00` as the obvious
+  reading suggests -- see SYSTEM-DESIGN 5.3.3, where that reading is disproved.  They are
+  drawn dimmed showing `--` and do nothing, because guessing a bit would write into the
+  user's settings.
+
 ## The null test
 
 `plugin/tools/null_test.py` is the acceptance test and, because the device sources are
