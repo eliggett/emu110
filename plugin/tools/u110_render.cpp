@@ -75,6 +75,7 @@ int main(int argc, char **argv)
     bool play_note = false;
     uint32_t blocksize = 512;
     std::string midi_events;        // "t,byte" per line, absolute emulated seconds
+    bool dump_midi = false;         // print whatever the machine sends back
 
     for (int i = 1; i < argc; i ++)
     {
@@ -87,6 +88,7 @@ int main(int argc, char **argv)
         else if (a == "--note")    play_note = true;
         else if (a == "--block")   blocksize = uint32_t(std::atoi(next()));
         else if (a == "--midi-at")  midi_events = next();
+        else if (a == "--midi-dump") dump_midi = true;
         else { std::fprintf(stderr, "unknown option %s\n", a.c_str()); return 2; }
     }
 
@@ -184,6 +186,18 @@ int main(int argc, char **argv)
         }
 
         core.renderStereo(l.data(), r.data(), n);
+
+        // The U-110 sends nothing unprompted, so this is silent unless something asked
+        // it a question.  It is the only way to see an RQ1's answer from out here.
+        if (dump_midi)
+        {
+            uint8_t mo[512];
+            uint32_t offs[512];
+            const size_t got = core.midiOut(mo, sizeof(mo), offs);
+            for (size_t i = 0; i < got; i ++)
+                std::printf("MIDIOUT %.4f %02X\n",
+                            double(done + offs[i]) / rate, mo[i]);
+        }
         for (uint32_t i = 0; i < n; i ++)
         {
             pcm.push_back(quantise(l[i]));

@@ -52,15 +52,40 @@ TREMOLO_RATE  = 0x1B
 TREMOLO_DEPTH = 0x1C
 
 # Part parameters (temporary), 00 1n xx with n the part number 0-5.
-PART_OUTPUT_ASSIGN = 0x00
-PART_RX_CHANNEL    = 0x01
-PART_TONE_MEDIA    = 0x02
-PART_TONE_NUMBER   = 0x03
-PART_BEND_RANGE    = 0x04
-PART_KEY_RANGE_LO  = 0x05
-PART_KEY_RANGE_HI  = 0x06
-PART_LEVEL         = 0x07
-PART_VELOCITY_SENS = 0x08
+PART_OUTPUT_ASSIGN = 0x00     # 0-6, 0-5 = outputs 1-6, 6 = OFF
+PART_RX_CHANNEL    = 0x01     # 0-15
+PART_TONE_MEDIA    = 0x02     # 0 = internal, else card
+PART_TONE_NUMBER   = 0x03     # 0-98 within that media
+PART_BEND_RANGE    = 0x04     # 0-12 semitones
+PART_KEY_RANGE_LO  = 0x05     # 0-127
+PART_KEY_RANGE_HI  = 0x06     # 0-127
+PART_LEVEL         = 0x07     # 0-127
+PART_VELOCITY_SENS = 0x08     # 0-15
+# The rest of the map, OM section 4.2.2.  Every one of these answers an RQ1 -- see
+# analysis/SYSTEM-DESIGN.md section 5.3.2, where each was read back off the emulation --
+# so a value can be fetched without knowing how the 16-byte part record packs it.
+PART_LEVEL_CH_PRESS  = 0x09   # 0-15
+PART_ENV_ATTACK      = 0x0A   # 1-15 for -7..+7
+PART_ENV_RELEASE     = 0x0B   # 1-15 for -7..+7
+PART_PITCH_COARSE    = 0x0C   # 52-76 for -12..+12 semitones
+PART_PITCH_FINE      = 0x0D   # 14-114 for -50..+50 cents
+PART_LFO_RATE        = 0x0E   # 0-15
+PART_LFO_AUTO_DELAY  = 0x0F   # 0-15
+PART_LFO_AUTO_RISE   = 0x10   # 0-15
+PART_LFO_AUTO_DEPTH  = 0x11   # 0-15
+PART_LFO_MAN_RISE    = 0x12   # 0-15
+PART_LFO_MAN_DEPTH   = 0x13   # 0-15
+PART_LFO_CH_PRESS    = 0x14   # 0-7
+PART_PGM_CHANGE      = 0x15   # 0-1, OFF/ON
+PART_PGM_MAP         = 0x16   # 0-5 for maps 1-6
+PART_DETUNE_DEPTH    = 0x17   # 0-15
+PART_PITCH_POLY_PRESS = 0x18  # 0-15, a list: -24,-12,-7,-5..+5,+7,+12
+PART_LFO_POLY_PRESS   = 0x19  # 0-7
+PART_PARAM_LAST       = 0x19  # 0x1A answers nothing, which is how the map ends
+
+# Patch common.  Only 0x14-0x1C answer; everything below 0x14 is silent except 0x00,
+# and that one only for a 0x14-unit read whose contents were zero on a named patch.
+PATCH_OUTPUT_MODE = 0x18      # 0-49, ZERO-BASED: 21 is the manual's mode 22
 
 
 def checksum(body):

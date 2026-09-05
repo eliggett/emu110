@@ -608,6 +608,47 @@ clear the message is discarded without a word — no error, no display, nothing.
 The device ID the machine answers to is one byte of battery-backed RAM at `0x3C01`; read
 it rather than assuming `0x0F`.
 
+### 5.3.2 Reading a parameter back: RQ1 on the individual map `[C]`
+
+The Owner's Manual §4.2.2 prints an address map of the individual parameters — 26 per
+part at `00 1n 00`..`00 1n 19`, and a patch-common block at `00 01 xx`. **Every address
+in it answers an RQ1**, one parameter per request, which is how the plugin reads a
+value without knowing how the 16-byte part record packs it.
+
+Measured against the emulation, on a freshly booted machine sitting on P-01:
+
+| RQ1 | reply | reading |
+|---|---|---|
+| `00 10 07` | `7F` | part 1 level = 127 |
+| `00 10 0C` | `40` | pitch shift coarse, 52–76 for −12..+12, so 64 = 0 |
+| `00 10 19` | `00` | LFO poly pressure sensitivity = 0 |
+| `00 11 07` | `7F` | part 2 level = 127 |
+| `00 01 19` | `07` | chorus rate = 7 |
+| `00 01 18` | `15` | **output mode, zero-based** — 21 is the manual's mode 22 |
+
+Four things this settles.
+
+**The size field is ignored on the individual map.** `RQ1 00 10 00` with size `00 00 1A`
+asked for all 26 of part 1's parameters and got back exactly one byte. There is no ranged
+read: a page of nine controls is nine requests, which is 22 bytes on the wire each and
+about 7 ms of emulated time — cheap enough to do on every page change.
+
+**The map ends where the manual says it does.** `00 10 1A` answers nothing at all, and
+neither does any patch-common address below `0x14`. Silence is how the firmware rejects
+an address, so an unanswered RQ1 is a map error, not a dropped message.
+
+**Writes take, and read back.** `DT1 00 10 07 = 40` then `RQ1 00 10 07` returns `40`;
+same for `DT1 00 01 18 = 00`, which is output mode 1. The write path the tone selector
+already uses (§5.3.1) therefore reaches every parameter in the map, not just the two it
+was built for.
+
+**The patch name is not in it.** `00 01 00` answers only when asked for `0x14` units —
+twenty, which is ten characters at the 2:1 expansion the bulk dumps use — and every one
+of them came back zero on a patch whose name is `Ac.Piano`. Whatever that field is, it
+is not the name being displayed. The name is plain ASCII in the active patch buffer at
+`0x2804` and the patch list already reads it there; unlike a tone, nothing is derived
+from it, so it is the one thing the editor can write to RAM directly.
+
 ### 5.4 Output assignment — **solved from the Owner's Manual** `[C]` `[S]`
 
 `[S]` OM p.5 "Patch Setting Chart (Factory Preset)" gives, for every factory patch, each
