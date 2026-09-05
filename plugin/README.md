@@ -69,6 +69,29 @@ non-zero if the artwork has problems, which makes it usable as a build step.
 Regenerating needs **Inkscape** (to flatten text) and **rsvg-convert** (to render
 the rasters).  Neither is needed to build from the generated files.
 
+`make` does it for you: the generated headers depend on the panel SVG and on every
+`dive_*.svg`, so editing artwork in Inkscape and running `make -j5` re-exports and
+rebuilds.  Nothing needs running by hand.
+
+#### `[!]` A multi-target rule runs once PER TARGET under `-j`
+
+One recipe produces four headers, and written the ordinary way --
+
+```make
+a.h b.h c.h d.h: source
+	recipe
+```
+
+-- make reads that as four separate rules that happen to share a recipe, and under `-j`
+it runs the recipe up to four times at once.  Three copies of the exporter then wrote and
+deleted each other's temporary files, and the build died in `render_raster` with a
+`FileNotFoundError` -- but only in a parallel build, and only when an SVG had actually
+changed, which is a good way to look like a flaky toolchain.
+
+GNU Make 4.3's **grouped target** `&:` says one run makes all four, which is the truth.
+The exporter also names its temporary files after its own pid now, so two of them running
+at once cannot collide whatever drives them.
+
 ### The DIVE drawer is seven documents, not one
 
 The panel is the frame; each tab's content is its own Inkscape file, so a page can

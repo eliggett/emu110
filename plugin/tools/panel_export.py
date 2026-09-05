@@ -892,7 +892,8 @@ def flatten(svg_path, out_path, drop_ids=(), offset=(0.0, 0.0), canvas=None,
 
     out_dir = os.path.dirname(out_path)
     os.makedirs(out_dir, exist_ok=True)
-    tmp = os.path.join(out_dir, '.flatten_in.svg')
+    # Named per process: two exporters running at once must not delete each other's.
+    tmp = os.path.join(out_dir, '.flatten_in.%d.svg' % os.getpid())
     tree.write(tmp, encoding='utf-8', xml_declaration=True)
 
     cmd = ['inkscape', tmp,
@@ -985,7 +986,7 @@ def render_raster(svg_path, out_png, canvas, keep_ids, scale,
 
     out_dir = os.path.dirname(out_png)
     os.makedirs(out_dir, exist_ok=True)
-    tmp = os.path.join(out_dir, '.raster_in.svg')
+    tmp = os.path.join(out_dir, '.raster_in.%d.svg' % os.getpid())
     tree.write(tmp, encoding='utf-8', xml_declaration=True)
 
     width = int(round(canvas[0] * scale))

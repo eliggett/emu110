@@ -80,7 +80,11 @@ generated: $(GENERATED)
 # panel_export.py needs Inkscape to flatten text to paths and rsvg-convert to render the
 # artwork's raster layer -- nanosvg can draw neither.  Both are regeneration tools, not
 # runtime ones: what ships is the flattened SVG and the pre-rendered PNG, embedded.
-generated/panel_geometry.h generated/panel_svg.h generated/panel_background.h generated/dive_pages.h: $(PANEL_SVG) $(DIVE_SVG) tools/panel_export.py
+# GROUPED target (&:), not an ordinary multi-target rule.  With "a b c:" make treats the
+# recipe as producing ONE of them per invocation and, under -j, cheerfully runs it once
+# per target in parallel -- three copies of the exporter writing and deleting each other's
+# temporary files.  "&:" says one run makes all four, which is the truth.
+generated/panel_geometry.h generated/panel_svg.h generated/panel_background.h generated/dive_pages.h &: $(PANEL_SVG) $(DIVE_SVG) tools/panel_export.py
 	@tools/panel_export.py --text-to-path --background
 
 generated/u110_cgrom.h: ../tools/make_lcd_cgrom.py
