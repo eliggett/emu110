@@ -2162,25 +2162,31 @@ private:
     /// How much narrower than NanoVG's default to make the antialiasing fringe.
     ///
     /// NanoVG antialiases by widening every filled shape by half a fringe and feathering
-    /// another fringe outside that, and the fringe is one device pixel.  On a photograph
-    /// that is invisible; on lettering it is most of a pixel of extra ink per side, and
-    /// the panel came out looking heavy and crowded next to the same SVG in Inkscape.
+    /// another fringe outside it, and the fringe is one device pixel.  Where two edges
+    /// come within about two pixels of each other -- the gap between two letters, the
+    /// counter inside an "o" -- the two feathers overlap and ADD, and the gap fills in.
+    /// That is what made the lettering look thick and crowded next to Inkscape: not
+    /// heavier strokes, but the holes closing up.
     ///
     /// The fringe is 1/devicePixelRatio, and the ratio does NOT scale any geometry -- it
-    /// only sets the fringe and the curve tessellation tolerance -- so handing NanoVG a
+    /// sets only the fringe and the curve tessellation tolerance -- so handing NanoVG a
     /// larger ratio than the window really has buys a finer fringe and nothing else.
     ///
-    /// Measured, as ink over a fixed threshold across "CARTRIDGE MANAGER" at a 1100 px
-    /// window, against rsvg-convert rendering the same flat SVG (3727):
+    /// Measured across a two-pixel gap between letters at a 1100 px window, as the blue
+    /// channel of those two pixels.  rsvg-convert on the same flat SVG reads 26, 26, and
+    /// the surrounding glyph is 224:
     ///
-    ///     x1 (NanoVG's default)  5099      x3   3849
-    ///     x2                     4344      x4   3745
+    ///     x1 (NanoVG's default)   193, 209      the gap is gone
+    ///     x2                       66,  98      mostly back
+    ///     x3                       31,  31      matches the reference
+    ///     x4                       31,  31      no further gain
     ///
-    /// Four matches the reference almost exactly and is still the wrong answer: with a
-    /// quarter-pixel fringe there is no antialiasing left, and the volume knob's circle
-    /// comes out visibly stepped.  Two removes half the excess weight and costs a barely
-    /// perceptible hardening of curves, which is the trade worth making.
-    static constexpr float kFringeSharpen = 2.0f;
+    /// Three is where the text becomes right, and four buys nothing more.  The cost is
+    /// curve smoothness: at a third of a pixel there is little fringe left to ramp, and
+    /// the volume knob's circle is measurably stepped -- but only measurably.  At 1:1,
+    /// which is how anyone actually looks at it, it is indistinguishable, and the fringe
+    /// is in device pixels so that judgement holds at any window size.
+    static constexpr float kFringeSharpen = 3.0f;
 
     /// Below this many window pixels a stroke is not drawn at all.
     ///

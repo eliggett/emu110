@@ -272,34 +272,51 @@ that, and the fringe is one device pixel.
 
 ### The fringe is one device pixel, and it does not have to be
 
+It is not the stems that thicken -- it is the **gaps that close**.  Where two edges come
+within about two pixels of each other, which on lettering is every counter and every space
+between letters, the two feathers overlap and add, and the hole fills in.
+
 `nvgBeginFrame`'s device pixel ratio sets `fringeWidth = 1/ratio` and the curve
 tessellation tolerance, and **scales no geometry at all**.  So handing NanoVG a larger
-ratio than the window really has buys a finer fringe and costs nothing else.  Measured as
-ink over a fixed threshold across "CARTRIDGE MANAGER" at a 1100 px window, against
-rsvg-convert on the same flat SVG (3727):
+ratio than the window really has buys a finer fringe and nothing else.  Measured across a
+two-pixel gap between two letters at a 1100 px window, as the blue channel of those two
+pixels -- rsvg-convert on the same flat SVG reads `26, 26`, and the glyph either side is
+`224`:
 
-| ratio | ink | |
+| ratio | the gap | |
 |---|---|---|
-| x1 (default) | 5099 | +37% over the reference |
-| **x2** | **4344** | +17%, and what is used |
-| x3 | 3849 | |
-| x4 | 3745 | matches the reference -- and the knob is visibly stepped |
+| x1 (default) | 193, 209 | the gap is gone |
+| x2 | 66, 98 | mostly back |
+| **x3** | **31, 31** | matches the reference |
+| x4 | 31, 31 | no further gain |
 
-Four is the wrong answer despite matching: a quarter-pixel fringe is no antialiasing at
-all, and every curve in the artwork comes out staircased.  Two removes half the excess for
-a barely perceptible hardening of curves.  The host's own scale factor is multiplied in
-rather than replaced, so a HiDPI display keeps the finer fringe it already had.
+Three is where the text becomes right and four buys nothing more.  The cost is curve
+smoothness -- at a third of a pixel there is little fringe left to ramp, and the volume
+knob's circle is measurably stepped.  Only measurably: at 1:1 it is indistinguishable, and
+the fringe is in device pixels, so that judgement holds at every window size.  The host's
+own scale factor is multiplied in rather than replaced, so a HiDPI display keeps the finer
+fringe it already had.
 
-### `[!]` The heaviest lettering change was not in the code at all
+### `[!]` Correction: the font was never the problem
 
-The artwork's text used to ask for **Earth** and now asks for **Earth-Mod**, a modified
-face that is bolder and about 11% narrower per glyph -- literally thicker and more
-crowded.  Flattening the same word through Inkscape: Earth gives 284 points across
-110.9 units, Earth-Mod gives 400 points across 98.5.  Rendered identically by rsvg, that
-is 2884 ink against 3727, a 29% increase before the renderer is involved at all.
+An earlier version of this section claimed the artwork had switched from **Earth** to
+**Earth-Mod**, a bolder and 11% narrower face, and that this was most of the weight.  That
+was **wrong**, and it was wrong because of how it was measured: the two fonts' flattened
+`d` strings were compared by treating every number in them as an alternating x,y pair.
+Path data is not that.  Relative commands, `h`, `v` and arc flags all put numbers into that
+stream that are not coordinates, so the "width" it computed was meaningless.
 
-Worth knowing when the panel's weight changes and nothing in the pipeline did: check
-`font-family` in the artwork before looking anywhere else.
+Rendering the two fonts through rsvg and comparing the result -- which is what should have
+been done first -- gives 28575 against 28057 ink and identical bounding boxes.  They differ
+in one glyph, the "T".  Nor was it the conversion: `--export-text-to-path` and the GUI's
+own `object-to-path` action produce byte-identical output, which was also checked.
+
+Two lessons, and the second cost the time.  **Measure the rendered output, not the source
+text**, whenever the question is about how something looks.  And a threshold ink count is a
+blunt instrument -- it says a shape has more ink without saying where, and the answer here
+was never in the stems.  One pixel profile across one gap said in a single reading what the
+ink totals never would have.
+
 
 ### What is not wired yet
 
