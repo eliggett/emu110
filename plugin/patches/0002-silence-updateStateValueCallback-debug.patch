@@ -1,0 +1,12 @@
+diff --git a/distrho/src/DistrhoPluginInternal.hpp b/distrho/src/DistrhoPluginInternal.hpp
+index d0bef80..3a51870 100644
+--- a/distrho/src/DistrhoPluginInternal.hpp
++++ b/distrho/src/DistrhoPluginInternal.hpp
+@@ -312,7 +312,6 @@ struct Plugin::PrivateData {
+         DISTRHO_SAFE_ASSERT_RETURN(key != nullptr && key[0] != '\0', false);
+         DISTRHO_SAFE_ASSERT_RETURN(value != nullptr, false);
+ 
+-        d_stdout("updateStateValueCallback %p", updateStateValueCallbackFunc);
+         if (updateStateValueCallbackFunc != nullptr)
+             return updateStateValueCallbackFunc(callbacksPtr, key, value);
+ 

@@ -1,3 +1,7 @@
 [submodule "plugin/dpf"]
 	path = plugin/dpf
 	url = https://github.com/DISTRHO/DPF.git
+[submodule "mame"]
+	path = mame
+	url = https://github.com/eliggett/mame.git
+	branch = u110
