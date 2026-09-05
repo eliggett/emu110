@@ -290,12 +290,35 @@ pixels -- rsvg-convert on the same flat SVG reads `26, 26`, and the glyph either
 | **x3** | **31, 31** | matches the reference |
 | x4 | 31, 31 | no further gain |
 
-Three is where the text becomes right and four buys nothing more.  The cost is curve
-smoothness -- at a third of a pixel there is little fringe left to ramp, and the volume
-knob's circle is measurably stepped.  Only measurably: at 1:1 it is indistinguishable, and
-the fringe is in device pixels, so that judgement holds at every window size.  The host's
-own scale factor is multiplied in rather than replaced, so a HiDPI display keeps the finer
-fringe it already had.
+Three is where the text becomes right and four buys nothing more.  But a third of a pixel
+leaves almost no fringe to ramp, and the volume knob's circle comes out visibly stepped --
+not at 1:1, but plainly at 400%, and it is the one shape on the panel that is nothing but
+curve.
+
+### So the panel is drawn twice
+
+Lettering wants a fine fringe and curves want a coarse one, and the fringe cannot be
+changed inside a frame -- `nvgBeginFrame` resets the draw list along with it.  So there are
+two frames per repaint: everything with a curve in it at the fringe the host asked for,
+then `nvgEndFrame`, then a second `nvgBeginFrame` at x3 for the lettering and the LCD.  The
+knob is smooth and the counters are open.
+
+Telling them apart after flattening is the interesting part, and the exporter does it: what
+survives the conversion is `font-family` in the style, which Inkscape leaves on the paths
+it makes from a `<text>` and on nothing else.  Matching on that rather than on the ids the
+exporter already knows is what makes it work for a **multi-line label**, which Inkscape
+turns into a group of paths with ids it invented -- and better than half the DIVE page
+labels are multi-line.  The ids go into `panel_text_ids.h` and `dive_pages.h`, and the UI
+marks shapes by position at load rather than comparing strings in the draw loop.
+
+Two consequences.  Lettering is drawn **on top** of everything in its document, whatever
+its layer order -- harmless here, where no label overlaps a control, but it is a real
+change on the DIVE pages, where the text layer is authored first.  And a repaint costs one
+extra GL flush: measured at 2.4 ms with the drawer open under software rendering, against
+1.2 ms for the panel alone before the drawer existed.
+
+The host's own scale factor is multiplied in rather than replaced, so a HiDPI display keeps
+the finer fringe it already had.
 
 ### `[!]` Correction: the font was never the problem
 

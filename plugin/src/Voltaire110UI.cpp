@@ -24,6 +24,7 @@
 #include "panel_svg.h"
 #include "panel_background.h"
 #include "dive_pages.h"
+#include "panel_text_ids.h"
 #include "u110_cgrom.h"
 #include "DiveParams.h"
 
@@ -39,6 +40,7 @@
 // NanoVG's own entry point, which DGL wraps but does not re-export.  See kFringeSharpen
 // for why this file needs it.
 extern "C" void nvgBeginFrame(NVGcontext *ctx, float w, float h, float devicePixelRatio);
+extern "C" void nvgEndFrame(NVGcontext *ctx);
 
 START_NAMESPACE_DISTRHO
 
@@ -314,10 +316,6 @@ protected:
         if (m_countFrames)
             clock_gettime(CLOCK_MONOTONIC, &t0);
 
-        // Halve NanoVG's antialiasing fringe.  See kFringeSharpen.
-        nvgBeginFrame(getContext(), float(getWidth()), float(getHeight()),
-                      float(m_hostScale) * kFringeSharpen);
-
         const float s = panelScale();
         const float ox = (getWidth() - voltaire::panel::kDesignWidth * s) * 0.5f;
         const float oy = (getHeight() - designHeight() * s) * 0.5f;
@@ -332,13 +330,30 @@ protected:
         translate(ox, oy);
         scale(s, s);
 
+        // Pass one, at the fringe the host asked for: everything with a curve in it.
         drawBackground();
-        drawArtwork();
-        drawDivePage();
-        drawLcd();
+        drawArtwork(false);
+        drawDivePage(false);
         drawLeds();
         drawKnob();
         drawButtonFeedback();
+
+        restore();
+
+        // Pass two, with the fringe made finer: the lettering and the LCD, which are
+        // the only things on the panel with features small enough to care.  See
+        // kFringeSharpen for why this cannot simply be done for the whole frame.
+        nvgEndFrame(getContext());
+        nvgBeginFrame(getContext(), float(getWidth()), float(getHeight()),
+                      float(m_hostScale) * kFringeSharpen);
+
+        save();
+        translate(ox, oy);
+        scale(s, s);
+
+        drawArtwork(true);
+        drawDivePage(true);
+        drawLcd();
 
         restore();
 
@@ -1781,11 +1796,17 @@ private:
         {
             m_svg = nsvgParseFromFile(path, "px", 96.0f);
             if (m_svg != nullptr)
+            {
+                // A hot-reloaded file has its own shape order, so the exporter's list
+                // does not describe it; the lettering just gets the coarser fringe.
+                markTextShapes(m_svg, kPanelTextIds, m_panelIsText);
                 return;
+            }
             d_stderr2("Voltaire 110: could not parse %s, using the built-in panel", path);
         }
         std::vector<char> copy(kPanelSvg, kPanelSvg + sizeof(kPanelSvg));
         m_svg = nsvgParse(copy.data(), "px", 96.0f);   // nsvgParse modifies its input
+        markTextShapes(m_svg, kPanelTextIds, m_panelIsText);
     }
 
     // The artwork's raster layer, which nanosvg cannot draw: it has no <image>
@@ -1817,7 +1838,7 @@ private:
         fill();
     }
 
-    void drawArtwork()
+    void drawArtwork(bool textPass)
     {
         if (m_svg == nullptr)
             return;
@@ -1833,9 +1854,12 @@ private:
         const float px = k * panelScale();
         save();
         scale(k, k);
-        for (NSVGshape *sh = m_svg->shapes; sh != nullptr; sh = sh->next)
+        size_t index = 0;
+        for (NSVGshape *sh = m_svg->shapes; sh != nullptr; sh = sh->next, index ++)
         {
             if (!(sh->flags & NSVG_FLAGS_VISIBLE))
+                continue;
+            if (isTextShape(m_panelIsText, index) != textPass)
                 continue;
             // The knob pointer is drawn in code so it can rotate.  Skipping the artwork's
             // copy is what stops the old one being left behind at its zero position.
@@ -1898,7 +1922,7 @@ private:
     /// the exporter -- including the shift up when the second tab row is hidden -- so
     /// there is no page transform here at all.  They are parsed on first use: opening
     /// the drawer on SET should not pay for the other five.
-    void drawDivePage()
+    void drawDivePage(bool textPass)
     {
         if (!m_diveOpen)
             return;
@@ -1913,7 +1937,7 @@ private:
 
         const float w = voltaire::panel::kDesignWidth;
         const float h = voltaire::panel::kDiveOpenHeight;
-        if (m_pageRaster[p].isValid())
+        if (!textPass && m_pageRaster[p].isValid())
         {
             // What nanosvg cannot draw: the section frames, whose gap for the title is a
             // clip path, and the slider graticules where they are clipped by the body.
@@ -1930,9 +1954,12 @@ private:
         const float px = k * panelScale();
         save();
         scale(k, k);
-        for (NSVGshape *sh = svg->shapes; sh != nullptr; sh = sh->next)
+        size_t index = 0;
+        for (NSVGshape *sh = svg->shapes; sh != nullptr; sh = sh->next, index ++)
         {
             if (!(sh->flags & NSVG_FLAGS_VISIBLE))
+                continue;
+            if (isTextShape(m_pageIsText[p], index) != textPass)
                 continue;
 
             // A slider tap is drawn where the VALUE is, not where Inkscape parked it.
@@ -1963,7 +1990,35 @@ private:
         }
         restore();
 
-        drawDiveValues(p);
+        if (textPass)
+            drawDiveValues(p);
+    }
+
+    /// Was this shape, by position in the document, made from a <text>?
+    static bool isTextShape(const std::vector<char> &flags, size_t index)
+    {
+        return index < flags.size() && flags[index] != 0;
+    }
+
+    /// Mark which of a parsed document's shapes came from text.
+    ///
+    /// By POSITION rather than by id, because a multi-line label becomes a group of
+    /// paths with ids Inkscape invented, and looking one up per shape per frame would
+    /// be a string compare in the draw loop.  The order nanosvg reports shapes in is
+    /// document order, which is the order the exporter listed them in.
+    static void markTextShapes(NSVGimage *svg, const char *const *ids,
+                               std::vector<char> &out)
+    {
+        out.clear();
+        if (svg == nullptr)
+            return;
+        for (NSVGshape *sh = svg->shapes; sh != nullptr; sh = sh->next)
+        {
+            bool is = false;
+            for (const char *const *p = ids; p != nullptr && *p != nullptr; p ++)
+                if (std::strcmp(sh->id, *p) == 0) { is = true; break; }
+            out.push_back(is ? 1 : 0);
+        }
     }
 
     /// Which slider owns this shape, if it is a tap.  Only the open page is searched.
@@ -2128,6 +2183,7 @@ private:
         {
             std::string copy(kDiveSvg[p]);
             m_pageSvg[p] = nsvgParse(&copy[0], "px", 96.0f);   // nsvgParse edits its input
+            markTextShapes(m_pageSvg[p], kDiveTextIds[p], m_pageIsText[p]);
         }
         if (kDiveRaster[p] != nullptr
                 && kDiveRasterSize[p] != 0)
@@ -2467,6 +2523,8 @@ private:
     int m_diveTab1 = voltaire::panel::TAB_SET;
     int m_diveTab2 = voltaire::panel::TAB_BASIC;
     NSVGimage *m_pageSvg[voltaire::panel::DIVEPAGE_COUNT] = { nullptr };
+    std::vector<char> m_panelIsText;
+    std::vector<char> m_pageIsText[voltaire::panel::DIVEPAGE_COUNT];
     NanoImage m_pageRaster[voltaire::panel::DIVEPAGE_COUNT];
     bool m_pageTried[voltaire::panel::DIVEPAGE_COUNT] = { false };
 
