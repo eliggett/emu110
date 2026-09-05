@@ -9,8 +9,17 @@
 set -u
 HERE="$(cd "$(dirname "$0")/../.." && pwd)"
 MAME="$HERE/mame"
-OUT="$HERE/plugin/build"
+
+# Overridable so a cross build gets its own compiler and its own object directory.  Two
+# architectures sharing one build/ would be worse than slow: make compares timestamps, not
+# machine types, so the second build would find "up to date" objects for the wrong target.
+CXX="${CXX:-g++}"
+AR="${AR:-ar}"
+OUT="${U110_CORE_BUILD:-$HERE/plugin/build}"
 mkdir -p "$OUT"
+
+MACHINE="$("$CXX" -dumpmachine)"
+case "$MACHINE" in *mingw*|*windows*) CROSS_WINDOWS=1 ;; *) CROSS_WINDOWS=0 ;; esac
 
 GEN="$OUT/generated"
 INCS=(-I "$HERE/plugin/compat"
@@ -44,7 +53,18 @@ SOURCES=(
 # -fPIC because the same objects are linked into the plugin's shared libraries (LV2,
 # VST3, CLAP) as well as into the standalone test tools.
 CXXFLAGS=(-std=c++20 -O2 -g -Wall -Wno-unused-variable -Wno-unused-but-set-variable
-          -Wno-unused-function -fno-strict-aliasing -fPIC)
+          -Wno-unused-function -fno-strict-aliasing)
+if [ "$CROSS_WINDOWS" = 1 ]; then
+  # A DLL on Windows is position independent by definition and -fPIC is merely ignored;
+  # the other two are not cosmetic.  -posix picks the posix-threads flavour of the mingw
+  # toolchain, which is the one DPF builds itself with -- link win32-threads objects
+  # against posix-threads ones and libstdc++ disagrees with itself about std::mutex.
+  # -mstackrealign is DPF's too: hosts have been known to call in on a stack aligned to
+  # less than SSE wants.
+  CXXFLAGS+=(-posix -mstackrealign -D__USE_MINGW_ANSI_STDIO=1)
+else
+  CXXFLAGS+=(-fPIC)
+fi
 
 # mcs96ops.lst is compiled into mcs96.hxx / i8x9x.hxx by MAME's own generator.  The plugin
 # build runs the same Python step rather than checking generated files in.
@@ -67,7 +87,7 @@ fail=0
 for src in "${SOURCES[@]}"; do
   obj="$OUT/$(basename "${src%.cpp}").o"
   printf '  %-24s ' "$(basename "$src")"
-  if g++ "${CXXFLAGS[@]}" "${INCS[@]}" -c "$src" -o "$obj" 2> "$obj.log"; then
+  if "$CXX" "${CXXFLAGS[@]}" "${INCS[@]}" -c "$src" -o "$obj" 2> "$obj.log"; then
     echo "ok"
     OBJS+=("$obj")
   else
@@ -79,16 +99,24 @@ done
 
 # A static library, so the DPF build links the core without inheriting its compiler flags
 # (or imposing ours on DPF).  The two builds stay independent.
-ar rcs "$OUT/libu110core.a" "${OBJS[@]}" 2>/dev/null && echo "  archived                 $(realpath --relative-to="$HERE" "$OUT/libu110core.a")"
+"$AR" rcs "$OUT/libu110core.a" "${OBJS[@]}" 2>/dev/null && echo "  archived                 $(realpath --relative-to="$HERE" "$OUT/libu110core.a")"
 
-# Compiling proves the declarations line up; only linking proves the definitions do.
+# Compiling proves the declarations line up; only linking proves the definitions do.  A
+# cross build still links it -- that is the half of the check that does not need to run --
+# but it cannot execute the result, so the smoke test is the native build's job.
+EXE=""
+[ "$CROSS_WINDOWS" = 1 ] && EXE=".exe"
 echo
 printf '  %-24s ' "link + smoke test"
-if g++ "${CXXFLAGS[@]}" "${INCS[@]}" "$HERE/plugin/tools/link_check.cpp" "${OBJS[@]}" \
-        -o "$OUT/link_check" 2> "$OUT/link_check.log"; then
-  echo "linked"
-  echo
-  "$OUT/link_check" || fail=1
+if "$CXX" "${CXXFLAGS[@]}" "${INCS[@]}" "$HERE/plugin/tools/link_check.cpp" "${OBJS[@]}" \
+        -o "$OUT/link_check$EXE" 2> "$OUT/link_check.log"; then
+  if [ "$CROSS_WINDOWS" = 1 ]; then
+    echo "linked (not run: $MACHINE)"
+  else
+    echo "linked"
+    echo
+    "$OUT/link_check" || fail=1
+  fi
 else
   echo "FAILED  (see $(realpath --relative-to="$HERE" "$OUT/link_check.log"))"
   fail=1
@@ -97,8 +125,8 @@ fi
 # The core renderer the null test drives.
 echo
 printf '  %-24s ' "u110_render"
-if g++ "${CXXFLAGS[@]}" "${INCS[@]}" "$HERE/plugin/tools/u110_render.cpp" "${OBJS[@]}" \
-        -o "$OUT/u110_render" 2> "$OUT/u110_render.log"; then
+if "$CXX" "${CXXFLAGS[@]}" "${INCS[@]}" "$HERE/plugin/tools/u110_render.cpp" "${OBJS[@]}" \
+        -o "$OUT/u110_render$EXE" 2> "$OUT/u110_render.log"; then
   echo "built"
 else
   echo "FAILED  (see $(realpath --relative-to="$HERE" "$OUT/u110_render.log"))"

@@ -107,6 +107,46 @@ core: generated
 		fi; \
 	done
 
+# ---- Windows -------------------------------------------------------------------------
+#
+# Cross-compiled from Linux with mingw-w64; CLAP only, because that is what the Windows
+# ask was.  Nothing about the plugin is conditional -- the same sources build -- so what
+# this target is really for is keeping the two builds' intermediate files apart.  make
+# decides what is up to date by comparing timestamps and knows nothing about target
+# machines, so one shared build/ means the second build finds "current" objects for the
+# wrong architecture and links them without a word of complaint.  Hence a separate object
+# directory for the core, a separate one for DPF, a separate one for DGL (that is what
+# BUILD_DIR_SUFFIX buys), and a separate bin-win/.
+#
+# These go on the sub-make's COMMAND LINE rather than being set here, because make passes
+# command-line variables down through MAKEFLAGS to every sub-make on its own -- and DPF
+# reaches DGL through one more level of $(MAKE) that an `export` in this file would not
+# reliably cover.
+CROSS_PREFIX ?= x86_64-w64-mingw32-
+WIN_BUILD    = $(CURDIR)/build-win
+WIN_BIN      = $(CURDIR)/bin-win
+
+win:
+	@command -v $(CROSS_PREFIX)g++ > /dev/null \
+		|| { echo "  $(CROSS_PREFIX)g++ not found -- see CLONING.md, the Windows section"; exit 1; }
+	@$(MAKE) --no-print-directory patches generated
+	@U110_CORE_BUILD=$(WIN_BUILD) CXX=$(CROSS_PREFIX)g++ AR=$(CROSS_PREFIX)ar \
+		tools/build_core.sh
+	@if [ -e "$(WIN_BIN)/$(NAME).clap" ] \
+	   && [ "$(WIN_BUILD)/libu110core.a" -nt "$(WIN_BIN)/$(NAME).clap" ]; then \
+		echo "  core is newer than $(NAME).clap -- forcing a relink"; \
+		rm -f "$(WIN_BIN)/$(NAME).clap"; \
+	fi
+	@$(MAKE) --no-print-directory clap \
+		CC=$(CROSS_PREFIX)gcc CXX=$(CROSS_PREFIX)g++ AR=$(CROSS_PREFIX)ar \
+		BUILD_DIR_SUFFIX=-win \
+		DPF_BUILD_DIR=$(WIN_BUILD)/$(NAME) \
+		DPF_TARGET_DIR=$(WIN_BIN) \
+		CORE_LIB=build-win/libu110core.a
+	@file $(WIN_BIN)/$(NAME).clap
+
+.PHONY: win
+
 dpf/utils/lv2_ttl_generator:
 	@$(MAKE) --no-print-directory -C dpf/utils/lv2-ttl-generator > /dev/null
 

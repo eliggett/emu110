@@ -2,5 +2,8 @@
 build/
 generated/
 bin/
+# The Windows cross build keeps its own, for the reason in the Makefile's `win` target.
+build-win/
+bin-win/
 *.o
 *.d

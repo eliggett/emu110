@@ -238,6 +238,77 @@ make rtaudit       # proves run() reaches no malloc, free, or getenv
 matched malloc/free counts. Both build first, so they are also a fine way to say
 "build and tell me it is not broken".
 
+### Building for Windows
+
+The Windows deliverable is the **CLAP**, cross-compiled from Linux with
+mingw-w64. One extra package, and nothing else — DPF pulls in no third-party
+libraries on Windows: OpenGL is `opengl32`, the window is raw Win32 through
+PUGL, and the rest is the mingw runtime.
+
+```sh
+sudo apt install g++-mingw-w64-x86-64
+cd plugin
+make win
+```
+
+`g++-mingw-w64-x86-64` is the metapackage: it brings the compiler in **both**
+threading flavours, plus `binutils-mingw-w64-x86-64` and
+`mingw-w64-x86-64-dev`. Both flavours matter — DPF compiles itself `-posix`, so
+the core has to be built `-posix` too or libstdc++ ends up with two
+irreconcilable opinions about `std::mutex`. `tools/build_core.sh` passes it
+when it sees a mingw target.
+
+The product is `plugin/bin-win/Voltaire110.clap` — a single DLL with a `.clap`
+extension, statically linked against libgcc and libstdc++, so it carries no
+runtime dependency beyond Windows itself.
+
+Nothing about the plugin is conditional on the platform; the same sources build.
+What `make win` is really doing is keeping the two builds' intermediates apart —
+`build-win/`, `dpf/build-win/`, `bin-win/`. Make decides what is up to date by
+comparing timestamps and knows nothing about target machines, so a shared
+`build/` would let the second build link the first build's objects for the
+wrong architecture without a word of complaint.
+
+There is no Windows standalone and no Windows LV2 here. Both are reachable —
+DPF has an RtAudio backend for the standalone — but neither was the ask, and
+`make win` builds `clap` only.
+
+### Where it goes on Windows
+
+CLAP hosts scan two directories, and either works:
+
+| | Path |
+|---|---|
+| Just you | `%LOCALAPPDATA%\Programs\Common\CLAP\` |
+| Everyone on the machine | `C:\Program Files\Common Files\CLAP\` |
+
+Drop `Voltaire110.clap` in one of them, no installer and no registration. FL
+Studio finds it on its next plugin scan; it also has its own extra-search-paths
+setting if you would rather keep it somewhere else.
+
+### Where the Windows build looks for ROMs
+
+Same rule as everywhere else — ROMs are data, the user supplies their own dumps,
+nothing is bundled — but the search path is the platform's, from
+`romSearchPath()` in `plugin/src/Voltaire110Plugin.cpp` and PLUGIN-PLAN.md §9:
+
+1. `%U110_DATA_DIR%\roms` — the override, if that environment variable is set
+2. `%LOCALAPPDATA%\u110\roms` — normally `C:\Users\<you>\AppData\Local\u110\roms`
+3. `%PROGRAMDATA%\u110\roms` — normally `C:\ProgramData\u110\roms`
+
+and `...\roms\cards\` is searched after each of those, so card images may sit
+either in `roms\` with everything else or in a `cards\` subdirectory. First hit
+wins, and the plugin logs which file it took.
+
+`%LOCALAPPDATA%` is the one to use. `%U110_DATA_DIR%` is awkward on Windows —
+a plugin inherits the host's environment, so it has to be set system-wide and
+the host restarted — and `%PROGRAMDATA%` needs an administrator to write to.
+
+The program ROM is required; without it the plugin loads, stays silent, and says
+so on stderr. Card images are optional. Filenames are matched loosely: what
+matters for a card is that the name contains its slot number (`sn-u110-08.bin`,
+`SN_U110_08.BIN`, `roland sn u110 08.rom` all name card 8).
+
 ---
 
 ## 5. The one thing a clone cannot fix for you

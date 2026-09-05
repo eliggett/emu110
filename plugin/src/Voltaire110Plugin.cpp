@@ -39,13 +39,24 @@ namespace {
 std::vector<std::string> romSearchPath()
 {
     std::vector<std::string> bases;
+    // The override is the same everywhere, so a note telling someone where to put their
+    // dumps does not have to ask which OS they are on first.
     if (const char *env = std::getenv("U110_DATA_DIR"))
         bases.push_back(std::string(env) + "/roms");
+   #ifdef _WIN32
+    // Forward slashes are fine: the Win32 file APIs accept them, and keeping one separator
+    // in this file means the paths a log line prints look the same on every platform.
+    if (const char *local = std::getenv("LOCALAPPDATA"))
+        bases.push_back(std::string(local) + "/u110/roms");
+    if (const char *shared = std::getenv("PROGRAMDATA"))
+        bases.push_back(std::string(shared) + "/u110/roms");
+   #else
     if (const char *xdg = std::getenv("XDG_DATA_HOME"))
         bases.push_back(std::string(xdg) + "/u110/roms");
     if (const char *home = std::getenv("HOME"))
         bases.push_back(std::string(home) + "/.local/share/u110/roms");
     bases.push_back("/usr/share/u110/roms");
+   #endif
     // Development convenience: the project's own roms/ directory.
     if (const char *env = std::getenv("U110_SOURCE_ROMS"))
         bases.push_back(env);
@@ -99,7 +110,10 @@ std::vector<uint8_t> findRom(const char *const *names, size_t count, size_t want
 
 std::string baseName(const std::string &path)
 {
-    const size_t slash = path.find_last_of('/');
+    // Both separators, on every platform.  A saved session carries the path the ROM had on
+    // the machine that saved it, so a Windows path can turn up in a Linux plugin and the
+    // other way round -- and this is what turns it back into a name to look for.
+    const size_t slash = path.find_last_of("/\\");
     return slash == std::string::npos ? path : path.substr(slash + 1);
 }
 
@@ -1782,8 +1796,12 @@ private:
         if (rom.empty())
         {
             d_stderr2("Voltaire 110: no U-110 program ROM found. Put your own dumps in "
-                      "$XDG_DATA_HOME/u110/roms (or set U110_DATA_DIR). The plugin will "
-                      "stay silent until then.");
+                     #ifdef _WIN32
+                      "%LOCALAPPDATA%\\u110\\roms"
+                     #else
+                      "$XDG_DATA_HOME/u110/roms"
+                     #endif
+                      " (or set U110_DATA_DIR). The plugin will stay silent until then.");
             return;
         }
         if (m_core.loadProgramRom(rom.data(), rom.size()) != voltaire::LoadResult::Ok)
