@@ -24,9 +24,9 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="mm"
-     inkscape:zoom="0.50466821"
-     inkscape:cx="1692.2009"
-     inkscape:cy="841.1467"
+     inkscape:zoom="0.17842716"
+     inkscape:cx="1689.7652"
+     inkscape:cy="843.48147"
      inkscape:window-width="2560"
      inkscape:window-height="1316"
      inkscape:window-x="0"
@@ -257,107 +257,105 @@
      inkscape:groupmode="layer"
      id="layer10"
      inkscape:label="Text"
-     style="display:inline"
-     sodipodi:insensitive="true">
+     style="display:inline">
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.7px;line-height:12.7px;font-family:Earth;-inkscape-font-specification:'Earth, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;display:inline;fill:#00a3e0;stroke:none;stroke-width:2;stroke-linecap:square"
-       x="181.58994"
-       y="298.07309"
+       x="186.74904"
+       y="284.59473"
        id="text43"
        inkscape:label="T_Part_Level"><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="181.58994"
-         y="298.07309"
+         x="186.74904"
+         y="284.59473"
          id="tspan43">PART</tspan><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="181.58994"
-         y="310.7731"
+         x="186.74904"
+         y="297.29474"
          id="tspan79">LEVEL</tspan></text>
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.7px;line-height:12.7px;font-family:Earth;-inkscape-font-specification:'Earth, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;display:inline;fill:#00a3e0;stroke:none;stroke-width:2;stroke-linecap:square"
-       x="269.97974"
-       y="298.07309"
+       x="275.13885"
+       y="284.59473"
        id="text55"
        inkscape:label="T_Velocity_Sensitivity"><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="269.97974"
-         y="298.07309"
+         x="275.13885"
+         y="284.59473"
          id="tspan55">VELO</tspan><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="269.97974"
-         y="310.7731"
+         x="275.13885"
+         y="297.29474"
          id="tspan66">SENS</tspan></text>
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.7px;line-height:12.7px;font-family:Earth;-inkscape-font-specification:'Earth, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;display:inline;fill:#00a3e0;stroke:none;stroke-width:2;stroke-linecap:square"
-       x="352.95898"
-       y="298.24673"
+       x="358.1181"
+       y="284.76837"
        id="text68"
        inkscape:label="T_ENV_Attack_Rate"><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="352.95898"
-         y="298.24673"
+         x="358.1181"
+         y="284.76837"
          id="tspan80">ENV</tspan><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="352.95898"
-         y="310.94675"
+         x="358.1181"
+         y="297.46838"
          id="tspan81">ATTK</tspan><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="352.95898"
-         y="323.64673"
+         x="358.1181"
+         y="310.16837"
          id="tspan68" /></text>
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.7px;line-height:12.7px;font-family:Earth;-inkscape-font-specification:'Earth, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;display:inline;fill:#00a3e0;stroke:none;stroke-width:2;stroke-linecap:square"
-       x="442.07123"
-       y="298.24673"
+       x="447.23035"
+       y="284.76837"
        id="text83"
        inkscape:label="T_ENV_Release_Rate"><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="442.07123"
-         y="298.24673"
+         x="447.23035"
+         y="284.76837"
          id="tspan83">ENV</tspan><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="442.07123"
-         y="310.94675"
+         x="447.23035"
+         y="297.46838"
          id="tspan94">REL</tspan></text>
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.7px;line-height:12.7px;font-family:Earth;-inkscape-font-specification:'Earth, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;display:inline;fill:#00a3e0;stroke:none;stroke-width:2;stroke-linecap:square"
-       x="506.30743"
-       y="298.07309"
+       x="511.46655"
+       y="284.59473"
        id="text96"
        inkscape:label="T_Channel_Pressure_Sensitivity"><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="506.30743"
-         y="298.07309"
+         x="511.46655"
+         y="284.59473"
          id="tspan95">CH PRES</tspan><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="506.30743"
-         y="310.7731"
+         x="511.46655"
+         y="297.29474"
          id="tspan96">SENS</tspan></text>
   </g>
   <g
      inkscape:groupmode="layer"
      id="layer11"
-     inkscape:label="Slider_bodies"
-     sodipodi:insensitive="true">
+     inkscape:label="Slider_bodies">
     <g
        id="g1"
-       transform="translate(346.9012,74.34793)"
+       transform="translate(352.06031,60.869582)"
        inkscape:label="SB_Part_Level">
       <g
          id="g52"
@@ -429,7 +427,7 @@
     </g>
     <g
        id="g2"
-       transform="translate(343.8856,74.34793)"
+       transform="translate(349.04471,60.869582)"
        inkscape:label="SB_Velocity_Sensitivity">
       <g
          id="g64"
@@ -501,7 +499,7 @@
     </g>
     <g
        id="g3"
-       transform="translate(350.84149,74.34793)"
+       transform="translate(356.0006,60.869582)"
        inkscape:label="SB_ENV_Attack_Rate">
       <g
          id="g77"
@@ -573,7 +571,7 @@
     </g>
     <g
        id="g4"
-       transform="translate(357.3943,74.34793)"
+       transform="translate(362.55341,60.869582)"
        inkscape:label="SB_ENV_Release_Rate">
       <g
          id="g92"
@@ -645,7 +643,7 @@
     </g>
     <g
        id="g5"
-       transform="translate(374.2419,74.34793)"
+       transform="translate(379.40101,60.869582)"
        inkscape:label="SB_Channel_Pressure_Sensitivity">
       <g
          id="g105"
@@ -720,47 +718,46 @@
      inkscape:groupmode="layer"
      id="layer12"
      inkscape:label="Slider_taps"
-     style="display:inline"
-     sodipodi:insensitive="true">
+     style="display:inline">
     <rect
        style="fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
        id="rect53"
        width="29"
        height="5.7179775"
-       x="197.97487"
-       y="90.648048"
+       x="203.13397"
+       y="77.169701"
        inkscape:label="ST_Part_Level" />
     <rect
        style="fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
        id="rect65"
        width="29"
        height="5.7179775"
-       x="281.32932"
-       y="90.648048"
+       x="286.48843"
+       y="77.169701"
        inkscape:label="ST_Velocity_Sensitivity" />
     <rect
        style="fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
        id="rect78"
        width="29"
        height="5.7179775"
-       x="364.68375"
-       y="90.648048"
+       x="369.84286"
+       y="77.169701"
        inkscape:label="ST_ENV_Attack_Rate" />
     <rect
        style="fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
        id="rect93"
        width="29"
        height="5.7179775"
-       x="448.03818"
-       y="90.648048"
+       x="453.1973"
+       y="77.169701"
        inkscape:label="ST_ENV_Release_Rate" />
     <rect
        style="fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
        id="rect106"
        width="29"
        height="5.7179775"
-       x="531.39264"
-       y="90.648048"
+       x="536.55176"
+       y="77.169701"
        inkscape:label="ST_Channel_Pressure_Sensitivity" />
   </g>
   <g

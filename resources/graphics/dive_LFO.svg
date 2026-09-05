@@ -24,15 +24,15 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="mm"
-     inkscape:zoom="0.35685431"
-     inkscape:cx="1560.8611"
-     inkscape:cy="713.17619"
+     inkscape:zoom="0.17842716"
+     inkscape:cx="1048.0467"
+     inkscape:cy="832.27242"
      inkscape:window-width="2560"
      inkscape:window-height="1316"
      inkscape:window-x="0"
      inkscape:window-y="0"
      inkscape:window-maximized="1"
-     inkscape:current-layer="layer10" />
+     inkscape:current-layer="layer11" />
   <defs
      id="defs1">
     <clipPath
@@ -679,18 +679,18 @@
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.7px;line-height:12.7px;font-family:Earth;-inkscape-font-specification:'Earth, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;display:inline;fill:#00a3e0;stroke:none;stroke-width:2;stroke-linecap:square"
-       x="89.422516"
+       x="89.422523"
        y="279.65625"
        id="text183"
        inkscape:label="T_LFO_Rate"><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="89.422516"
+         x="89.422523"
          y="279.65625"
          id="tspan183">LFO</tspan><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="89.422516"
+         x="89.422523"
          y="292.35626"
          id="tspan250">RATE</tspan></text>
   </g>
@@ -701,7 +701,7 @@
     <g
        id="g19"
        inkscape:label="SB_Polyphonic_Pressure_Sensitivity"
-       transform="translate(21.121664,-5.0253437)">
+       transform="translate(21.121669,-5.0253507)">
       <g
          id="g18"
          inkscape:label="slider_lines">
@@ -761,7 +761,7 @@
     <g
        id="g41"
        inkscape:label="SB_Channel_Pressure_Sensitivity"
-       transform="translate(-57.356203,-5.0253437)">
+       transform="translate(-57.356198,-5.0253507)">
       <g
          id="g40"
          inkscape:label="slider_lines">
@@ -821,7 +821,7 @@
     <g
        id="g52"
        inkscape:label="SB_Manual_Rise_Time"
-       transform="translate(-139.36462,-5.0253437)">
+       transform="translate(-139.36461,-5.0253507)">
       <g
          id="g51"
          inkscape:label="slider_lines">
@@ -881,7 +881,7 @@
     <g
        id="g63"
        inkscape:label="SB_Manual_Depth"
-       transform="translate(-214.447,-5.0253437)">
+       transform="translate(-214.44699,-5.0253507)">
       <g
          id="g62"
          inkscape:label="slider_lines">
@@ -941,7 +941,7 @@
     <g
        id="g86"
        inkscape:label="SB_Auto_Rise_Time"
-       transform="translate(-289.55143,-5.0253437)">
+       transform="translate(-289.55142,-5.0253507)">
       <g
          id="g85"
          inkscape:label="slider_lines">
@@ -1001,7 +1001,7 @@
     <g
        id="g97"
        inkscape:label="SB_Auto_Delay_Time"
-       transform="translate(-367.38711,-5.0253437)">
+       transform="translate(-367.3871,-5.0253507)">
       <g
          id="g96"
          inkscape:label="slider_lines">
@@ -1061,7 +1061,7 @@
     <g
        id="g108"
        inkscape:label="SB_Auto_Depth"
-       transform="translate(-450.39383,-5.0253437)">
+       transform="translate(-450.39382,-5.0253507)">
       <g
          id="g107"
          inkscape:label="slider_lines">
@@ -1121,7 +1121,7 @@
     <g
        id="g119"
        inkscape:label="SB_LFO_Rate"
-       transform="translate(-528.16056,-5.0253437)">
+       transform="translate(-528.16055,-5.0253507)">
       <g
          id="g118"
          inkscape:label="slider_lines">
@@ -1194,7 +1194,7 @@
        width="29"
        height="5.7179775"
        x="650.19385"
-       y="71.24173"
+       y="71.241722"
        inkscape:label="ST_Polyphonic_Pressure_Sensitivity" />
     <rect
        style="fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
@@ -1202,7 +1202,7 @@
        width="29"
        height="5.7179775"
        x="571.716"
-       y="71.24173"
+       y="71.241722"
        inkscape:label="ST_Channel_Pressure_Sensitivity" />
     <rect
        style="fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
@@ -1210,7 +1210,7 @@
        width="29"
        height="5.7179775"
        x="489.70758"
-       y="71.24173"
+       y="71.241722"
        inkscape:label="ST_Manual_Rise_Time" />
     <rect
        style="fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
@@ -1218,7 +1218,7 @@
        width="29"
        height="5.7179775"
        x="414.62521"
-       y="71.24173"
+       y="71.241722"
        inkscape:label="ST_Manual_Depth" />
     <rect
        style="fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
@@ -1226,7 +1226,7 @@
        width="29"
        height="5.7179775"
        x="339.52078"
-       y="71.24173"
+       y="71.241722"
        inkscape:label="ST_Auto_Rise_Time" />
     <rect
        style="fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
@@ -1234,7 +1234,7 @@
        width="29"
        height="5.7179775"
        x="261.68512"
-       y="71.24173"
+       y="71.241722"
        inkscape:label="ST_Auto_Delay_Time" />
     <rect
        style="fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
@@ -1242,7 +1242,7 @@
        width="29"
        height="5.7179775"
        x="178.67838"
-       y="71.24173"
+       y="71.241722"
        inkscape:label="ST_Auto_Depth" />
     <rect
        style="fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
@@ -1250,7 +1250,7 @@
        width="29"
        height="5.7179775"
        x="100.91164"
-       y="71.24173"
+       y="71.241722"
        inkscape:label="ST_LFO_Rate" />
   </g>
   <g

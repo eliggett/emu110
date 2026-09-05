@@ -24,15 +24,15 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="mm"
-     inkscape:zoom="0.50466821"
-     inkscape:cx="1612.9409"
-     inkscape:cy="345.77173"
+     inkscape:zoom="0.17842716"
+     inkscape:cx="1813.0648"
+     inkscape:cy="1017.2218"
      inkscape:window-width="2560"
      inkscape:window-height="1316"
      inkscape:window-x="0"
      inkscape:window-y="0"
      inkscape:window-maximized="1"
-     inkscape:current-layer="g9" />
+     inkscape:current-layer="layer11" />
   <defs
      id="defs1">
     <clipPath
@@ -371,99 +371,98 @@
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.7px;line-height:12.7px;font-family:Earth;-inkscape-font-specification:'Earth, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;display:inline;fill:#00a3e0;stroke:none;stroke-width:2;stroke-linecap:square"
-       x="206.02866"
+       x="191.47647"
        y="284.68158"
        id="text109"
        inkscape:label="T_Shift_Course"><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="206.02866"
+         x="191.47647"
          y="284.68158"
          id="tspan108">SHIFT</tspan><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="206.02866"
+         x="191.47647"
          y="297.38159"
          id="tspan109">COURSE</tspan></text>
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.7px;line-height:12.7px;font-family:Earth;-inkscape-font-specification:'Earth, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;display:inline;fill:#00a3e0;stroke:none;stroke-width:2;stroke-linecap:square"
-       x="292.39871"
+       x="277.84653"
        y="284.68158"
        id="text120"
        inkscape:label="T_Shift_Fine"><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="292.39871"
+         x="277.84653"
          y="284.68158"
          id="tspan120">SHIFT</tspan><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="292.39871"
+         x="277.84653"
          y="297.38159"
          id="tspan177">FINE</tspan></text>
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.7px;line-height:12.7px;font-family:Earth;-inkscape-font-specification:'Earth, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;display:inline;fill:#00a3e0;stroke:none;stroke-width:2;stroke-linecap:square"
-       x="368.79724"
+       x="354.24506"
        y="284.68158"
        id="text132"
        inkscape:label="T_Bend_Range"><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="368.79724"
+         x="354.24506"
          y="284.68158"
          id="tspan132">BEND</tspan><tspan
          sodipodi:role="line"
          style="font-size:12.7px;line-height:12.7px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="368.79724"
+         x="354.24506"
          y="297.38159"
          id="tspan179">RANGE</tspan></text>
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:11.2889px;line-height:11.2889px;font-family:Earth;-inkscape-font-specification:'Earth, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;display:inline;fill:#00a3e0;stroke:none;stroke-width:2;stroke-linecap:square"
-       x="451.41974"
+       x="436.86755"
        y="284.68158"
        id="text143"
        inkscape:label="T_Detune_Depth"><tspan
          sodipodi:role="line"
          style="font-size:11.2889px;line-height:11.2889px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="451.41974"
+         x="436.86755"
          y="284.68158"
          id="tspan143">DETUNE</tspan><tspan
          sodipodi:role="line"
          style="font-size:11.2889px;line-height:11.2889px;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="451.41974"
+         x="436.86755"
          y="295.97049"
          id="tspan180">DEPTH</tspan></text>
     <text
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:11.2889px;line-height:12.7px;font-family:Earth;-inkscape-font-specification:'Earth, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;display:inline;fill:#00a3e0;stroke:none;stroke-width:2;stroke-linecap:square"
-       x="541.21008"
+       x="526.6579"
        y="284.68158"
        id="text154"
        inkscape:label="T_Polyphonic_Pressure_Sensitivity"><tspan
          sodipodi:role="line"
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:11.2889px;line-height:12.7px;font-family:Earth;-inkscape-font-specification:'Earth, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="541.21008"
+         x="526.6579"
          y="284.68158"
          id="tspan154">P.PRES</tspan><tspan
          sodipodi:role="line"
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:11.2889px;line-height:12.7px;font-family:Earth;-inkscape-font-specification:'Earth, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0;stroke:none;stroke-width:2"
-         x="541.21008"
+         x="526.6579"
          y="297.38159"
          id="tspan181">SENS</tspan></text>
   </g>
   <g
      inkscape:groupmode="layer"
      id="layer11"
-     inkscape:label="Slider_bodies"
-     sodipodi:insensitive="true">
+     inkscape:label="Slider_bodies">
     <g
        id="g9"
        style="display:inline"
        inkscape:label="SB_Shift_Course"
-       sodipodi:insensitive="true">
+       transform="translate(-14.552178)">
       <g
          id="g118"
          clip-path="url(#clipath_lpe_path-effect165)"
@@ -535,7 +534,8 @@
     <g
        id="g8"
        style="display:inline"
-       inkscape:label="SB_Shift_Fine">
+       inkscape:label="SB_Shift_Fine"
+       transform="translate(-14.552178)">
       <g
          id="g129"
          clip-path="url(#clipath_lpe_path-effect167)"
@@ -607,7 +607,8 @@
     <g
        id="g7"
        style="display:inline"
-       inkscape:label="SB_Bend_Range">
+       inkscape:label="SB_Bend_Range"
+       transform="translate(-14.552178)">
       <g
          id="g141"
          clip-path="url(#clipath_lpe_path-effect169)"
@@ -679,7 +680,8 @@
     <g
        id="g6"
        style="display:inline"
-       inkscape:label="SB_Detune_Depth">
+       inkscape:label="SB_Detune_Depth"
+       transform="translate(-14.552178)">
       <g
          id="g152"
          clip-path="url(#clipath_lpe_path-effect171)"
@@ -751,7 +753,8 @@
     <g
        id="g5"
        style="display:inline"
-       inkscape:label="SB_Polyphonic_Pressure_Sensitivity">
+       inkscape:label="SB_Polyphonic_Pressure_Sensitivity"
+       transform="translate(-14.552178)">
       <g
          id="g163"
          clip-path="url(#clipath_lpe_path-effect173)"
@@ -825,47 +828,46 @@
      inkscape:groupmode="layer"
      id="layer12"
      inkscape:label="Slider_taps"
-     style="display:inline"
-     sodipodi:insensitive="true">
+     style="display:inline">
     <rect
        style="display:inline;fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
        id="rect119"
        width="29"
        height="5.7179775"
-       x="229.02405"
-       y="76.109375"
+       x="214.47186"
+       y="76.109367"
        inkscape:label="ST_Shift_Course" />
     <rect
        style="display:inline;fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
        id="rect130"
        width="29"
        height="5.7179775"
-       x="304.78699"
-       y="76.109375"
+       x="290.2348"
+       y="76.109367"
        inkscape:label="ST_Shift_Fine" />
     <rect
        style="display:inline;fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
        id="rect142"
        width="29"
        height="5.7179775"
-       x="386.72006"
-       y="76.109375"
+       x="372.16788"
+       y="76.109367"
        inkscape:label="ST_Bend_Range" />
     <rect
        style="display:inline;fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
        id="rect153"
        width="29"
        height="5.7179775"
-       x="471.65735"
-       y="76.109375"
+       x="457.10516"
+       y="76.109367"
        inkscape:label="ST_Detune_Depth" />
     <rect
        style="display:inline;fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
        id="rect164"
        width="29"
        height="5.7179775"
-       x="556.35999"
-       y="76.109375"
+       x="541.8078"
+       y="76.109367"
        inkscape:label="ST_Polyphonic_Pressure_Sensitivity" />
   </g>
   <g
