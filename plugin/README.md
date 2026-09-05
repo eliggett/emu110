@@ -317,6 +317,18 @@ change on the DIVE pages, where the text layer is authored first.  And a repaint
 extra GL flush: measured at 2.4 ms with the drawer open under software rendering, against
 1.2 ms for the panel alone before the drawer existed.
 
+#### `[!]` ...and a third frame, for the one thing drawn with a real font
+
+The PATCH and TONE palettes are the only things in the UI drawn with an actual typeface
+rather than paths or dots, and putting them in the fine-fringe frame made them **harder to
+read**.  NanoVG rasterises a glyph at `fontSize * devicePixelRatio` and then draws it
+scaled back down (`nvgText`: `fonsSetSize(fs, state->fontSize*scale)`).  At x3 that is a
+39 px glyph minified to 13 with bilinear sampling and no mipmap -- undersampled, so soft.
+
+So there is a third frame at the host's own ratio for the menus and the tooltip, opened
+only when one of them is actually up.  The artwork never cared: its lettering is paths and
+the LCD is rectangles, and neither goes near the font atlas.
+
 The host's own scale factor is multiplied in rather than replaced, so a HiDPI display keeps
 the finer fringe it already had.
 
@@ -634,6 +646,7 @@ promptly. There is no refresh rate to compromise over.
 ```sh
 VOLTAIRE_FPS=1 ./bin/Voltaire110      # prints the rate and the cost per redraw
 VOLTAIRE_DIVE=P1 ./bin/Voltaire110    # start with the drawer open on a tab
+VOLTAIRE_MENU=patch ./bin/Voltaire110 # start with a palette open (patch|tone)
 ```
 
 `VOLTAIRE_DIVE` takes a tab name as the artwork spells it (`set`, `common`, `P1`..`P6`,

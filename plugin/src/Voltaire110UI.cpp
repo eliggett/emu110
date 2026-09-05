@@ -82,6 +82,11 @@ public:
     {
         loadArtwork();
         resolveDiveParams();
+        // VOLTAIRE_MENU=patch|tone opens a menu at startup, for the same reason: a
+        // palette that cannot be opened without a mouse cannot be looked at under Xvfb.
+        if (const char *m = std::getenv("VOLTAIRE_MENU"))
+            m_menu = sameName(m, "tone") ? Menu::Tone : Menu::Patch;
+
         // VOLTAIRE_DIVE=<tab> opens the drawer on that tab at startup.  The drawer is
         // otherwise only reachable by clicking, which a headless screenshot cannot do,
         // and a page whose layout nobody can look at is a page nobody checked.
@@ -356,6 +361,23 @@ protected:
         drawLcd();
 
         restore();
+
+        // A third frame, back at the host's own ratio, for anything drawn with a real
+        // font.  NanoVG rasterises a glyph at fontSize * devicePixelRatio and then draws
+        // it scaled back down: at x3 that is a 39 px glyph minified to 13 with bilinear
+        // sampling and no mipmap, which is softer and measurably harder to read.  The
+        // artwork does not care -- its lettering is paths, and the LCD is rectangles --
+        // but the menus are text, and they are the one thing here that is.
+        //
+        // Only when there is something to draw, so the common case still costs two.
+        const bool overlay = m_menu != Menu::None
+                          || (m_diveOpen && (m_dragCtl >= 0 || m_hoverCtl >= 0));
+        if (overlay)
+        {
+            nvgEndFrame(getContext());
+            nvgBeginFrame(getContext(), float(getWidth()), float(getHeight()),
+                          float(m_hostScale));
+        }
 
         // Outside the panel transform on purpose: the menus are in window pixels.
         if (m_menu == Menu::Patch)
