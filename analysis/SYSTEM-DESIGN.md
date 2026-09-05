@@ -649,6 +649,39 @@ is not the name being displayed. The name is plain ASCII in the active patch buf
 `0x2804` and the patch list already reads it there; unlike a tone, nothing is derived
 from it, so it is the one thing the editor can write to RAM directly.
 
+#### Every parameter's real range, asked of the machine `[C]`
+
+The manual prints a range for each parameter twice -- once in the address map of §4.2.2
+and once in Parameter Table 1 -- and **they do not always agree**. The machine settles it:
+write `0x7F` to an address, read it back, and what comes back is that parameter's own
+maximum.
+
+| addr | parameter | max | | addr | parameter | max |
+|---|---|---|---|---|---|---|
+| 00 | output assign | 7 | | 10 | LFO auto rise | 15 |
+| 01 | receive channel | 15 | | 11 | LFO auto depth | 15 |
+| 04 | bend range | 15 | | 12 | LFO manual rise | 15 |
+| 05 | key range low | 127 | | 13 | LFO manual depth | 15 |
+| 06 | key range high | 127 | | 14 | LFO ch press sens | 7 |
+| 07 | part level | 127 | | 15 | program change | 1 |
+| 08 | velocity sens | 15 | | 16 | program change map | 7 |
+| 09 | level ch press sens | 15 | | 17 | detune depth | 15 |
+| 0A | ENV attack | 15 | | 18 | pitch poly press sens | 15 |
+| 0B | ENV release | 15 | | 19 | LFO poly press sens | 7 |
+| 0C | pitch shift coarse | 127 | | | | |
+| 0D | pitch shift fine | 127 | | | | |
+| **0E** | **LFO rate** | **127** | | | | |
+
+`[C]` **LFO RATE is 0-127.** §4.2.2 prints it as `0000 aaaa : 0-15`; Parameter Table 1
+prints `LFO.RATE 0....127`; the table is right. A freshly booted P-01 reads back **50**
+there, which the address map's range cannot even represent.
+
+Several of the machine's clamps are looser than the documented musical range -- output
+assign stops at 7 where the manual gives 1-6 and OFF, bend range at 15 where the manual
+gives 0-12, and pitch shift coarse and fine are not clamped to their 52-76 and 14-114
+windows at all. The documented ranges are what the editor uses, since those are what the
+values *mean*; the machine simply does not police them.
+
 ### 5.3.3 SETUP lives in battery-backed RAM, and only partly where expected `[C]`
 
 None of the SETUP parameters has a SysEx address — §4.2.2's map covers the patch and its

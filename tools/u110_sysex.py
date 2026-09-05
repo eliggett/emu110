@@ -69,7 +69,8 @@ PART_ENV_ATTACK      = 0x0A   # 1-15 for -7..+7
 PART_ENV_RELEASE     = 0x0B   # 1-15 for -7..+7
 PART_PITCH_COARSE    = 0x0C   # 52-76 for -12..+12 semitones
 PART_PITCH_FINE      = 0x0D   # 14-114 for -50..+50 cents
-PART_LFO_RATE        = 0x0E   # 0-15
+PART_LFO_RATE        = 0x0E   # 0-127, NOT the 0-15 the address map prints -- see
+                              # SYSTEM-DESIGN 5.3.2; the machine reads back 50 on P-01
 PART_LFO_AUTO_DELAY  = 0x0F   # 0-15
 PART_LFO_AUTO_RISE   = 0x10   # 0-15
 PART_LFO_AUTO_DEPTH  = 0x11   # 0-15

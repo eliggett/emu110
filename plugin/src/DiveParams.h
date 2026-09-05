@@ -99,7 +99,10 @@ inline constexpr Param kParams[] = {
     { "pitch", "SB_Polyphonic_Pressure_Sensitivity",  kPart, 0x18,  0,  15, kPolyPress, 0 },
 
     // ---- LFO
-    { "lfo", "SB_LFO_Rate",                         kPart, 0x0E, 0, 15, kNumber, 0 },
+    // 0-127, NOT the 0-15 the manual's address map prints for it.  The Parameter Table
+    // a few pages earlier says 127, the two disagree, and the machine settles it: a
+    // freshly booted P-01 reads back 50 here, and writing 0x7F to it sticks.
+    { "lfo", "SB_LFO_Rate",                         kPart, 0x0E, 0, 127, kNumber, 0 },
     { "lfo", "SB_Auto_Depth",                       kPart, 0x11, 0, 15, kNumber, 0 },
     { "lfo", "SB_Auto_Delay_Time",                  kPart, 0x0F, 0, 15, kNumber, 0 },
     { "lfo", "SB_Auto_Rise_Time",                   kPart, 0x10, 0, 15, kNumber, 0 },

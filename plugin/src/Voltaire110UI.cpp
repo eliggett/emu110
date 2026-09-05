@@ -1589,7 +1589,12 @@ private:
                 ? voltaire::dive::kMasterTuneMax : int(p->hi);
         if (hi <= lo)
             return 0.0f;
-        return float(raw - lo) / float(hi - lo);
+        // Clamped, so a value outside the range this table believes in pins the tap to
+        // an end of its travel instead of drawing it off the page.  That is how the LFO
+        // rate looked when its range was wrong: not wrong, but ABSENT, which is a much
+        // harder thing to recognise as a range error.
+        const float f = float(raw - lo) / float(hi - lo);
+        return f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f);
     }
 
     /// ...and the inverse, for a drag.
