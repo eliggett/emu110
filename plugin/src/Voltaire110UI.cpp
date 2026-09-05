@@ -36,6 +36,10 @@
 #include <string>
 #include <vector>
 
+// NanoVG's own entry point, which DGL wraps but does not re-export.  See kFringeSharpen
+// for why this file needs it.
+extern "C" void nvgBeginFrame(NVGcontext *ctx, float w, float h, float devicePixelRatio);
+
 START_NAMESPACE_DISTRHO
 
 // Kept in step with the plugin by hand; there are only a few and they are checked by the
@@ -250,6 +254,15 @@ protected:
     /// Half a second on, half a second off, and only while a field is being typed into.
     static constexpr double kCaretPeriod = 0.5;
 
+    /// The fringe is in DEVICE pixels, so a HiDPI host that is already drawing at 2x
+    /// has a finer one to begin with; keeping its factor rather than replacing it is
+    /// what stops this from being a fixed assumption about the display.
+    void uiScaleFactorChanged(double scaleFactor) override
+    {
+        m_hostScale = scaleFactor > 0.0 ? scaleFactor : 1.0;
+        repaint();
+    }
+
     void uiIdle() override
     {
         if (m_nameEdit)
@@ -300,6 +313,10 @@ protected:
         struct timespec t0;
         if (m_countFrames)
             clock_gettime(CLOCK_MONOTONIC, &t0);
+
+        // Halve NanoVG's antialiasing fringe.  See kFringeSharpen.
+        nvgBeginFrame(getContext(), float(getWidth()), float(getHeight()),
+                      float(m_hostScale) * kFringeSharpen);
 
         const float s = panelScale();
         const float ox = (getWidth() - voltaire::panel::kDesignWidth * s) * 0.5f;
@@ -2142,6 +2159,29 @@ private:
         }
     }
 
+    /// How much narrower than NanoVG's default to make the antialiasing fringe.
+    ///
+    /// NanoVG antialiases by widening every filled shape by half a fringe and feathering
+    /// another fringe outside that, and the fringe is one device pixel.  On a photograph
+    /// that is invisible; on lettering it is most of a pixel of extra ink per side, and
+    /// the panel came out looking heavy and crowded next to the same SVG in Inkscape.
+    ///
+    /// The fringe is 1/devicePixelRatio, and the ratio does NOT scale any geometry -- it
+    /// only sets the fringe and the curve tessellation tolerance -- so handing NanoVG a
+    /// larger ratio than the window really has buys a finer fringe and nothing else.
+    ///
+    /// Measured, as ink over a fixed threshold across "CARTRIDGE MANAGER" at a 1100 px
+    /// window, against rsvg-convert rendering the same flat SVG (3727):
+    ///
+    ///     x1 (NanoVG's default)  5099      x3   3849
+    ///     x2                     4344      x4   3745
+    ///
+    /// Four matches the reference almost exactly and is still the wrong answer: with a
+    /// quarter-pixel fringe there is no antialiasing left, and the volume knob's circle
+    /// comes out visibly stepped.  Two removes half the excess weight and costs a barely
+    /// perceptible hardening of curves, which is the trade worth making.
+    static constexpr float kFringeSharpen = 2.0f;
+
     /// Below this many window pixels a stroke is not drawn at all.
     ///
     /// NanoVG cannot draw a sub-pixel stroke: anything thinner than one device pixel is
@@ -2447,6 +2487,7 @@ private:
     double m_caretAt = 0.0;
     char m_nameBuf[voltaire::dive::kNameLen + 1] = { 0 };
     int m_nameCaret = 0;
+    double m_hostScale = 1.0;    ///< the host's own pixel ratio, 1.0 unless it says
     bool m_diveNeedRead = false; ///< the open page's values are stale
     int m_diveRetry = 0;         ///< idles left before asking again
     int m_dragCtl = -1;          ///< the slider being dragged, or -1

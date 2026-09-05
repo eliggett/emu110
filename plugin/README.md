@@ -257,8 +257,8 @@ reduced to compensate, so every tab label came out with a dark rim and read as h
 crowded.  Strokes thinner than 0.6 device pixels are now skipped, which is what matches
 the reference render.
 
-A residual remains and is worth knowing about, because it is the renderer and not the
-artwork.  Measuring stem widths on one scanline through "COMMON":
+A residual remains, and it is the renderer rather than the artwork.  Measuring stem
+widths on one scanline through "COMMON":
 
 | window | rsvg | plugin | excess |
 |---|---|---|---|
@@ -266,10 +266,40 @@ artwork.  Measuring stem widths on one scanline through "COMMON":
 | 2200 px | 13.8 px | 15.5 px | +1.8 px |
 
 The excess is roughly **constant in pixels**, not proportional -- doubling the window did
-not double it -- so it is NanoVG's antialiasing expansion, about a pixel per side, and not
-anything geometric.  It therefore matters less the larger the panel is drawn: a third of a
-stem at 1100 px, an eighth at 2200.  Turning shape antialiasing off would remove it
-exactly and give hard, jagged glyph edges instead, which is a worse trade.
+not double it -- so it is NanoVG's antialiasing expansion and not anything geometric.
+NanoVG widens every filled shape by half a fringe and feathers another fringe outside
+that, and the fringe is one device pixel.
+
+### The fringe is one device pixel, and it does not have to be
+
+`nvgBeginFrame`'s device pixel ratio sets `fringeWidth = 1/ratio` and the curve
+tessellation tolerance, and **scales no geometry at all**.  So handing NanoVG a larger
+ratio than the window really has buys a finer fringe and costs nothing else.  Measured as
+ink over a fixed threshold across "CARTRIDGE MANAGER" at a 1100 px window, against
+rsvg-convert on the same flat SVG (3727):
+
+| ratio | ink | |
+|---|---|---|
+| x1 (default) | 5099 | +37% over the reference |
+| **x2** | **4344** | +17%, and what is used |
+| x3 | 3849 | |
+| x4 | 3745 | matches the reference -- and the knob is visibly stepped |
+
+Four is the wrong answer despite matching: a quarter-pixel fringe is no antialiasing at
+all, and every curve in the artwork comes out staircased.  Two removes half the excess for
+a barely perceptible hardening of curves.  The host's own scale factor is multiplied in
+rather than replaced, so a HiDPI display keeps the finer fringe it already had.
+
+### `[!]` The heaviest lettering change was not in the code at all
+
+The artwork's text used to ask for **Earth** and now asks for **Earth-Mod**, a modified
+face that is bolder and about 11% narrower per glyph -- literally thicker and more
+crowded.  Flattening the same word through Inkscape: Earth gives 284 points across
+110.9 units, Earth-Mod gives 400 points across 98.5.  Rendered identically by rsvg, that
+is 2884 ink against 3727, a 29% increase before the renderer is involved at all.
+
+Worth knowing when the panel's weight changes and nothing in the pipeline did: check
+`font-family` in the artwork before looking anywhere else.
 
 ### What is not wired yet
 
