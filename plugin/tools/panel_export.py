@@ -14,6 +14,16 @@ composes every transform down to canvas coordinates, and emits
     plugin/generated/panel_svg.h          the same, embedded as a C string
     plugin/generated/panel_background.png rasters, pre-rendered by rsvg-convert
     plugin/generated/panel_background.h   the same, embedded as bytes
+    plugin/generated/dive_<page>_flat.svg one per DIVE page, in panel coordinates
+    plugin/generated/dive_pages.h         all of them, embedded
+
+The DIVE drawer is drawn from seven documents, not one.  The panel is the frame and
+each tab's content is its own Inkscape file, so that a page can be laid out without
+the other six in the way.  They are NOT merged into a single SVG: every page names
+its content box `rect11` and its slider graticules `path290`, so a merge would
+collide ids -- and ids are how the UI finds a shape to recolour.  Each page is
+flattened separately and translated into panel coordinates by the exporter, using
+the `dive_controls_max_outline` rect that appears in both documents as the anchor.
 
 It also LINTS the artwork against nanosvg's subset.  nanosvg ignores what it
 does not understand, silently, so an unsupported construct shows up as a missing
@@ -27,7 +37,13 @@ Elements are recognised by their Inkscape label:
     KNOB_<name>_pointer   its needle-> shape id + pivot + zero angle
     LCD_outer / LCD_inner           -> bezel and glass
     VU_<name>     a meter           -> draw rect
-    T_<name>      screenprint text  -> ignored here, drawn by nanosvg
+    T_<name>      screenprint text  -> drawn by nanosvg; its id is exported so the
+                                       UI can recolour it (a selected tab)
+    M_<name>      a menu button     -> hit rect, value drawn in the LCD font
+    SB_<name>     a slider body     -> the group; its graticules give the travel
+    ST_<name>     a slider tap      -> the draggable part, at its zero position
+    LCD_<name>    an LCD-style field-> hit/draw rect
+    L_<name>      a section frame   -> rounded rect with a gap for T_<name>
 
 Usage:
     plugin/tools/panel_export.py                 # extract
@@ -62,19 +78,45 @@ ET.register_namespace('sodipodi', 'http://sodipodi.sourceforge.net/DTD/sodipodi-
 ET.register_namespace('xlink', 'http://www.w3.org/1999/xlink')
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SVG_PATH = os.path.join(ROOT, 'resources/graphics/overall_panel_inkscape.svg')
+GFX = os.path.join(ROOT, 'resources/graphics')
+SVG_PATH = os.path.join(GFX, 'overall_panel_inkscape.svg')
 OUT_DIR = os.path.join(ROOT, 'plugin/generated')
 
-# Layers whose contents are editing aids, not part of the rendered panel.
-# 'Foreground Text as Text' is the layer the human edits; the paths layer built
-# from it is what actually renders, since nanosvg has no text support at all.
-SKIP_LAYERS = {'Foreground Text as Text', 'Example_LCD_Testing_only'}
+# The DIVE pages, in tab order.  `scoot` says the page is shown with the second tab
+# row hidden, so everything on it moves up by exactly that row's height; the two
+# pages that have no per-part sub-tabs are the two that scoot.  Doing it here rather
+# than in Inkscape means each page is drawn once, at one set of coordinates, and the
+# artwork does not carry two copies of the same layout.
+DIVE_PAGES = [
+    ('set',    'dive_setup.svg',  True),
+    ('common', 'dive_common.svg', True),
+    ('basic',  'dive_basic.svg',  False),
+    ('level',  'dive_level.svg',  False),
+    ('pitch',  'dive_pitch.svg',  False),
+    ('lfo',    'dive_LFO.svg',    False),
+]
+
+# The rect that appears in BOTH the panel and every page, and so fixes where a page
+# lands.  Inkscape puts it at (1,1) on a page and at (2,312.26) on the panel; the
+# exporter never needs to be told the offset, it measures it.
+ANCHOR = 'dive_controls_max_outline'
+
+# Layers whose contents are editing aids, not part of the rendered panel.  A layer
+# whose name ends in _do_not_include is the artwork saying so itself, which is the
+# convention to prefer -- the two named here predate it.
+#
+# 'Foreground Text as Text' used to be listed too, back when a sibling layer held
+# paths built from it.  That layer is gone: the lettering is now flattened from the
+# text on every export, which is what makes a label editable in Inkscape as text.
+# The one thing still exempt from flattening is a hand-adjusted X_as_path pair.
+SKIP_LAYERS = {'Example_LCD_Testing_only'}
+SKIP_LAYER_SUFFIX = '_do_not_include'
 
 # nanosvg understands fills, strokes and linear/radial gradients.  Everything
 # here is silently dropped by it.
 UNSUPPORTED_TAGS = {'filter', 'clipPath', 'mask', 'pattern', 'use', 'image',
                     'switch', 'foreignObject', 'marker', 'symbol'}
-UNSUPPORTED_ATTRS = {'filter', 'clip-path', 'mask'}
+UNSUPPORTED_ATTRS = {'filter', 'mask'}
 
 # ...with two exceptions, which this script HANDLES rather than warns about.
 #
@@ -91,6 +133,17 @@ UNSUPPORTED_ATTRS = {'filter', 'clip-path', 'mask'}
 # BACKGROUND_SCALE sets how much detail is kept, at roughly 660 KB per multiple.
 HANDLED_TAGS = {'image', 'clipPath'}
 BACKGROUND_SCALE = 2.0
+
+# A clip-path is dropped by nanosvg too, so anything wearing one goes through the same
+# pre-render.  The rule is uniform on purpose -- "if nanosvg cannot clip it, rsvg draws
+# it" needs no list of exceptions and cannot fall out of date.  Two constructs in the
+# artwork rely on it: the section frames (L_*), whose gap for the title is an Inkscape
+# power clip, and the slider graticules, which are clipped where the slider body covers
+# them.  Both land behind the page's vectors, which is the z-order they already had.
+#
+# These are strokes rather than photographs, so they are rendered at a higher scale than
+# the background: a few lines on a transparent ground cost almost nothing compressed.
+FRAME_SCALE = 4.0
 
 # Rendering the background needs a renderer that implements clip paths, which is the
 # whole reason not to do it in the UI: rsvg-convert already has one.
@@ -179,6 +232,116 @@ def rotation_of(s):
     return None
 
 
+# ----------------------------------------------------------------- path bbox
+
+PATH_TOKENS = re.compile(r'([MmZzLlHhVvCcSsQqTtAa])|(-?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)')
+
+
+def path_points(d):
+    """Every control point of a path, in the path's own coordinates.
+
+    Control points, not the true outline: a bezier is contained by its hull, so this
+    can only ever be too generous, and never by much on the shapes it is asked about
+    -- slider graticules, which are straight, and rounded rectangles, whose corner
+    controls sit on the box.  Being exact would mean subdividing curves for no gain.
+    """
+    if not d:
+        return []
+    toks = [(c, n) for c, n in PATH_TOKENS.findall(d)]
+    pts, i = [], 0
+    x = y = sx = sy = 0.0
+    cmd = None
+    # how many numbers each command eats, and which of its pairs are coordinates
+    argc = dict(M=2, L=2, H=1, V=1, C=6, S=4, Q=4, T=2, A=7, Z=0)
+    while i < len(toks):
+        c, n = toks[i]
+        if c:
+            cmd = c
+            i += 1
+            if cmd in 'Zz':
+                x, y = sx, sy
+                continue
+        if cmd is None:
+            return pts
+        up = cmd.upper()
+        rel = cmd.islower()
+        k = argc[up]
+        nums = []
+        while len(nums) < k and i < len(toks) and not toks[i][0]:
+            nums.append(float(toks[i][1]))
+            i += 1
+        if len(nums) < k:
+            break
+        if up == 'H':
+            x = x + nums[0] if rel else nums[0]
+        elif up == 'V':
+            y = y + nums[0] if rel else nums[0]
+        elif up == 'A':
+            # only the endpoint is a coordinate; the radii are not points on the path
+            x = x + nums[5] if rel else nums[5]
+            y = y + nums[6] if rel else nums[6]
+        else:
+            ox, oy = x, y
+            for j in range(0, k, 2):
+                px = nums[j] + (ox if rel else 0.0)
+                py = nums[j + 1] + (oy if rel else 0.0)
+                pts.append((px, py))
+                x, y = px, py
+        pts.append((x, y))
+        if up == 'M':
+            sx, sy = x, y
+            cmd = 'l' if rel else 'L'      # a second M coordinate pair is an implicit L
+    return pts
+
+
+def node_bbox(node, mat):
+    """Bounding box of a subtree in canvas coordinates, or None if it has no geometry.
+
+    This is what lets a group be measured.  A slider is authored as a group -- its
+    graticules and its body -- and neither part alone says where the thing is.
+    """
+    box = None
+
+    def add(m, px, py):
+        nonlocal box
+        gx, gy = mat_apply(m, px, py)
+        if box is None:
+            box = [gx, gy, gx, gy]
+        else:
+            box[0], box[1] = min(box[0], gx), min(box[1], gy)
+            box[2], box[3] = max(box[2], gx), max(box[3], gy)
+
+    def geom(n, m):
+        tag = n.tag.split('}')[-1]
+        if tag == 'rect':
+            try:
+                x, y, w, h = (float(n.get(k)) for k in ('x', 'y', 'width', 'height'))
+            except (TypeError, ValueError):
+                return
+            add(m, x, y)
+            add(m, x + w, y + h)
+        elif tag in ('circle', 'ellipse'):
+            cx, cy = float(n.get('cx', 0)), float(n.get('cy', 0))
+            rx = float(n.get('r') or n.get('rx') or 0)
+            ry = float(n.get('r') or n.get('ry') or 0)
+            add(m, cx - rx, cy - ry)
+            add(m, cx + rx, cy + ry)
+        elif tag == 'path':
+            for px, py in path_points(n.get('d')):
+                add(m, px, py)
+
+    def walk(n, m, root):
+        # the caller's matrix already includes this node's own transform
+        if not root:
+            m = mat_mul(m, parse_transform(n.get('transform')))
+        geom(n, m)
+        for c in n:
+            walk(c, m, False)
+
+    walk(node, mat, True)
+    return box
+
+
 # ------------------------------------------------------------------ scanning
 
 class Element:
@@ -201,7 +364,7 @@ class Element:
 
 
 def scan(svg_path):
-    """Walk the SVG, returning (elements, knob_pivots, warnings, canvas)."""
+    """Walk the SVG, returning (elements, pivots, warnings, canvas, rasters, travel)."""
     tree = ET.parse(svg_path)
     root = tree.getroot()
 
@@ -214,34 +377,41 @@ def scan(svg_path):
 
     elements, pivots, warnings = [], {}, []
     aids = editing_aid_labels(root)
-    rasters = []
+    rasters, travel = [], {}
 
-    def walk(node, mat, layer, in_skipped, in_handled):
+    def walk(node, mat, layer, in_skipped, in_defs, in_raster):
         tag = node.tag.split('}')[-1]
         label = node.get(f'{{{INK}}}label')
         eid = node.get('id')
 
         if node.get(f'{{{INK}}}groupmode') == 'layer':
             layer = label or eid
-            in_skipped = layer in SKIP_LAYERS
+            if layer in SKIP_LAYERS or (layer or '').endswith(SKIP_LAYER_SUFFIX):
+                in_skipped = True
 
         # An element paired with an X_as_path is a source, not artwork.  Its whole
         # subtree is exempt: it is neither drawn nor measured nor complained about.
         if label in aids:
             in_skipped = True
 
-        # Inside a <clipPath> or an <image>, geometry belongs to the background
-        # pipeline.  It is neither a control nor something nanosvg was ever going
-        # to draw, so linting it against nanosvg's subset says nothing useful.
-        if tag in HANDLED_TAGS:
-            in_handled = True
+        # A <clipPath> holds geometry that is never drawn anywhere -- it only shapes
+        # something else -- so it is neither a control nor a lint subject.
+        if tag in ('clipPath', 'defs'):
+            in_defs = True
 
         mat = mat_mul(mat, parse_transform(node.get('transform')))
 
-        if tag == 'image' and not in_skipped:
-            rasters.append(eid)
+        # Everything nanosvg cannot draw goes to the raster pass instead: <image>,
+        # which it has no element for, and anything wearing a clip-path, which it
+        # parses and then ignores.  Recording the id here is what lets the flattener
+        # take the same elements OUT of the vector artwork, so the two halves stay
+        # disjoint and nothing is drawn twice.
+        if not in_skipped and not in_defs and not in_raster:
+            if tag == 'image' or node.get('clip-path'):
+                rasters.append(eid)
+                in_raster = True
 
-        if not in_skipped and not in_handled:
+        if not in_skipped and not in_defs and not in_raster:
             if tag in UNSUPPORTED_TAGS:
                 warnings.append(f'<{tag}> id={eid}: nanosvg ignores this entirely')
             for attr in UNSUPPORTED_ATTRS:
@@ -249,10 +419,6 @@ def scan(svg_path):
                     warnings.append(f'<{tag}> id={eid}: {attr}= is dropped by nanosvg')
             if node.get('style') and 'filter:' in node.get('style'):
                 warnings.append(f'<{tag}> id={eid}: filter in style= is dropped by nanosvg')
-            if tag == 'text':
-                warnings.append(f'<text> id={eid} in layer {layer!r}: nanosvg cannot '
-                                'render text -- convert to path or move it to an '
-                                'editing-aid layer')
 
         # A rotate() on a group whose child is a knob pointer is the knob's zero
         # position, not artwork to be flattened away.
@@ -272,7 +438,10 @@ def scan(svg_path):
                     pivots[name] = dict(angle_deg=ang, x=gx, y=gy,
                                         shape_id=child.get('id'))
 
-        if label and not in_skipped and not in_handled:
+        # The anchor is measured even inside a guide layer.  It is not artwork --
+        # it is the registration mark that says where a page sits on the panel, and
+        # a guide layer is exactly where it belongs.
+        if label and (not in_skipped or label == ANCHOR) and not in_defs:
             if tag == 'rect':
                 try:
                     x, y, w, h = (float(node.get(k)) for k in ('x', 'y', 'width', 'height'))
@@ -300,11 +469,36 @@ def scan(svg_path):
                 gx, gy = mat_apply(mat, cx, cy)
                 elements.append(Element(label, eid, 'ellipse',
                                         gx - rx, gy - ry, 2 * rx, 2 * ry))
+            elif tag in ('g', 'path'):
+                b = node_bbox(node, mat)
+                if b is not None:
+                    elements.append(Element(label, eid, tag,
+                                            b[0], b[1], b[2] - b[0], b[3] - b[1]))
+            elif tag == 'text':
+                # A text box needs font metrics to measure and the exporter has none.
+                # Its anchor is enough: what the UI wants from a label is its id, so
+                # that a selected tab can be redrawn in a brighter colour.
+                try:
+                    gx, gy = mat_apply(mat, float(node.get('x')), float(node.get('y')))
+                    elements.append(Element(label, eid, 'text', gx, gy, 0.0, 0.0))
+                except (TypeError, ValueError):
+                    pass
+
+            # A slider is a group: graticules plus a body.  The ten graticules are
+            # what bounds the travel -- the artwork's own statement of where the tap
+            # may go -- and they are the only part of it the UI cannot guess.
+            if label.startswith('SB_'):
+                for kid in node.iter():
+                    if kid.get(f'{{{INK}}}label') == 'slider_lines':
+                        b = node_bbox(kid, mat_mul(mat, parse_transform(kid.get('transform'))))
+                        if b is not None:
+                            travel[label] = b
+                        break
 
         for child in node:
-            walk(child, mat, layer, in_skipped, in_handled)
+            walk(child, mat, layer, in_skipped, in_defs, in_raster)
 
-    walk(root, IDENTITY, None, False, False)
+    walk(root, IDENTITY, None, False, False, False)
 
     # off-canvas check
     W, H = canvas
@@ -313,7 +507,7 @@ def scan(svg_path):
             warnings.append(f'{e.label}: extends outside the canvas '
                             f'({e.x:.1f},{e.y:.1f} {e.w:.1f}x{e.h:.1f})')
 
-    return elements, pivots, warnings, canvas, rasters
+    return elements, pivots, warnings, canvas, rasters, travel
 
 
 def invert_rotate(rot):
@@ -330,13 +524,33 @@ def c_ident(name):
     return re.sub(r'[^A-Za-z0-9]+', '_', name).strip('_').upper()
 
 
-def emit_header(path, elements, pivots, canvas, svg_rel):
+# Which prefixes name a DIVE control, and what the UI does with each.
+DIVE_KIND = {'BUT': 'DK_BUTTON', 'M': 'DK_MENU', 'SB': 'DK_SLIDER', 'LCD': 'DK_LCD'}
+
+
+def emit_header(path, elements, pivots, canvas, svg_rel, pages=(), row2_h=0.0):
     by_prefix = {}
     for e in elements:
         pre = e.label.split('_', 1)[0]
         by_prefix.setdefault(pre, []).append(e)
 
-    buttons = sorted(by_prefix.get('BUT', []), key=lambda e: (e.y, e.x))
+    by_label = {e.label: e for e in elements}
+    drawer = by_label.get('dive_with_tabs_max_outline')
+    content = by_label.get(ANCHOR)
+
+    # A button below the drawer's top edge is a tab, not a panel button.  The
+    # artwork already says which is which by where it put them, so nothing here
+    # needs a list of tab names to keep in step with Inkscape.
+    top = drawer.y if drawer is not None else float('inf')
+    # Rounded to a tenth of a millimetre before sorting: two tabs in the same row
+    # can sit a ten-thousandth apart in the artwork, which is not a row boundary but
+    # is enough to shuffle the enum from one export to the next.
+    tabs = sorted((e for e in by_prefix.get('BUT', []) if e.y >= top - 0.01),
+                  key=lambda e: (round(e.y, 1), e.x))
+    rows = sorted({round(e.y, 1) for e in tabs})
+
+    buttons = sorted((e for e in by_prefix.get('BUT', []) if e.y < top - 0.01),
+                     key=lambda e: (e.y, e.x))
     leds = sorted(by_prefix.get('LED', []), key=lambda e: (e.y, e.x))
     meters = sorted(by_prefix.get('VU', []), key=lambda e: (e.y, e.x))
     lcds = {e.label: e for e in by_prefix.get('LCD', [])}
@@ -417,6 +631,9 @@ def emit_header(path, elements, pivots, canvas, svg_rel):
         A(f'inline constexpr const char *k{name.title()}KnobPointerId = "{piv["shape_id"]}";')
         A('')
 
+    emit_dive(A, canvas, tabs, rows, drawer, content, by_label, pages, row2_h,
+              by_label.get('overall_outline'))
+
     A('} // namespace panel')
     A('} // namespace voltaire')
     A('')
@@ -425,77 +642,260 @@ def emit_header(path, elements, pivots, canvas, svg_rel):
         f.write('\n'.join(L))
 
 
-def emit_json(path, elements, pivots, canvas, svg_rel):
+def emit_dive(A, canvas, tabs, rows, drawer, content, panel_by_label, pages, row2_h,
+              outline):
+    """The DIVE drawer: its tabs, its three heights, and each page's controls."""
+    if not tabs or drawer is None or content is None:
+        A('// (no DIVE drawer in the artwork)')
+        A('')
+        return
+
+    A('// ------------------------------------------------------------------ DIVE')
+    A('//')
+    A('// The drawer lives below the panel in the same artwork, so every coordinate')
+    A('// here is in the same design space as the panel above it.  It has three')
+    A('// heights: shut, open on a page with one tab row, and open on a page with')
+    A('// two.  A page that shows no second row is drawn shifted up by exactly that')
+    A('// row\'s height, and the geometry below already has the shift applied.')
+    A('')
+    # Shut, the window ends below the panel outline with the same margin the artwork
+    # leaves at its left edge -- which is what the outline's 4-unit stroke needs to
+    # not be sliced in half by the window edge.
+    shut = (outline.y + outline.h + outline.x) if outline is not None else drawer.y
+    A(f'inline constexpr float kPanelShutHeight = {shut:.5f}f;')
+    A(f'inline constexpr float kDiveRow2Height  = {row2_h:.5f}f;')
+    A(f'inline constexpr float kDiveOpenHeight  = {canvas[1]:.5f}f;')
+    A(f'inline constexpr float kDiveOpenHeight1Row = {canvas[1] - row2_h:.5f}f;')
+    A('')
+    A('// The drawer body and its content box are the two shapes whose size depends')
+    A('// on which page is open, so the UI draws them itself and skips the artwork\'s')
+    A('// copies.  Same pattern as the knob pointer.')
+    A(f'inline constexpr const char *kDiveBodySvgId    = "{drawer.id}";')
+    A(f'inline constexpr const char *kDiveContentSvgId = "{content.id}";')
+    A(f'inline constexpr Rect kDiveBody    = {{ {drawer.x:.4f}f, {drawer.y:.4f}f, '
+      f'{drawer.w:.4f}f, {drawer.h:.4f}f }};')
+    A(f'inline constexpr Rect kDiveContent = {{ {content.x:.4f}f, {content.y:.4f}f, '
+      f'{content.w:.4f}f, {content.h:.4f}f }};')
+    A('')
+
+    # ---- the tabs
+    A('enum DiveTabId : int {')
+    for e in tabs:
+        A(f'    TAB_{c_ident(e.label[4:])},')
+    A('    DIVETABID_COUNT')
+    A('};')
+    A('')
+    A('inline constexpr Rect kDiveTab[DIVETABID_COUNT] = {')
+    for e in tabs:
+        A(f'    {{ {e.x:9.4f}f, {e.y:9.4f}f, {e.w:8.4f}f, {e.h:8.4f}f }},  // {e.label}')
+    A('};')
+    A('')
+    A('// 0 is the always-visible row; 1 only appears once a part tab is chosen.')
+    A('inline constexpr int kDiveTabRow[DIVETABID_COUNT] = {')
+    for e in tabs:
+        A(f'    {rows.index(round(e.y, 1))},')
+    A('};')
+    A('')
+    for what, get in (('SvgId', lambda e: e.id),
+                      ('TextSvgId', lambda e: (panel_by_label[t].id
+                                               if (t := text_id_for(panel_by_label, e.label))
+                                               else None)),
+                      ('Name', lambda e: e.label[4:])):
+        A(f'inline constexpr const char *kDiveTab{what}[DIVETABID_COUNT] = {{')
+        for e in tabs:
+            v = get(e)
+            A(f'    {chr(34) + v + chr(34) if v else "nullptr"},')
+        A('};')
+        A('')
+
+    # ---- the pages
+    A('enum DivePage : int {')
+    for p in pages:
+        A(f'    DIVE_{p.name.upper()},')
+    A('    DIVEPAGE_COUNT')
+    A('};')
+    A('')
+    A('inline constexpr const char *kDivePageName[DIVEPAGE_COUNT] = {')
+    for p in pages:
+        A(f'    "{p.name}",')
+    A('};')
+    A('')
+    A('// The pages with no per-part sub-tabs: their second row is hidden and their')
+    A('// content is already shifted up by kDiveRow2Height.')
+    A('inline constexpr bool kDivePageHidesRow2[DIVEPAGE_COUNT] = {')
+    for p in pages:
+        A(f'    {"true" if p.scoot else "false"},')
+    A('};')
+    A('')
+    A('enum DiveKind : int { DK_BUTTON, DK_MENU, DK_SLIDER, DK_LCD };')
+    A('')
+    A('// One row per control.  `travel` is where a slider tap\'s CENTRE may go --')
+    A('// the artwork draws ten graticules and the tap stays between the first and')
+    A('// the last -- and `tap` is the tap\'s own size, taken from where it was')
+    A('// parked in Inkscape.  Both are zero for anything that is not a slider.')
+    A('struct DiveControl {')
+    A('    const char *label;')
+    A('    const char *id;')
+    A('    const char *text_id;')
+    A('    int page;')
+    A('    int kind;')
+    A('    Rect box;')
+    A('    Rect travel;')
+    A('    Rect tap;')
+    A('};')
+    A('')
+
+    rows_out, starts = [], []
+    for pi, p in enumerate(pages):
+        starts.append(len(rows_out))
+        controls = [e for e in p.elements
+                    if e.label.split('_', 1)[0] in DIVE_KIND]
+        for e in sorted(controls, key=lambda e: (e.y, e.x)):
+            kind = DIVE_KIND[e.label.split('_', 1)[0]]
+            travel = (0.0, 0.0, 0.0, 0.0)
+            tap = (0.0, 0.0, 0.0, 0.0)
+            if kind == 'DK_SLIDER':
+                b = p.travel.get(e.label)
+                if b is None:
+                    continue
+                travel = (b[0], b[1], b[2] - b[0], b[3] - b[1])
+                t = p.by_label.get('ST_' + e.label[3:])
+                if t is None:
+                    continue
+                tap = (t.x, t.y, t.w, t.h)
+            tid = text_id_for(p.by_label, e.label)
+            rows_out.append((e, pi, kind, travel, tap,
+                             p.by_label[tid].id if tid else None))
+    starts.append(len(rows_out))
+
+    A('inline constexpr DiveControl kDiveControl[] = {')
+    for e, pi, kind, travel, tap, tid in rows_out:
+        A('    { "%s", "%s", %s, %d, %s,' % (e.label, e.id,
+                                             '"%s"' % tid if tid else 'nullptr',
+                                             pi, kind))
+        A('      { %9.4ff, %9.4ff, %8.4ff, %8.4ff },' % (e.x, e.y, e.w, e.h))
+        A('      { %9.4ff, %9.4ff, %8.4ff, %8.4ff },' % travel)
+        A('      { %9.4ff, %9.4ff, %8.4ff, %8.4ff } },' % tap)
+    A('};')
+    A(f'inline constexpr int kDiveControlCount = {len(rows_out)};')
+    A('')
+    A('// Half-open range of kDiveControl belonging to each page.')
+    A('inline constexpr int kDivePageFirst[DIVEPAGE_COUNT + 1] = {')
+    for s in starts:
+        A(f'    {s},')
+    A('};')
+    A('')
+
+
+def emit_json(path, elements, pivots, canvas, svg_rel, pages=()):
     doc = dict(source=svg_rel,
                design_width=round(canvas[0], 5),
                design_height=round(canvas[1], 5),
                elements=[e.as_dict() for e in elements],
                knobs={k: {kk: (round(vv, 4) if isinstance(vv, float) else vv)
-                          for kk, vv in v.items()} for k, v in pivots.items()})
+                          for kk, vv in v.items()} for k, v in pivots.items()},
+               dive=[dict(name=p.name, source=os.path.basename(p.path),
+                          hides_row2=p.scoot,
+                          offset=[round(v, 5) for v in p.offset],
+                          elements=[e.as_dict() for e in p.elements],
+                          travel={k: [round(v, 4) for v in b]
+                                  for k, b in p.travel.items()})
+                     for p in pages])
     with open(path, 'w') as f:
         json.dump(doc, f, indent=2)
         f.write('\n')
 
 
+# ------------------------------------------------------- document rewriting
+
+def reframe(root, offset, canvas):
+    """Move a document's artwork by `offset` and give it `canvas`'s frame.
+
+    Every DIVE page is authored on its own sheet, positioned by the content box it
+    shares with the panel.  Baking the offset in here means the page is drawn at
+    panel coordinates by whoever draws it, and -- because the frame is rewritten to
+    the panel's too -- every document normalises to the same scale in the UI.  A
+    page that has to be shifted at draw time is a page whose hit boxes and artwork
+    can disagree; this way they cannot.
+    """
+    kids = [c for c in list(root) if c.tag != f'{{{SVG}}}defs']
+    if offset != (0.0, 0.0):
+        g = ET.Element(f'{{{SVG}}}g')
+        g.set('transform', 'translate(%.6f,%.6f)' % offset)
+        for c in kids:
+            root.remove(c)
+            g.append(c)
+        root.append(g)
+    root.set('width', '%.5fmm' % canvas[0])
+    root.set('height', '%.5fmm' % canvas[1])
+    root.set('viewBox', '0 0 %.5f %.5f' % canvas)
+
+
 # ---------------------------------------------------------------- text->path
 
-def text_to_path(svg_path, verbose=True):
+def flatten(svg_path, out_path, drop_ids=(), offset=(0.0, 0.0), canvas=None,
+            verbose=True):
     """Build the flattened artwork the renderer actually loads.
 
     Four things have to happen, in this order:
 
-      1. Drop the editing-aid layers.  'Foreground Text as Text' is the human's
-         copy and 'Example_LCD_Testing_only' is scaffolding; both would draw on
-         top of the real artwork.  This must happen BEFORE Inkscape runs, because
-         --export-plain-svg strips inkscape:label and the layers become
-         unidentifiable afterwards.
+      1. Drop the editing-aid layers -- 'Example_LCD_Testing_only' is scaffolding,
+         and anything named *_do_not_include is the artwork saying so itself.  This
+         must happen BEFORE Inkscape runs, because --export-plain-svg strips
+         inkscape:label and the layers become unidentifiable afterwards.
       2. Drop every element paired with an X_as_path, for the same reason and one
          more: Inkscape would convert it to a path, and that path is ALREADY in
          the artwork, possibly adjusted by hand since it was made.  Flattening the
          source again would quietly replace the adjusted one with a fresh copy.
+         Drop the raster pass's elements too, so no shape is drawn twice.
       3. Let Inkscape convert what remains to paths.  nanosvg has no text support
-         whatsoever.
+         whatsoever.  A single-line label comes back as one <path> WITH THE SAME
+         id, which is what lets the UI recolour a selected tab.
       4. Drop anything that is still <text>, and every <image>.  nanosvg would
          ignore both silently, so leaving them in would make rsvg-convert (our
          reference renderer) disagree with what the plugin actually draws -- which
-         defeats the point of having a reference.  The images are not lost; they
-         are the background layer, rendered separately by render_background().
+         defeats the point of having a reference.
     """
     tree = ET.parse(svg_path)
     root = tree.getroot()
 
     aids = editing_aid_labels(root)
+    drop = set(drop_ids)
     dropped = []
 
     def prune(parent):
         for child in list(parent):
             label = child.get(f'{{{INK}}}label') or ''
             is_layer = child.get(f'{{{INK}}}groupmode') == 'layer'
-            if ((is_layer and label in SKIP_LAYERS) or label.endswith('_duplicate')
-                    or label in aids):
+            if ((is_layer and (label in SKIP_LAYERS
+                               or label.endswith(SKIP_LAYER_SUFFIX)))
+                    or label.endswith('_duplicate') or label in aids
+                    or child.get('id') in drop):
                 dropped.append(label or child.get('id'))
                 parent.remove(child)
             else:
                 prune(child)
 
     prune(root)
+    if canvas is not None:
+        reframe(root, offset, canvas)
 
-    os.makedirs(OUT_DIR, exist_ok=True)
-    tmp = os.path.join(OUT_DIR, '.panel_pruned.svg')
+    out_dir = os.path.dirname(out_path)
+    os.makedirs(out_dir, exist_ok=True)
+    tmp = os.path.join(out_dir, '.flatten_in.svg')
     tree.write(tmp, encoding='utf-8', xml_declaration=True)
 
-    out = os.path.join(OUT_DIR, 'panel_flat.svg')
     cmd = ['inkscape', tmp,
            '--export-type=svg', '--export-plain-svg',
-           '--export-text-to-path', f'--export-filename={out}']
+           '--export-text-to-path', f'--export-filename={out_path}']
     r = subprocess.run(cmd, capture_output=True, text=True)
     os.unlink(tmp)
     if r.returncode != 0:
         sys.stderr.write(r.stderr)
         return None
 
-    # Step 3: anything Inkscape could not convert.
-    tree = ET.parse(out)
+    # Step 4: anything Inkscape could not convert.
+    tree = ET.parse(out_path)
     root = tree.getroot()
     leftover = []
 
@@ -505,111 +905,151 @@ def text_to_path(svg_path, verbose=True):
                 leftover.append(child.get('id') or '?')
                 parent.remove(child)
             elif child.tag == f'{{{SVG}}}image':
-                parent.remove(child)          # drawn from panel_background.png
+                parent.remove(child)          # drawn from the raster pass instead
             else:
                 strip_text(child)
 
     strip_text(root)
-    tree.write(out, encoding='utf-8', xml_declaration=True)
-    if leftover:
-        for eid in leftover:
-            sys.stderr.write(f'panel_export: warning: <text> id={eid} survived '
-                             'text-to-path and was removed from the flat SVG; '
-                             'check it in Inkscape\n')
+    tree.write(out_path, encoding='utf-8', xml_declaration=True)
+    for eid in leftover:
+        sys.stderr.write(f'panel_export: warning: <text> id={eid} survived '
+                         'text-to-path and was removed from the flat SVG; '
+                         'check it in Inkscape\n')
 
-    # nanosvg finds shapes by literal tag name, so verify the output is unprefixed before
-    # anyone tries to draw it.  This is cheap and it is the failure that has no symptom.
-    with open(out) as f:
+    # nanosvg finds shapes by literal tag name, so verify the output is unprefixed
+    # before anyone tries to draw it.  This is cheap and it is the failure that has
+    # no symptom.
+    with open(out_path) as f:
         head = f.read(4096)
     if '<svg' not in head:
         sys.stderr.write('panel_export: ERROR: %s has namespace-prefixed tags; nanosvg '
-                         'will parse it and find nothing to draw\n' % out)
+                         'will parse it and find nothing to draw\n' % out_path)
 
     if verbose and dropped:
         sys.stderr.write('panel_export: flattened without '
                          + ', '.join(repr(d) for d in dropped) + '\n')
-    return out
+    return out_path
 
 
 # ------------------------------------------------------------ raster layer
 
-def render_background(svg_path, out_dir, canvas, verbose=True):
-    """Pre-render every <image> in the artwork into one PNG the UI can draw.
+def render_raster(svg_path, out_png, canvas, keep_ids, scale,
+                  offset=(0.0, 0.0), verbose=True):
+    """Pre-render the elements nanosvg cannot draw, into one transparent PNG.
 
-    Why a pre-render rather than image support in the UI: the background is not
-    just a bitmap, it is a bitmap under a transform AND a clip path, and rsvg
-    already implements both correctly.  Reimplementing clipping against NanoVG
-    to save one build-time dependency would be trading a solved problem for an
-    unsolved one.
+    Why a pre-render rather than support in the UI: these are not just shapes, they
+    are shapes under a transform AND a clip path, and rsvg already implements both
+    correctly.  Reimplementing clipping against NanoVG to save one build-time
+    dependency would be trading a solved problem for an unsolved one.
 
-    The result is exactly the canvas rectangle, transparent wherever the clip
-    does not reach, so the UI draws it into the design rect with no geometry of
-    its own -- nothing here has to agree with anything there.
+    The result is exactly the canvas rectangle, transparent wherever nothing was
+    drawn, so the UI blits it into the design rect with no geometry of its own --
+    nothing here has to agree with anything there.
     """
     tree = ET.parse(svg_path)
     root = tree.getroot()
-
-    # Keep <defs> (the clip paths live there), every <image>, and the group chain
-    # above each image -- the layer transforms are part of where it lands.
-    def keep(node):
-        tag = node.tag.split('}')[-1]
-        if tag in ('image', 'defs'):
-            return True
-        kept = False
-        for child in list(node):
-            if keep(child):
-                kept = True
-            else:
-                node.remove(child)
-        return kept or tag == 'svg'
-
-    keep(root)
-    if root.find(f'.//{{{SVG}}}image') is None:
-        if verbose:
-            sys.stderr.write('panel_export: no <image> in the artwork, '
-                             'no background rendered\n')
+    keep = set(keep_ids)
+    if not keep:
         return None
 
+    def prune(node):
+        """Remove every branch that does not lead to a kept id.  Ancestors stay,
+        because their transforms are part of where the kept element lands."""
+        wanted = False
+        for child in list(node):
+            if child.tag == f'{{{SVG}}}defs':
+                continue                       # the clip paths live here
+            if child.get('id') in keep:
+                wanted = True
+                continue
+            if prune(child):
+                wanted = True
+            else:
+                node.remove(child)
+        return wanted
+
+    if not prune(root):
+        return None
+
+    reframe(root, offset, canvas)
+
+    out_dir = os.path.dirname(out_png)
     os.makedirs(out_dir, exist_ok=True)
-    tmp = os.path.join(out_dir, '.panel_bg.svg')
+    tmp = os.path.join(out_dir, '.raster_in.svg')
     tree.write(tmp, encoding='utf-8', xml_declaration=True)
 
-    png = os.path.join(out_dir, 'panel_background.png')
-    width = int(round(canvas[0] * BACKGROUND_SCALE))
-    r = subprocess.run([RSVG, '-w', str(width), tmp, '-o', png],
+    width = int(round(canvas[0] * scale))
+    r = subprocess.run([RSVG, '-w', str(width), tmp, '-o', out_png],
                        capture_output=True, text=True)
     os.unlink(tmp)
     if r.returncode != 0:
         sys.stderr.write(r.stderr or f'panel_export: {RSVG} failed\n')
         return None
+    return out_png
 
-    with open(png, 'rb') as f:
-        data = f.read()
 
-    # Embedded, like panel_svg.h and for the same reason: an installed .lv2 bundle
-    # has nothing beside it, and a panel that draws only from a source tree is a
-    # panel that works on the developer's machine alone.
-    hdr = os.path.join(out_dir, 'panel_background.h')
-    with open(hdr, 'w') as f:
-        f.write('// GENERATED by plugin/tools/panel_export.py -- do not edit.\n'
-                '//\n'
-                '// The artwork\'s raster layer, already transformed and clipped, %d bytes\n'
-                '// of PNG at %d px wide (%.1fx the design width).  nanosvg has no <image>\n'
-                '// element, so this is drawn under the vectors instead of inside them.\n'
-                '#pragma once\n\n'
-                'static const unsigned char kPanelBackgroundPng[] = {\n'
-                % (len(data), width, BACKGROUND_SCALE))
-        for i in range(0, len(data), 16):
-            f.write('    ' + ','.join('0x%02x' % b for b in data[i:i + 16]) + ',\n')
-        f.write('};\n')
+def embed_bytes(f, name, data, comment=''):
+    if comment:
+        f.write(comment)
+    f.write('static const unsigned char %s[] = {\n' % name)
+    for i in range(0, len(data), 16):
+        f.write('    ' + ','.join('0x%02x' % b for b in data[i:i + 16]) + ',\n')
+    f.write('};\n\n')
 
-    if verbose:
-        print('  -> %s (%d KB)' % (os.path.relpath(png, ROOT), len(data) // 1024))
-        print('  -> %s' % os.path.relpath(hdr, ROOT))
-    return png
+
+def embed_svg(f, name, text):
+    f.write('static const char %s[] =\n' % name)
+    for line in text.splitlines():
+        esc = line.replace('\\', '\\\\').replace('"', '\\"')
+        f.write('    "%s\\n"\n' % esc)
+    f.write('    ;\n\n')
 
 
 # --------------------------------------------------------------------- main
+
+class Page:
+    """One DIVE tab's content, measured and moved into panel coordinates."""
+
+    def __init__(self, name, filename, scoot, panel_anchor, row2_h):
+        self.name = name
+        self.path = os.path.join(GFX, filename)
+        self.scoot = scoot
+        (self.elements, _, self.warnings,
+         self.canvas, self.rasters, self.travel) = scan(self.path)
+
+        anchor = next((e for e in self.elements if e.label == ANCHOR), None)
+        if anchor is None:
+            self.warnings.append(f'no {ANCHOR} rect -- there is nothing to line '
+                                 'the page up with')
+            self.offset = (0.0, 0.0)
+        else:
+            # The page is placed by the box it shares with the panel, and shifted up
+            # by the second tab row when that row is not shown on this page.
+            self.offset = (panel_anchor.x - anchor.x,
+                           panel_anchor.y - anchor.y - (row2_h if scoot else 0.0))
+
+        dx, dy = self.offset
+        for e in self.elements:
+            e.x += dx
+            e.y += dy
+        for k, b in self.travel.items():
+            self.travel[k] = [b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy]
+        self.by_label = {e.label: e for e in self.elements}
+
+
+def text_id_for(page_labels, label):
+    """The screenprint that names a control: M_output_mode is titled T_output_mode.
+
+    Matched without case because the artwork spells a name the way it reads on the
+    panel -- LCD_Patch_Name over T_patch_name -- and the pairing is about which
+    words they share, not how they are capitalised.
+    """
+    suffix = label.split('_', 1)[1].lower() if '_' in label else ''
+    for other in page_labels:
+        if other.startswith('T_') and other[2:].lower() == suffix:
+            return other
+    return None
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
@@ -619,58 +1059,137 @@ def main():
     ap.add_argument('--check', action='store_true',
                     help='lint only; exit non-zero if the artwork has problems')
     ap.add_argument('--text-to-path', action='store_true',
-                    help='also write generated/panel_flat.svg with text flattened')
+                    help='also write the flattened SVGs the UI actually draws')
     ap.add_argument('--background', action='store_true',
-                    help='also pre-render the artwork\'s rasters to a PNG')
+                    help='also pre-render what nanosvg cannot draw')
     ap.add_argument('-q', '--quiet', action='store_true')
     args = ap.parse_args()
 
-    elements, pivots, warnings, canvas, rasters = scan(args.svg)
+    elements, pivots, warnings, canvas, rasters, _ = scan(args.svg)
     rel = os.path.relpath(args.svg, ROOT)
+    by_label = {e.label: e for e in elements}
+
+    anchor = by_label.get(ANCHOR)
+    row2 = [by_label[l] for l in ('BUT_basic', 'BUT_level', 'BUT_pitch', 'BUT_LFO')
+            if l in by_label]
+    row2_h = row2[0].h if row2 else 0.0
+
+    pages = []
+    if anchor is not None:
+        for name, filename, scoot in DIVE_PAGES:
+            p = Page(name, filename, scoot, anchor, row2_h)
+            warnings.extend(f'{filename}: {w}' for w in p.warnings)
+            pages.append(p)
+    else:
+        warnings.append(f'the panel has no {ANCHOR} rect; the DIVE pages have '
+                        'nothing to line up with and were skipped')
 
     for w in warnings:
         sys.stderr.write(f'panel_export: warning: {w}\n')
 
+    n_controls = sum(len(p.elements) for p in pages)
     if args.check:
         if not args.quiet:
             print(f'{len(elements)} named elements, {len(pivots)} knob(s), '
-                  f'{len(rasters)} raster(s), {len(warnings)} warning(s)')
+                  f'{len(rasters)} raster(s), {len(pages)} DIVE page(s) with '
+                  f'{n_controls} named elements, {len(warnings)} warning(s)')
         return 1 if warnings else 0
 
     os.makedirs(args.out_dir, exist_ok=True)
     h = os.path.join(args.out_dir, 'panel_geometry.h')
     j = os.path.join(args.out_dir, 'panel_geometry.json')
-    emit_header(h, elements, pivots, canvas, rel)
-    emit_json(j, elements, pivots, canvas, rel)
+    emit_header(h, elements, pivots, canvas, rel, pages, row2_h)
+    emit_json(j, elements, pivots, canvas, rel, pages)
+    written = [h, j]
 
-    bg = (render_background(args.svg, args.out_dir, canvas, not args.quiet)
-          if args.background else None)
+    if args.background:
+        png = os.path.join(args.out_dir, 'panel_background.png')
+        if render_raster(args.svg, png, canvas, rasters, BACKGROUND_SCALE,
+                         verbose=not args.quiet):
+            data = open(png, 'rb').read()
+            hdr = os.path.join(args.out_dir, 'panel_background.h')
+            with open(hdr, 'w') as f:
+                f.write('// GENERATED by plugin/tools/panel_export.py -- do not edit.\n'
+                        '//\n'
+                        "// The artwork's raster layer, already transformed and clipped,\n"
+                        '// %d bytes of PNG at %d px wide (%.1fx the design width).\n'
+                        '#pragma once\n\n' % (len(data),
+                                              int(round(canvas[0] * BACKGROUND_SCALE)),
+                                              BACKGROUND_SCALE))
+                embed_bytes(f, 'kPanelBackgroundPng', data)
+            written += [png, hdr]
+        else:
+            sys.stderr.write('panel_export: no raster layer in the panel\n')
 
-    flat = text_to_path(args.svg, not args.quiet) if args.text_to_path else None
-    if flat:
-        # Embed the flattened artwork as a C string so the plugin has no runtime file
-        # dependency.  PLUGIN-PLAN.md section 6 allows either; embedding is what makes the
-        # panel work from an installed .lv2 bundle with nothing beside it.  The UI can
-        # still be pointed at a file for hot-reload while the panel is being drawn.
-        hdr = os.path.join(args.out_dir, 'panel_svg.h')
-        with open(flat) as f:
-            svg = f.read()
+    flat = None
+    if args.text_to_path:
+        flat = flatten(args.svg, os.path.join(args.out_dir, 'panel_flat.svg'),
+                       drop_ids=rasters, verbose=not args.quiet)
+        if flat:
+            hdr = os.path.join(args.out_dir, 'panel_svg.h')
+            with open(hdr, 'w') as f:
+                f.write('// GENERATED by plugin/tools/panel_export.py -- do not edit.\n'
+                        '#pragma once\n\n')
+                embed_svg(f, 'kPanelSvg', open(flat).read())
+            written += [flat, hdr]
+
+    # The DIVE pages: flattened and rasterised the same way, but each translated
+    # into panel coordinates first, and all embedded in one header.
+    if pages and (args.text_to_path or args.background):
+        page_svg, page_png = {}, {}
+        for p in pages:
+            if args.text_to_path:
+                out = os.path.join(args.out_dir, 'dive_%s_flat.svg' % p.name)
+                if flatten(p.path, out, drop_ids=p.rasters, offset=p.offset,
+                           canvas=canvas, verbose=False):
+                    page_svg[p.name] = open(out).read()
+                    written.append(out)
+            if args.background:
+                out = os.path.join(args.out_dir, 'dive_%s_raster.png' % p.name)
+                if render_raster(p.path, out, canvas, p.rasters, FRAME_SCALE,
+                                 offset=p.offset, verbose=False):
+                    page_png[p.name] = open(out, 'rb').read()
+                    written.append(out)
+        hdr = os.path.join(args.out_dir, 'dive_pages.h')
         with open(hdr, 'w') as f:
             f.write('// GENERATED by plugin/tools/panel_export.py -- do not edit.\n'
-                    '#pragma once\n\nstatic const char kPanelSvg[] =\n')
-            for line in svg.splitlines():
-                esc = line.replace('\\', '\\\\').replace('"', '\\"')
-                f.write('    "%s\\n"\n' % esc)
-            f.write(';\n')
-        print('  -> %s' % os.path.relpath(hdr, ROOT))
+                    '//\n'
+                    '// One DIVE page per tab, each already translated into panel\n'
+                    "// coordinates, so all of them normalise to the panel's own scale.\n"
+                    '// A page with no raster has a zero-length array.\n'
+                    '#pragma once\n\n')
+            for p in pages:
+                if p.name in page_svg:
+                    embed_svg(f, 'kDiveSvg_%s' % p.name, page_svg[p.name])
+            for p in pages:
+                data = page_png.get(p.name, b'')
+                embed_bytes(f, 'kDiveRaster_%s' % p.name, data or b'\x00')
+                if not data:
+                    f.write('#define kDiveRaster_%s_EMPTY 1\n\n' % p.name)
+            f.write('static const char *const kDiveSvg[] = {\n')
+            for p in pages:
+                f.write('    %s,\n' % ('kDiveSvg_%s' % p.name
+                                       if p.name in page_svg else 'nullptr'))
+            f.write('};\n\n')
+            f.write('static const unsigned char *const kDiveRaster[] = {\n')
+            for p in pages:
+                f.write('    %s,\n' % ('kDiveRaster_%s' % p.name
+                                       if p.name in page_png else 'nullptr'))
+            f.write('};\n\n')
+            f.write('static const unsigned int kDiveRasterSize[] = {\n')
+            for p in pages:
+                f.write('    %du,\n' % len(page_png.get(p.name, b'')))
+            f.write('};\n')
+        written.append(hdr)
 
     if not args.quiet:
         print(f'panel {canvas[0]:.2f} x {canvas[1]:.2f}, {len(elements)} elements, '
-              f'{len(rasters)} raster(s)')
-        print(f'  -> {os.path.relpath(h, ROOT)}')
-        print(f'  -> {os.path.relpath(j, ROOT)}')
-        if flat:
-            print(f'  -> {os.path.relpath(flat, ROOT)}')
+              f'{len(rasters)} raster(s), {len(pages)} DIVE page(s)')
+        for w in written:
+            size = os.path.getsize(w)
+            print('  -> %-44s %6d KB' % (os.path.relpath(w, ROOT), size // 1024)
+                  if size >= 1024 else
+                  '  -> %-44s %6d B ' % (os.path.relpath(w, ROOT), size))
     return 0
 
 

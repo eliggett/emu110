@@ -1,0 +1,802 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="777.48517mm"
+   height="363.91016mm"
+   viewBox="0 0 777.48517 363.91016"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
+   sodipodi:docname="dive_setup.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     inkscape:zoom="0.5046682"
+     inkscape:cx="1543.5884"
+     inkscape:cy="710.36772"
+     inkscape:window-width="2560"
+     inkscape:window-height="1316"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer14" />
+  <defs
+     id="defs1">
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect54">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect54"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect54"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect66">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect66"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect66"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect79">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect79"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect79"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect94">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect94"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect94"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect107">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect107"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect107"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect165">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect165"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect165"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect167">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect167"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect167"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect169">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect169"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect169"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect171">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect171"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect171"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect173">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect173"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect173"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect238">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect238"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect238"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect240">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect240"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect240"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect242">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect242"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect242"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect244">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect244"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect244"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect246">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect246"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect246"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect267">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect267"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect267"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect279">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect279"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect279"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect292">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect292"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect292"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipPath59">
+      <path
+         id="lpe_path-effect59"
+         style="display:block;fill:none;fill-opacity:1;stroke:#ffa228;stroke-width:4;stroke-dasharray:none"
+         class="powerclip"
+         d="M 60.351921,1280.17 H 493.43053 v 236.1383 H 60.351921 Z m 104.965749,-15.9211 c -11.85359,0 -21.39637,9.5428 -21.39637,21.3964 0,11.8536 9.54278,21.3964 21.39637,21.3964 h 53.27059 c 11.8536,0 21.39638,-9.5428 21.39638,-21.3964 0,-11.8536 -9.54278,-21.3964 -21.39638,-21.3964 z" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect59"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <radialGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient31"
+       id="radialGradient64"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(0.5,0,0,11.590623,789.80869,-2409.5848)"
+       cx="-292.47284"
+       cy="222.38538"
+       fx="-292.47284"
+       fy="222.38538"
+       r="9" />
+    <linearGradient
+       id="linearGradient31"
+       inkscape:collect="always">
+      <stop
+         style="stop-color:#626262;stop-opacity:1;"
+         offset="0"
+         id="stop31" />
+      <stop
+         style="stop-color:#2d2d2d;stop-opacity:1;"
+         offset="1"
+         id="stop32" />
+    </linearGradient>
+  </defs>
+  <g
+     inkscape:label="Guide_do_not_include"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(342.63541,74.347931)">
+    <rect
+       style="display:inline;fill:#000000;fill-opacity:0.119741;stroke:#000000;stroke-width:2;stroke-dasharray:none"
+       id="rect11"
+       width="775.48517"
+       height="361.91016"
+       x="-341.63541"
+       y="-73.347931"
+       inkscape:label="dive_controls_max_outline"
+       sodipodi:insensitive="true" />
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="layer10"
+     inkscape:label="Text"
+     style="display:inline">
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="376.67465"
+       y="110.51584"
+       id="text30"
+       inkscape:label="T_Control_Channel"><tspan
+         sodipodi:role="line"
+         id="tspan30"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="376.67465"
+         y="110.51584">CONTROL CHANNEL</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="393.8974"
+       y="136.7612"
+       id="text31"
+       inkscape:label="T_Control_Change"><tspan
+         sodipodi:role="line"
+         id="tspan31"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="393.8974"
+         y="136.7612">CONTROL CHANGE</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="359.52667"
+       y="189.252"
+       id="text32"
+       inkscape:label="T_Channel_Pressure"><tspan
+         sodipodi:role="line"
+         id="tspan32"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="359.52667"
+         y="189.252">CHANNEL PRESSURE</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="388.10962"
+       y="163.00667"
+       id="text33"
+       inkscape:label="T_Program_Change"><tspan
+         sodipodi:role="line"
+         id="tspan33"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="388.10962"
+         y="163.00667">PROGRAM CHANGE</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="325.61041"
+       y="217.24193"
+       id="text42"
+       inkscape:label="T_Polyphonic_Pressure"><tspan
+         sodipodi:role="line"
+         id="tspan42"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="325.61041"
+         y="217.24193">Polyphonic Pressure</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="433.27911"
+       y="241.74284"
+       id="text44"
+       inkscape:label="T_Pitch_Bender"><tspan
+         sodipodi:role="line"
+         id="tspan44"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="433.27911"
+         y="241.74284">PITCH BENDER</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="482.31787"
+       y="269.64178"
+       id="text45"
+       inkscape:label="T_Exclusive"><tspan
+         sodipodi:role="line"
+         id="tspan45"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="482.31787"
+         y="269.64178">Exclusive</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:22.5778px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="398.73444"
+       y="81.206146"
+       id="text47"
+       inkscape:label="T_MIDI"><tspan
+         sodipodi:role="line"
+         id="tspan47"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:22.5778px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="398.73444"
+         y="81.206146">MIDI</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:14.71083407px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="198.73563"
+       y="283.97144"
+       id="text49"
+       inkscape:label="T_Map_Edit"><tspan
+         sodipodi:role="line"
+         id="tspan49"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0;line-height:14.71083407px"
+         x="198.73563"
+         y="283.97144">MAP </tspan><tspan
+         sodipodi:role="line"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0;line-height:14.71083407px"
+         x="198.73563"
+         y="298.68228"
+         id="tspan65">EDIT</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:14.71083407px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;display:inline;fill:#00a3e0;stroke:none;stroke-width:2;stroke-linecap:square"
+       x="45.913479"
+       y="283.97144"
+       id="text227-6"
+       inkscape:label="T_Master_Tune"><tspan
+         sodipodi:role="line"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0;stroke:none;stroke-width:2;line-height:14.71083407px"
+         x="45.913479"
+         y="283.97144"
+         id="tspan254-6">MasTer</tspan><tspan
+         sodipodi:role="line"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0;stroke:none;stroke-width:2;line-height:14.71083407px"
+         x="45.913479"
+         y="298.68228"
+         id="tspan9">Tune</tspan></text>
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="layer11"
+     inkscape:label="Slider_bodies">
+    <g
+       id="g63"
+       inkscape:label="SB_Master_Tune"
+       transform="translate(-544.20471,-14.180429)"
+       style="display:inline">
+      <g
+         id="g62"
+         inkscape:label="slider_lines">
+        <path
+           style="fill:none;fill-opacity:0;stroke:#a5a5a5;stroke-width:2;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
+           d="m 629.22875,79.126061 h 28.68689"
+           id="path53" />
+        <path
+           style="fill:none;fill-opacity:0;stroke:#a5a5a5;stroke-width:2;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
+           d="m 629.22875,99.001061 h 28.68689"
+           id="path54" />
+        <path
+           style="fill:none;fill-opacity:0;stroke:#a5a5a5;stroke-width:2;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
+           d="m 629.22875,118.87606 h 28.68689"
+           id="path55-3" />
+        <path
+           style="fill:none;fill-opacity:0;stroke:#a5a5a5;stroke-width:2;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
+           d="m 629.22875,138.75106 h 28.68689"
+           id="path56-9" />
+        <path
+           style="fill:none;fill-opacity:0;stroke:#a5a5a5;stroke-width:2;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
+           d="m 629.22875,158.62606 h 28.68689"
+           id="path57-4" />
+        <path
+           style="fill:none;fill-opacity:0;stroke:#a5a5a5;stroke-width:2;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
+           d="m 629.22875,178.50106 h 28.68689"
+           id="path58-8" />
+        <path
+           style="fill:none;fill-opacity:0;stroke:#a5a5a5;stroke-width:2;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
+           d="m 629.22875,198.37606 h 28.68689"
+           id="path59-1" />
+        <path
+           style="fill:none;fill-opacity:0;stroke:#a5a5a5;stroke-width:2;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
+           d="m 629.22875,218.25106 h 28.68689"
+           id="path60-2" />
+        <path
+           style="fill:none;fill-opacity:0;stroke:#a5a5a5;stroke-width:2;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
+           d="m 629.22875,238.12606 h 28.68689"
+           id="path61-9" />
+        <path
+           style="fill:none;fill-opacity:0;stroke:#a5a5a5;stroke-width:2;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
+           d="m 629.22875,258.00106 h 28.68689"
+           id="path62-3"
+           inkscape:label="path290" />
+      </g>
+      <rect
+         style="fill:url(#radialGradient64);fill-opacity:1;stroke:#000000;stroke-width:2;stroke-linecap:round;stroke-dasharray:none"
+         id="rect62"
+         width="8"
+         height="206.76007"
+         x="639.5722"
+         y="64.620224"
+         ry="10.73123"
+         rx="3.789474"
+         inkscape:label="slider_path" />
+    </g>
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="layer16"
+     inkscape:label="paste_scratch_do_not_include" />
+  <g
+     inkscape:groupmode="layer"
+     id="layer12"
+     inkscape:label="Slider_taps"
+     style="display:inline">
+    <rect
+       style="display:inline;fill:#ffa228;fill-opacity:1;stroke:#dcdcdc;stroke-width:0.5;stroke-linecap:square;stroke-dasharray:none;stroke-opacity:1"
+       id="rect63"
+       width="29"
+       height="5.7179775"
+       x="84.867477"
+       y="151.47093"
+       inkscape:label="ST_Master_Tune" />
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="layer13"
+     inkscape:label="Buttons">
+    <rect
+       style="display:inline;fill:#002b00;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect12"
+       width="57.440044"
+       height="22.245409"
+       x="646.37469"
+       y="121.53325"
+       inkscape:label="BUT_Control_Change" />
+    <rect
+       style="display:inline;fill:#002b00;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect18"
+       width="57.440044"
+       height="22.245409"
+       x="646.37494"
+       y="174.02405"
+       inkscape:label="BUT_Channel_Pressure" />
+    <rect
+       style="display:inline;fill:#002b00;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect13"
+       width="57.440044"
+       height="22.245409"
+       x="646.37469"
+       y="147.77872"
+       inkscape:label="BUT_Program_Change" />
+    <rect
+       style="display:inline;fill:#002b00;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect45"
+       width="57.440044"
+       height="22.245409"
+       x="646.37494"
+       y="200.26947"
+       inkscape:label="BUT_Polyphonic_Pressure" />
+    <rect
+       style="display:inline;fill:#002b00;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect46"
+       width="57.440044"
+       height="22.245409"
+       x="646.37494"
+       y="226.51491"
+       inkscape:label="BUT_Pitch_Bender" />
+    <rect
+       style="display:inline;fill:#002b00;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect47"
+       width="57.440044"
+       height="22.245409"
+       x="646.37494"
+       y="252.76028"
+       inkscape:label="BUT_Exclusive" />
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="layer18"
+     inkscape:label="Lines">
+    <path
+       id="path36"
+       transform="translate(242.39701,-1212.4869)"
+       clip-path="url(#clipPath59)"
+       d="M 92.222754,1287.17 H 461.5597 c 13.77844,0 24.87083,11.0924 24.87083,24.8709 v 172.3966 c 0,13.7785 -11.09239,24.8708 -24.87083,24.8708 H 92.222754 c -13.778442,0 -24.870833,-11.0923 -24.870833,-24.8708 v -172.3966 c 0,-13.7785 11.092391,-24.8709 24.870833,-24.8709 z"
+       style="display:inline;fill:none;fill-opacity:1;stroke:#ffa228;stroke-width:4;stroke-dasharray:none"
+       inkscape:label="L_MIDI" />
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="layer15"
+     inkscape:label="LCD" />
+  <g
+     inkscape:groupmode="layer"
+     id="layer14"
+     inkscape:label="Menus"
+     style="display:inline">
+    <rect
+       style="display:inline;fill:#002b00;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect11-3"
+       width="57.440044"
+       height="22.245409"
+       x="646.37469"
+       y="95.287888"
+       inkscape:label="M_Control_Channel" />
+    <rect
+       style="display:inline;fill:#002b00;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect49"
+       width="57.440044"
+       height="22.245409"
+       x="198.46243"
+       y="233.95445"
+       inkscape:label="M_Map_Edit" />
+  </g>
+</svg>

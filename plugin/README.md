@@ -46,8 +46,8 @@ coordinate is typed into the C++.
 plugin/tools/panel_export.py --text-to-path
 ```
 
-reads `resources/graphics/overall_panel_inkscape.svg` and writes three things to
-`generated/`:
+reads `resources/graphics/overall_panel_inkscape.svg`, plus one file per DIVE tab,
+and writes to `generated/`:
 
 | File | What it is |
 |---|---|
@@ -57,6 +57,9 @@ reads `resources/graphics/overall_panel_inkscape.svg` and writes three things to
 | `panel_svg.h` | the same, embedded as a C string |
 | `panel_background.png` | the artwork's rasters, pre-rendered with their transforms and clips |
 | `panel_background.h` | the same, embedded as bytes |
+| `dive_<page>_flat.svg` | one per DIVE page, already translated into panel coordinates |
+| `dive_<page>_raster.png` | that page's clipped elements, pre-rendered |
+| `dive_pages.h` | all of them, embedded |
 
 It also **lints the artwork against nanosvg's subset**.  nanosvg silently ignores
 filters, clip paths, masks, patterns and text, so an unsupported construct
@@ -66,16 +69,50 @@ non-zero if the artwork has problems, which makes it usable as a build step.
 Regenerating needs **Inkscape** (to flatten text) and **rsvg-convert** (to render
 the rasters).  Neither is needed to build from the generated files.
 
+### The DIVE drawer is seven documents, not one
+
+The panel is the frame; each tab's content is its own Inkscape file, so a page can
+be laid out without the other six in the way.  They are **not** merged into a
+single SVG, and the reason is ids: every page names its content box `rect11` and
+its slider graticules `path290`, so a merge would collide — and ids are how the UI
+finds a shape to recolour.  Each page is flattened separately and embedded
+separately, and the UI parses one on first use.
+
+Placement needs no constant anywhere.  Both documents carry a rect labelled
+`dive_controls_max_outline`; the exporter measures where it sits in each and
+translates the page by the difference.  Move the box in Inkscape and the page
+follows it.
+
+The two pages with no per-part sub-tabs — SET and COMMON — are shown with the
+second tab row hidden, so the exporter also shifts them **up** by exactly that
+row's height.  That shift is baked into both the page's artwork and its hit boxes,
+which is what stops the two from disagreeing.  It leaves three window heights:
+shut, open with one tab row, open with two.  All three come out of the artwork
+(`kPanelShutHeight`, `kDiveOpenHeight1Row`, `kDiveOpenHeight`).
+
+Two shapes are drawn by the UI rather than taken from the artwork, because their
+size depends on which page is open: the drawer body and the content box.  The UI
+paints them with the fill and stroke nanosvg parsed from those very shapes, so
+their appearance still comes from Inkscape — only their height does not.
+
 ### The artwork is split in two, because nanosvg has no `<image>`
 
 nanosvg's element dispatch knows `g`, `path`, `rect`, `circle`, `ellipse`, `line`,
 `polyline`, `polygon` and the gradients.  There is no `<image>` and no clip path,
 so a background photo drops out of the panel with nothing said anywhere.
 
-So the exporter splits the artwork at the seam: every `<image>`, with its transform
-and its clip-path, is rendered **once** by rsvg-convert into `panel_background.png`,
-and the vector remainder becomes `panel_flat.svg`.  The UI draws the PNG into the
+So the exporter splits the artwork at the seam: every `<image>` **and everything
+wearing a `clip-path`**, with its transforms, is rendered by rsvg-convert into a
+PNG, and the vector remainder becomes the flat SVG.  The UI draws the PNG into the
 design rectangle and then the vectors over it.
+
+The rule is uniform on purpose — *if nanosvg cannot draw it, rsvg does* — so there
+is no list of exceptions to keep up to date.  Two constructs in the artwork depend
+on it.  The section frames (`L_*`) are rounded rectangles with a gap for their
+title, and that gap is an Inkscape **power clip**: without the pre-render the frame
+would draw closed and the title would sit on top of the stroke.  And the slider
+graticules are clipped where the body covers them.  Both belong behind the page's
+vectors, which is where the raster lands anyway.
 
 Pre-rendering rather than teaching the UI about images is deliberate — the image is
 not just a bitmap, it is a bitmap under a transform *and* a clip path, and rsvg
@@ -85,7 +122,9 @@ already implements both.  Two consequences worth knowing:
   Inkscape.  They are a separate layer by the time the UI sees them.
 - The background is **resolution-limited** where the vectors are not.
   `BACKGROUND_SCALE` in the exporter sets how much detail is kept, at roughly
-  660 KB per multiple of the design width.
+  660 KB per multiple of the design width.  `FRAME_SCALE` does the same for the
+  page rasters and is set higher: those are strokes rather than photographs, and a
+  few lines on a transparent ground cost almost nothing compressed.
 
 ### Conventions the exporter relies on
 
@@ -99,12 +138,33 @@ Every element needs an Inkscape label; the prefix says what it is.
 | `KNOB_<name>_pointer` | its needle: rotated in code about the outline's centre |
 | `VU_<name>` | a meter |
 | `LCD_outer` / `LCD_inner` | the bezel and the glass |
-| `T_<name>` | screenprint text, drawn from the artwork |
+| `T_<name>` | screenprint text, drawn from the artwork; its id is exported so the UI can recolour it |
+| `M_<name>` | a menu button: the chosen value is drawn in it in the LCD font |
+| `SB_<name>` | a slider body — the group, whose graticules give the travel |
+| `ST_<name>` | that slider's tap, at the position Inkscape parked it |
+| `LCD_<name>` | an LCD-style field |
+| `L_<name>` | a section frame, titled by `T_<name>` |
 
-Two layers are treated as editing aids and never rendered: **`Foreground Text as
-Text`** (the human's editable copy, whose flattened twin `Foreground Text as
-Paths` is what actually draws) and **`Example_LCD_Testing_only`**.  Anything
-labelled `*_duplicate` is dropped too.
+A control and its screenprint are paired **by name, ignoring case**: `M_output_mode`
+is titled `T_output_mode`, and `LCD_Patch_Name` by `T_patch_name`.  The same pairing
+gives each tab the id of its own lettering, which is what lets a selected tab be
+redrawn brighter.
+
+A slider is a group because neither half of it says where the thing is.  The ten
+graticules bound the **travel** — the artwork's own statement of how far the tap may
+go — and the tap's rect gives its size.
+
+A layer whose name ends in **`_do_not_include`** is never rendered — that is the
+artwork saying so itself, and it needs nothing here.  `Example_LCD_Testing_only`
+predates the convention and is named in the exporter.  Anything labelled
+`*_duplicate` is dropped too.
+
+**Lettering is flattened from the text on every export.**  There is no longer a
+paths layer kept beside a text layer: `Foreground Text as Text` is the artwork, and
+Inkscape converts it on the way out.  A single-line label comes back as one `<path>`
+**keeping the text's id**, which is what makes a tab's lettering addressable.  (A
+multi-line label becomes a group of paths with fresh ids, so it cannot be recoloured
+— keep anything that needs to change colour on one line.)
 
 **An element labelled `X` is an editing aid when one labelled `X_as_path`
 exists.**  The path is what draws; `X` is what it was made from.  The exporter
@@ -416,7 +476,13 @@ promptly. There is no refresh rate to compromise over.
 
 ```sh
 VOLTAIRE_FPS=1 ./bin/Voltaire110      # prints the rate and the cost per redraw
+VOLTAIRE_DIVE=P1 ./bin/Voltaire110    # start with the drawer open on a tab
 ```
+
+`VOLTAIRE_DIVE` takes a tab name as the artwork spells it (`set`, `common`, `P1`..`P6`,
+`basic`, `level`, `pitch`, `LFO`) and is there so a page can be screenshotted headlessly
+under Xvfb -- the drawer is otherwise only reachable by clicking, and a page whose layout
+nobody can look at is a page nobody checked.
 
 ```
 panel: 11.2 redraws/s, 1.08 ms each -> 1% of a core     (booting)

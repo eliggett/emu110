@@ -1,0 +1,360 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="777.48517mm"
+   height="363.91016mm"
+   viewBox="0 0 777.48517 363.91016"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
+   sodipodi:docname="dive_basic.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     inkscape:zoom="0.50466821"
+     inkscape:cx="1019.4817"
+     inkscape:cy="767.83121"
+     inkscape:window-width="2560"
+     inkscape:window-height="1316"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer13" />
+  <defs
+     id="defs1">
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect54">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect54"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect54"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect66">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect66"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect66"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect79">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect79"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect79"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect94">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect94"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect94"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipath_lpe_path-effect107">
+      <rect
+         style="display:block;fill:none;stroke:#000000;stroke-width:4;stroke-linecap:round;stroke-dasharray:none"
+         id="rect107"
+         width="16"
+         height="221"
+         x="-300.47284"
+         y="111.88538"
+         ry="11.470307"
+         rx="7.578948" />
+    </clipPath>
+    <inkscape:path-effect
+       effect="powerclip"
+       message=""
+       id="path-effect107"
+       is_visible="true"
+       lpeversion="1"
+       inverse="true"
+       flatten="false"
+       hide_clip="false" />
+  </defs>
+  <g
+     inkscape:label="Guide_do_not_include"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(342.63541,74.347931)"
+     sodipodi:insensitive="true">
+    <rect
+       style="display:inline;fill:#000000;fill-opacity:0.119741;stroke:#000000;stroke-width:2;stroke-dasharray:none"
+       id="rect11"
+       width="775.48517"
+       height="361.91016"
+       x="-341.63541"
+       y="-73.347931"
+       inkscape:label="dive_controls_max_outline"
+       sodipodi:insensitive="true" />
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="layer10"
+     inkscape:label="Text"
+     style="display:inline"
+     sodipodi:insensitive="true">
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="479.43063"
+       y="134.72644"
+       id="text293"
+       inkscape:label="T_tone"><tspan
+         sodipodi:role="line"
+         id="tspan293"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="479.43063"
+         y="134.72644">TONE</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="85.648232"
+       y="134.72839"
+       id="text295"
+       inkscape:label="T_output_assign"><tspan
+         sodipodi:role="line"
+         id="tspan295"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="85.648232"
+         y="134.72839">OUTPUT ASSIGN</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="120.11842"
+       y="167.03387"
+       id="text296"
+       inkscape:label="T_midi_rx_channel"><tspan
+         sodipodi:role="line"
+         id="tspan296"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="120.11842"
+         y="167.03387">MIDI RX CHAN</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="56.014874"
+       y="242.49194"
+       id="text297"
+       inkscape:label="T_program_change"><tspan
+         sodipodi:role="line"
+         id="tspan297"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="56.014874"
+         y="242.49194">PROGRAM CHANGE</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="229.09346"
+       y="207.06451"
+       id="text301"
+       inkscape:label="T_map"><tspan
+         sodipodi:role="line"
+         id="tspan301"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="229.09346"
+         y="207.06451">MAP</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="434.72433"
+       y="171.67908"
+       id="text302"
+       inkscape:label="T_key_low"><tspan
+         sodipodi:role="line"
+         id="tspan302"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="434.72433"
+         y="171.67908">KEY LOW</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="436.19608"
+       y="210.12372"
+       id="text303"
+       inkscape:label="T_key_high"><tspan
+         sodipodi:role="line"
+         id="tspan303"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="436.19608"
+         y="210.12372">KEY HIGH</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;line-height:11.2889px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;writing-mode:lr-tb;direction:ltr;fill:#00a3e0;fill-opacity:1"
+       x="416.7327"
+       y="244.92224"
+       id="text307"
+       inkscape:label="T_defaults"><tspan
+         sodipodi:role="line"
+         id="tspan307"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:Earth-Mod;-inkscape-font-specification:'Earth-Mod, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00a3e0"
+         x="416.7327"
+         y="244.92224">DEFAULTS</tspan></text>
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="layer11"
+     inkscape:label="Slider_bodies"
+     sodipodi:insensitive="true" />
+  <g
+     inkscape:groupmode="layer"
+     id="layer12"
+     inkscape:label="Slider_taps"
+     style="display:inline"
+     sodipodi:insensitive="true" />
+  <g
+     inkscape:groupmode="layer"
+     id="layer13"
+     inkscape:label="Buttons"
+     style="display:inline">
+    <rect
+       style="display:inline;fill:#999999;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect307"
+       width="59.482288"
+       height="22.245409"
+       x="561.10114"
+       y="227.87952"
+       inkscape:label="BUT_defaults" />
+    <rect
+       style="display:inline;fill:#002b00;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect306"
+       width="57.440044"
+       height="22.245409"
+       x="297.21945"
+       y="227.2641"
+       inkscape:label="BUT_program_change" />
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="layer15"
+     inkscape:label="LCD"
+     sodipodi:insensitive="true">
+    <rect
+       style="display:inline;fill:#002b00;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect17-7"
+       width="156.39421"
+       height="26.214159"
+       x="560.21527"
+       y="113.78522"
+       inkscape:label="LCD_tone" />
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="layer14"
+     inkscape:label="Menus"
+     style="display:inline">
+    <rect
+       style="display:inline;fill:#002b00;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect295"
+       width="57.440044"
+       height="22.245409"
+       x="297.21945"
+       y="117.75593"
+       inkscape:label="M_output_assign" />
+    <rect
+       style="display:inline;fill:#002b00;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect296"
+       width="57.440044"
+       height="22.245409"
+       x="297.21945"
+       y="151.80603"
+       inkscape:label="M_midi_rx_channel" />
+    <rect
+       style="display:inline;fill:#002b00;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect299"
+       width="95.01088"
+       height="22.245409"
+       x="560.21527"
+       y="154.79755"
+       inkscape:label="M_key_low" />
+    <rect
+       style="display:inline;fill:#002b00;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect300"
+       width="95.01088"
+       height="22.245409"
+       x="560.21527"
+       y="193.08099"
+       inkscape:label="M_key_high" />
+    <rect
+       style="display:inline;fill:#002b00;fill-opacity:1;stroke:#000000;stroke-width:3.99999;stroke-linecap:square"
+       id="rect305"
+       width="57.440044"
+       height="22.245409"
+       x="297.21945"
+       y="189.90601"
+       inkscape:label="M_map" />
+  </g>
+</svg>

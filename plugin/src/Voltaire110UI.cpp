@@ -23,10 +23,12 @@
 #include "panel_geometry.h"
 #include "panel_svg.h"
 #include "panel_background.h"
+#include "dive_pages.h"
 #include "u110_cgrom.h"
 
 #include <cmath>
 #include <cstdio>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -72,6 +74,19 @@ public:
         : UI(DISTRHO_UI_DEFAULT_WIDTH, DISTRHO_UI_DEFAULT_HEIGHT)
     {
         loadArtwork();
+        // VOLTAIRE_DIVE=<tab> opens the drawer on that tab at startup.  The drawer is
+        // otherwise only reachable by clicking, which a headless screenshot cannot do,
+        // and a page whose layout nobody can look at is a page nobody checked.
+        if (const char *d = std::getenv("VOLTAIRE_DIVE"))
+        {
+            m_diveOpen = true;
+            for (int t = 0; t < voltaire::panel::DIVETABID_COUNT; t ++)
+                if (sameName(d, voltaire::panel::kDiveTabName[t]))
+                    (voltaire::panel::kDiveTabRow[t] == 1 ? m_diveTab2 : m_diveTab1) = t;
+            setSize(DISTRHO_UI_DEFAULT_WIDTH,
+                    uint(DISTRHO_UI_DEFAULT_WIDTH * designHeight()
+                         / voltaire::panel::kDesignWidth));
+        }
         std::memset(m_lcd, ' ', sizeof(m_lcd));
         std::memset(m_cgram, 0, sizeof(m_cgram));
 
@@ -91,6 +106,9 @@ public:
     {
         if (m_svg != nullptr)
             nsvgDelete(m_svg);
+        for (NSVGimage *p : m_pageSvg)
+            if (p != nullptr)
+                nsvgDelete(p);
     }
 
 protected:
@@ -224,7 +242,7 @@ protected:
 
         const float s = panelScale();
         const float ox = (getWidth() - voltaire::panel::kDesignWidth * s) * 0.5f;
-        const float oy = (getHeight() - voltaire::panel::kDesignHeight * s) * 0.5f;
+        const float oy = (getHeight() - designHeight() * s) * 0.5f;
 
         // Ground behind the panel, so a resized window does not show through.
         beginPath();
@@ -238,6 +256,7 @@ protected:
 
         drawBackground();
         drawArtwork();
+        drawDivePage();
         drawLcd();
         drawLeds();
         drawKnob();
@@ -333,9 +352,8 @@ protected:
             }
         }
 
-        const float s = panelScale();
-        const float x = (ev.pos.getX() - (getWidth() - voltaire::panel::kDesignWidth * s) * 0.5f) / s;
-        const float y = (ev.pos.getY() - (getHeight() - voltaire::panel::kDesignHeight * s) * 0.5f) / s;
+        float x, y;
+        toDesign(ev.pos.getX(), ev.pos.getY(), x, y);
 
         if (ev.press)
         {
@@ -346,6 +364,14 @@ protected:
                 m_dragKnob = true;
                 m_dragY = ev.pos.getY();
                 m_dragStart = m_volume;
+                return true;
+            }
+            const int tab = diveTabHit(x, y);
+            if (tab >= 0)
+            {
+                (voltaire::panel::kDiveTabRow[tab] == 1 ? m_diveTab2 : m_diveTab1) = tab;
+                resizeToDrawer();
+                repaint();
                 return true;
             }
             for (int i = 0; i < voltaire::panel::BUTTONID_COUNT; i ++)
@@ -371,6 +397,13 @@ protected:
                         m_menu = i == voltaire::panel::BUT_TONE ? Menu::Tone : Menu::Patch;
                         m_menuHover = -1;
                         m_toneHover = ToneHit();
+                        repaint();
+                        return true;
+                    }
+                    if (i == voltaire::panel::BUT_DIVE)
+                    {
+                        m_diveOpen = !m_diveOpen;
+                        resizeToDrawer();
                         repaint();
                         return true;
                     }
@@ -430,9 +463,8 @@ protected:
         if (m_menu != Menu::None)
             return true;
         const auto &k = voltaire::panel::kVolumeKnob;
-        const float s = panelScale();
-        const float x = (ev.pos.getX() - (getWidth() - voltaire::panel::kDesignWidth * s) * 0.5f) / s;
-        const float y = (ev.pos.getY() - (getHeight() - voltaire::panel::kDesignHeight * s) * 0.5f) / s;
+        float x, y;
+        toDesign(ev.pos.getX(), ev.pos.getY(), x, y);
         if (std::hypot(x - k.cx, y - k.cy) > k.r * 1.3f)
             return false;
         float v = m_volume + ev.delta.getY() * 0.5f;
@@ -775,10 +807,114 @@ private:
         }
     }
 
+    // ---- the DIVE drawer ------------------------------------------------------------
+    //
+    // Named for Sound Diver, and for what it does: the panel slides down to expose the
+    // parameters the machine itself only reaches through its EDIT menus.  The drawer is
+    // part of the same artwork as the panel, sitting below it in the same coordinate
+    // space, so nothing here needs to know where anything is -- only which of the three
+    // window heights is in force and which page is on show.
+
+    /// Case-insensitive compare, spelled out rather than reached for: strcasecmp is
+    /// POSIX and _stricmp is MSVC, and this is two lines.
+    static bool sameName(const char *a, const char *b)
+    {
+        for (; *a && *b; a ++, b ++)
+            if (std::tolower((unsigned char)*a) != std::tolower((unsigned char)*b))
+                return false;
+        return *a == *b;
+    }
+
+    static bool tabIsPart(int t)
+    {
+        return t >= voltaire::panel::TAB_P1 && t <= voltaire::panel::TAB_P6;
+    }
+
+    /// Which of the six parts row 1 is pointing at, or -1 for SET and COMMON.
+    int divePart() const
+    {
+        return tabIsPart(m_diveTab1) ? m_diveTab1 - voltaire::panel::TAB_P1 : -1;
+    }
+
+    /// The second row only means anything for a part; SET and COMMON are whole pages.
+    bool row2Visible() const { return tabIsPart(m_diveTab1); }
+
+    /// Tab -> page, matched on the name both tables carry.
+    ///
+    /// The alternative would be a switch mapping TAB_LEVEL to DIVE_LEVEL and so on,
+    /// which is a second place to edit every time a tab is added in Inkscape.  Here
+    /// the artwork's own naming is the mapping, and a tab whose name matches no page
+    /// simply shows nothing rather than showing the wrong thing.
+    int divePage() const
+    {
+        const char *want = voltaire::panel::kDiveTabName[
+                row2Visible() ? m_diveTab2 : m_diveTab1];
+        for (int p = 0; p < voltaire::panel::DIVEPAGE_COUNT; p ++)
+            if (sameName(want, voltaire::panel::kDivePageName[p]))
+                return p;
+        return -1;
+    }
+
+    /// How tall the artwork is right now: shut, or open with one tab row or two.
+    float designHeight() const
+    {
+        if (!m_diveOpen)
+            return voltaire::panel::kPanelShutHeight;
+        return row2Visible() ? voltaire::panel::kDiveOpenHeight
+                             : voltaire::panel::kDiveOpenHeight1Row;
+    }
+
+    /// How far up a one-row page is drawn.  The exporter has already applied this to
+    /// the page's own geometry; what is left is the drawer furniture drawn from the
+    /// panel's artwork, which is authored at the two-row position.
+    float diveScoot() const
+    {
+        return (m_diveOpen && !row2Visible()) ? voltaire::panel::kDiveRow2Height : 0.0f;
+    }
+
+    /// Follow the window to the height the drawer now needs, keeping the panel's scale.
+    void resizeToDrawer()
+    {
+        const uint w = getWidth();
+        const uint h = uint(std::lround(double(w) * designHeight()
+                                        / voltaire::panel::kDesignWidth));
+        if (h != getHeight())
+            setSize(w, h);
+    }
+
+    /// Window pixels -> design units, the space every rectangle in panel_geometry.h is in.
+    void toDesign(int px, int py, float &x, float &y) const
+    {
+        const float s = panelScale();
+        x = (px - (getWidth() - voltaire::panel::kDesignWidth * s) * 0.5f) / s;
+        y = (py - (getHeight() - designHeight() * s) * 0.5f) / s;
+    }
+
+    /// The tab under a design-space point, or -1.  Row 2 is only there when it is shown.
+    int diveTabHit(float x, float y) const
+    {
+        if (!m_diveOpen)
+            return -1;
+        for (int t = 0; t < voltaire::panel::DIVETABID_COUNT; t ++)
+        {
+            if (voltaire::panel::kDiveTabRow[t] == 1 && !row2Visible())
+                continue;
+            const auto &r = voltaire::panel::kDiveTab[t];
+            if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h)
+                return t;
+        }
+        return -1;
+    }
+
+    bool diveTabSelected(int t) const
+    {
+        return t == (voltaire::panel::kDiveTabRow[t] == 1 ? m_diveTab2 : m_diveTab1);
+    }
+
     float panelScale() const
     {
         const float sx = float(getWidth()) / voltaire::panel::kDesignWidth;
-        const float sy = float(getHeight()) / voltaire::panel::kDesignHeight;
+        const float sy = float(getHeight()) / designHeight();
         return sx < sy ? sx : sy;
     }
 
@@ -873,24 +1009,99 @@ private:
             // copy is what stops the old one being left behind at its zero position.
             if (std::strcmp(sh->id, voltaire::panel::kVolumeKnobPointerId) == 0)
                 continue;
-            beginPath();
-            for (NSVGpath *p = sh->paths; p != nullptr; p = p->next)
-            {
-                moveTo(p->pts[0], p->pts[1]);
-                for (int i = 0; i < p->npts - 1; i += 3)
-                {
-                    const float *q = &p->pts[i * 2];
-                    bezierTo(q[2], q[3], q[4], q[5], q[6], q[7]);
-                }
-                if (p->closed)
-                    closePath();
 
-                // NanoVG FORCES every subpath to CCW unless told otherwise, so the
-                // counters inside letters -- the hole in an "o" -- get reversed and the
-                // glyph fills solid.  nanosvg already hands over correctly opposed
-                // windings, so preserving each subpath's own direction is the whole fix.
-                pathWinding(subpathArea(p) >= 0.0f ? CCW : CW);
+            // The drawer: nothing of it exists while it is shut, the body and the
+            // content box are drawn here because their size follows the page, and the
+            // second row of tabs is only there for a part.
+            const DiveShape d = classifyDiveShape(sh->id);
+            if (d.what != DiveShape::None && !m_diveOpen)
+                continue;
+            if (d.what == DiveShape::Body)    { drawDiveBox(sh, diveBodyRect()); continue; }
+            if (d.what == DiveShape::Content) { drawDiveBox(sh, diveContentRect()); continue; }
+            if (d.what != DiveShape::None
+                    && voltaire::panel::kDiveTabRow[d.tab] == 1 && !row2Visible())
+                continue;
+
+            const bool lit = d.what != DiveShape::None && diveTabSelected(d.tab);
+            if (lit && d.what == DiveShape::TabText)
+            {
+                // Brighter, and glowing, because #00a3e0 on its own does not have enough
+                // headroom left to read as "selected" from across a mix window.  The glow
+                // is the same path stroked twice at low alpha under the fill -- no filter,
+                // which nanosvg has no notion of anyway.
+                shapePath(sh);
+                strokeColor(Color(120, 220, 255, 0.20f));
+                strokeWidth(2.6f);
+                stroke();
+                strokeColor(Color(120, 220, 255, 0.28f));
+                strokeWidth(1.2f);
+                stroke();
+                fillColor(Color(190, 240, 255));
+                fill();
+                continue;
             }
+
+            shapePath(sh);
+            if (sh->fill.type == NSVG_PAINT_COLOR)
+            {
+                // A selected tab darkens by becoming less transparent, which is the one
+                // change that reads the same whatever is behind it.
+                fillColor(nvgCol(sh->fill.color,
+                                 lit ? sh->opacity * kDiveTabLit : sh->opacity));
+                fill();
+            }
+            if (sh->stroke.type == NSVG_PAINT_COLOR && sh->strokeWidth > 0.0f)
+            {
+                strokeColor(nvgCol(sh->stroke.color, sh->opacity));
+                strokeWidth(sh->strokeWidth);
+                stroke();
+            }
+        }
+        restore();
+    }
+
+    /// The open page: its raster layer, then its vectors.
+    ///
+    /// Each page is a separate document, already translated into panel coordinates by
+    /// the exporter -- including the shift up when the second tab row is hidden -- so
+    /// there is no page transform here at all.  They are parsed on first use: opening
+    /// the drawer on SET should not pay for the other five.
+    void drawDivePage()
+    {
+        if (!m_diveOpen)
+            return;
+        const int p = divePage();
+        if (p < 0)
+            return;
+        if (!m_pageTried[p])
+        {
+            m_pageTried[p] = true;
+            loadDivePage(p);
+        }
+
+        const float w = voltaire::panel::kDesignWidth;
+        const float h = voltaire::panel::kDiveOpenHeight;
+        if (m_pageRaster[p].isValid())
+        {
+            // What nanosvg cannot draw: the section frames, whose gap for the title is a
+            // clip path, and the slider graticules where they are clipped by the body.
+            beginPath();
+            rect(0, 0, w, h);
+            fillPaint(imagePattern(0, 0, w, h, 0.0f, m_pageRaster[p], 1.0f));
+            fill();
+        }
+
+        NSVGimage *svg = m_pageSvg[p];
+        if (svg == nullptr)
+            return;
+        const float k = (svg->width > 1.0f) ? (w / svg->width) : 1.0f;
+        save();
+        scale(k, k);
+        for (NSVGshape *sh = svg->shapes; sh != nullptr; sh = sh->next)
+        {
+            if (!(sh->flags & NSVG_FLAGS_VISIBLE))
+                continue;
+            shapePath(sh);
             if (sh->fill.type == NSVG_PAINT_COLOR)
             {
                 fillColor(nvgCol(sh->fill.color, sh->opacity));
@@ -902,6 +1113,117 @@ private:
                 strokeWidth(sh->strokeWidth);
                 stroke();
             }
+        }
+        restore();
+    }
+
+    void loadDivePage(int p)
+    {
+        if (kDiveSvg[p] != nullptr)
+        {
+            std::string copy(kDiveSvg[p]);
+            m_pageSvg[p] = nsvgParse(&copy[0], "px", 96.0f);   // nsvgParse edits its input
+        }
+        if (kDiveRaster[p] != nullptr
+                && kDiveRasterSize[p] != 0)
+            m_pageRaster[p] = createImageFromMemory(
+                    const_cast<uchar *>(kDiveRaster[p]),
+                    kDiveRasterSize[p], 0);
+    }
+
+    /// Lay a parsed SVG shape down as a NanoVG path.  Nothing is painted.
+    void shapePath(NSVGshape *sh)
+    {
+        beginPath();
+        for (NSVGpath *p = sh->paths; p != nullptr; p = p->next)
+        {
+            moveTo(p->pts[0], p->pts[1]);
+            for (int i = 0; i < p->npts - 1; i += 3)
+            {
+                const float *q = &p->pts[i * 2];
+                bezierTo(q[2], q[3], q[4], q[5], q[6], q[7]);
+            }
+            if (p->closed)
+                closePath();
+
+            // NanoVG FORCES every subpath to CCW unless told otherwise, so the
+            // counters inside letters -- the hole in an "o" -- get reversed and the
+            // glyph fills solid.  nanosvg already hands over correctly opposed
+            // windings, so preserving each subpath's own direction is the whole fix.
+            pathWinding(subpathArea(p) >= 0.0f ? CCW : CW);
+        }
+    }
+
+    // How much less transparent a selected tab's background gets.  Three times the
+    // artwork's own 12% lands at a bit over a third, which is dark enough to read as
+    // chosen against the panel body without becoming a black hole.
+    static constexpr float kDiveTabLit = 3.0f;
+
+    struct DiveShape
+    {
+        enum What { None, Body, Content, TabRect, TabText } what = None;
+        int tab = 0;
+    };
+
+    /// Which piece of the drawer, if any, an SVG id belongs to.
+    DiveShape classifyDiveShape(const char *id) const
+    {
+        DiveShape d;
+        if (id == nullptr || id[0] == '\0')
+            return d;
+        if (std::strcmp(id, voltaire::panel::kDiveBodySvgId) == 0)
+        { d.what = DiveShape::Body; return d; }
+        if (std::strcmp(id, voltaire::panel::kDiveContentSvgId) == 0)
+        { d.what = DiveShape::Content; return d; }
+        for (int t = 0; t < voltaire::panel::DIVETABID_COUNT; t ++)
+        {
+            if (std::strcmp(id, voltaire::panel::kDiveTabSvgId[t]) == 0)
+            { d.what = DiveShape::TabRect; d.tab = t; return d; }
+            const char *tx = voltaire::panel::kDiveTabTextSvgId[t];
+            if (tx != nullptr && std::strcmp(id, tx) == 0)
+            { d.what = DiveShape::TabText; d.tab = t; return d; }
+        }
+        return d;
+    }
+
+    /// The drawer body, shortened when the second tab row is not on show.
+    voltaire::panel::Rect diveBodyRect() const
+    {
+        voltaire::panel::Rect r = voltaire::panel::kDiveBody;
+        r.h -= diveScoot();
+        return r;
+    }
+
+    /// The content box, moved up into the space the hidden tab row leaves.
+    voltaire::panel::Rect diveContentRect() const
+    {
+        voltaire::panel::Rect r = voltaire::panel::kDiveContent;
+        r.y -= diveScoot();
+        return r;
+    }
+
+    /// Redraw one of the artwork's own rectangles at a size the page decides, keeping
+    /// the paint it was given in Inkscape.
+    void drawDiveBox(NSVGshape *sh, const voltaire::panel::Rect &r)
+    {
+        // The artwork is drawn under a normalising scale; these rectangles are in design
+        // units, so undo it for the duration.
+        const float k = (m_svg->width > 1.0f)
+                ? (voltaire::panel::kDesignWidth / m_svg->width) : 1.0f;
+        save();
+        scale(1.0f / k, 1.0f / k);
+        beginPath();
+        rect(r.x, r.y, r.w, r.h);
+        if (sh->fill.type == NSVG_PAINT_COLOR)
+        {
+            fillColor(nvgCol(sh->fill.color, sh->opacity));
+            fill();
+        }
+        if (sh->stroke.type == NSVG_PAINT_COLOR && sh->strokeWidth > 0.0f)
+        {
+            strokeColor(nvgCol(sh->stroke.color, sh->opacity));
+            strokeWidth(sh->strokeWidth * k);
+            stroke();
         }
         restore();
     }
@@ -1055,6 +1377,14 @@ private:
             fillColor(Color(255, 255, 255, 0.22f));
             fill();
         }
+        if (m_diveOpen)
+        {
+            const auto &d = voltaire::panel::kButton[voltaire::panel::BUT_DIVE];
+            beginPath();
+            roundedRect(d.x, d.y, d.w, d.h, d.h * 0.15f);
+            fillColor(Color(255, 255, 255, 0.22f));
+            fill();
+        }
         if (m_hf)
         {
             const auto &f = voltaire::panel::kButton[voltaire::panel::BUT_FILTER];
@@ -1075,6 +1405,19 @@ private:
     NSVGimage *m_svg = nullptr;
     NanoImage m_background;
     bool m_backgroundTried = false;
+
+    // ---- the DIVE drawer
+    //
+    // Two rows of tabs select what is shown.  Row 1 picks SET, COMMON or one of the six
+    // parts; row 2 only exists for a part, and picks which group of its parameters is on
+    // show.  So the page being drawn is a function of both, and which of the drawer's
+    // three heights the window takes is a function of row 1 alone.
+    bool m_diveOpen = false;
+    int m_diveTab1 = voltaire::panel::TAB_SET;
+    int m_diveTab2 = voltaire::panel::TAB_BASIC;
+    NSVGimage *m_pageSvg[voltaire::panel::DIVEPAGE_COUNT] = { nullptr };
+    NanoImage m_pageRaster[voltaire::panel::DIVEPAGE_COUNT];
+    bool m_pageTried[voltaire::panel::DIVEPAGE_COUNT] = { false };
     bool m_dirty = true;
     const bool m_countFrames = std::getenv("VOLTAIRE_FPS") != nullptr;
 

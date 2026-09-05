@@ -1,0 +1,17 @@
+Description of UI control elements: 
+
+Global: Nearly eveything has a tooltip.
+
+DIVE: Exposes a lower set of controls. The controls are inside tabs. One tab for each "part" plus a tab for shared items. 
+
+Patch: Drop-down menu, two sub items, one is instrument patches, the other is user patches (our own managed bank). 
+
+Tone: Drop down menu, six sub items, one sub item for each "part" in the patch. Within each of these is a list of available tones, with subs for each installed cartridge at the top. 
+
+Reset: Resets the machine to defaults (confirm first) and then reboots it. 
+
+Cartridge Manager: Drop-down menu showing each cardridge detected on startup, allows user to manually specify a cartridge image. note: we do not verify the md5sum, we allow any cardridge and try to read it. 
+
+VU Meter: Basic green-yellow-red segmented horizontal stereo VU meter, shows the final output levels. 
+
+

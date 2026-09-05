@@ -65,14 +65,22 @@ ttl:
 # Inkscape SVG, the LCD character set from MatrixSans.  Neither is checked in, so a fresh
 # clone rebuilds them rather than inheriting a stale copy.
 GENERATED = generated/panel_geometry.h generated/panel_svg.h \
-            generated/panel_background.h generated/u110_cgrom.h
+            generated/panel_background.h generated/dive_pages.h \
+            generated/u110_cgrom.h
+
+# The DIVE drawer's content is one Inkscape file per tab; a change to any of them
+# re-exports everything, because they are placed relative to the panel.
+PANEL_SVG = ../resources/graphics/overall_panel_inkscape.svg
+# dive_panel_inkscape.svg is a design scratchpad, not a page the exporter reads.
+DIVE_SVG  = $(filter-out %dive_panel_inkscape.svg,\
+              $(wildcard ../resources/graphics/dive_*.svg))
 
 generated: $(GENERATED)
 
 # panel_export.py needs Inkscape to flatten text to paths and rsvg-convert to render the
 # artwork's raster layer -- nanosvg can draw neither.  Both are regeneration tools, not
 # runtime ones: what ships is the flattened SVG and the pre-rendered PNG, embedded.
-generated/panel_geometry.h generated/panel_svg.h generated/panel_background.h: ../resources/graphics/overall_panel_inkscape.svg tools/panel_export.py
+generated/panel_geometry.h generated/panel_svg.h generated/panel_background.h generated/dive_pages.h: $(PANEL_SVG) $(DIVE_SVG) tools/panel_export.py
 	@tools/panel_export.py --text-to-path --background
 
 generated/u110_cgrom.h: ../tools/make_lcd_cgrom.py
