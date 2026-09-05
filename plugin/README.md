@@ -248,109 +248,67 @@ every negative setting read as unknown and the fader dropped to the bottom -- an
 not be dragged into the negative half, because the moment it got there it stopped being a
 value.  The sentinel is now -1000, which no parameter can reach.
 
-### `[!]` NanoVG cannot draw a hairline, and lettering is where that shows
+### `[!]` The panel renders correctly, and three "fixes" to it were regressions
 
-Inkscape leaves a `stroke:#000000; stroke-width:0.264583` on text as a matter of course.
-That is 0.37 window pixels at the default size, which rsvg draws as very nearly nothing.
-NanoVG cannot: anything under one device pixel is promoted to a full pixel with the alpha
-reduced to compensate, so every tab label came out with a dark rim and read as heavy and
-crowded.  Strokes thinner than 0.6 device pixels are now skipped, which is what matches
-the reference render.
+The lettering was reported as thick and crowded next to Inkscape.  Four rounds of work
+followed -- a sub-pixel stroke rule, a finer antialiasing fringe, splitting the panel into
+two frames, then a third frame for the palettes -- and every one of them was a fix for a
+problem that did not exist.  All four are gone.
 
-A residual remains, and it is the renderer rather than the artwork.  Measuring stem
-widths on one scanline through "COMMON":
+**NanoVG matches the reference renderer.**  With the background composited in, one
+scanline through "CARTRIDGE MANAGER" reads, blue channel:
 
-| window | rsvg | plugin | excess |
-|---|---|---|---|
-| 1100 px | 6.9 px | 9.2 px | +2.3 px |
-| 2200 px | 13.8 px | 15.5 px | +1.8 px |
+```
+rsvg-convert + background   ... 127  30  90 ... 81  33 106 ...
+the plugin                  ... 147  31  90 ... 82  34  95 ...
+```
 
-The excess is roughly **constant in pixels**, not proportional -- doubling the window did
-not double it -- so it is NanoVG's antialiasing expansion and not anything geometric.
-NanoVG widens every filled shape by half a fringe and feathers another fringe outside
-that, and the fringe is one device pixel.
+Those are the antialiasing gradient pixels, and they agree.  The first version of the
+plugin, built in a worktree and run side by side, matches its own reference the same way:
+`124 56 155` against `124 56 155`, pixel for pixel.
 
-### The fringe is one device pixel, and it does not have to be
+**What went wrong was the reference, not the renderer.**  Every measurement that showed
+"fattening" compared the plugin against `rsvg-convert panel_flat.svg` -- and the flat SVG
+does **not contain the background**, which is a separate PNG the UI draws underneath.  So
+the bright pixels read "inside the letter gaps" were the Earth photograph showing through
+the gaps, exactly as it should.  The gaps were never closing.  There was nothing to fix.
 
-It is not the stems that thicken -- it is the **gaps that close**.  Where two edges come
-within about two pixels of each other, which on lettering is every counter and every space
-between letters, the two feathers overlap and add, and the hole fills in.
+The fix for a measurement error is to fix the measurement:
 
-`nvgBeginFrame`'s device pixel ratio sets `fringeWidth = 1/ratio` and the curve
-tessellation tolerance, and **scales no geometry at all**.  So handing NanoVG a larger
-ratio than the window really has buys a finer fringe and nothing else.  Measured across a
-two-pixel gap between two letters at a 1100 px window, as the blue channel of those two
-pixels -- rsvg-convert on the same flat SVG reads `26, 26`, and the glyph either side is
-`224`:
+```sh
+convert -size 1100x954 xc:'#141416' comp.png
+convert comp.png \( generated/panel_background.png -resize 1100x \) \
+        -gravity northwest -composite comp.png
+rsvg-convert -w 1100 generated/panel_flat.svg -o flat.png
+convert comp.png flat.png -gravity northwest -composite reference.png
+```
 
-| ratio | the gap | |
-|---|---|---|
-| x1 (default) | 193, 209 | the gap is gone |
-| x2 | 66, 98 | mostly back |
-| **x3** | **31, 31** | matches the reference |
-| x4 | 31, 31 | no further gain |
+**Three things this cost, worth naming.**  A threshold ink count says a shape has more ink
+without saying where; it agreed with the wrong conclusion four times.  A pixel profile
+across one gap disagreed with it immediately, once the reference was right.  And the
+scale test that "proved" the excess was a fixed-pixel effect was measuring the background
+too -- it proved nothing, and it was convincing.
 
-Three is where the text becomes right and four buys nothing more.  But a third of a pixel
-leaves almost no fringe to ramp, and the volume knob's circle comes out visibly stepped --
-not at 1:1, but plainly at 400%, and it is the one shape on the panel that is nothing but
-curve.
+**The rule that came out of it**: when comparing a render against a reference, the
+reference has to be the *whole picture the plugin actually draws*, background and all --
+and regenerated from the current artwork, since a stale one shifts everything sideways and
+looks like a transform bug.
 
-### So the panel is drawn twice
-
-Lettering wants a fine fringe and curves want a coarse one, and the fringe cannot be
-changed inside a frame -- `nvgBeginFrame` resets the draw list along with it.  So there are
-two frames per repaint: everything with a curve in it at the fringe the host asked for,
-then `nvgEndFrame`, then a second `nvgBeginFrame` at x3 for the lettering and the LCD.  The
-knob is smooth and the counters are open.
-
-Telling them apart after flattening is the interesting part, and the exporter does it: what
-survives the conversion is `font-family` in the style, which Inkscape leaves on the paths
-it makes from a `<text>` and on nothing else.  Matching on that rather than on the ids the
-exporter already knows is what makes it work for a **multi-line label**, which Inkscape
-turns into a group of paths with ids it invented -- and better than half the DIVE page
-labels are multi-line.  The ids go into `panel_text_ids.h` and `dive_pages.h`, and the UI
-marks shapes by position at load rather than comparing strings in the draw loop.
-
-Two consequences.  Lettering is drawn **on top** of everything in its document, whatever
-its layer order -- harmless here, where no label overlaps a control, but it is a real
-change on the DIVE pages, where the text layer is authored first.  And a repaint costs one
-extra GL flush: measured at 2.4 ms with the drawer open under software rendering, against
-1.2 ms for the panel alone before the drawer existed.
-
-#### `[!]` ...and a third frame, for the one thing drawn with a real font
-
-The PATCH and TONE palettes are the only things in the UI drawn with an actual typeface
-rather than paths or dots, and putting them in the fine-fringe frame made them **harder to
-read**.  NanoVG rasterises a glyph at `fontSize * devicePixelRatio` and then draws it
-scaled back down (`nvgText`: `fonsSetSize(fs, state->fontSize*scale)`).  At x3 that is a
-39 px glyph minified to 13 with bilinear sampling and no mipmap -- undersampled, so soft.
-
-So there is a third frame at the host's own ratio for the menus and the tooltip, opened
-only when one of them is actually up.  The artwork never cared: its lettering is paths and
-the LCD is rectangles, and neither goes near the font atlas.
-
-The host's own scale factor is multiplied in rather than replaced, so a HiDPI display keeps
-the finer fringe it already had.
-
-### `[!]` Correction: the font was never the problem
+### `[!]` Correction: the font was never the problem either
 
 An earlier version of this section claimed the artwork had switched from **Earth** to
-**Earth-Mod**, a bolder and 11% narrower face, and that this was most of the weight.  That
-was **wrong**, and it was wrong because of how it was measured: the two fonts' flattened
-`d` strings were compared by treating every number in them as an alternating x,y pair.
-Path data is not that.  Relative commands, `h`, `v` and arc flags all put numbers into that
-stream that are not coordinates, so the "width" it computed was meaningless.
+**Earth-Mod**, a bolder and 11% narrower face.  That was **wrong**: the two fonts' flattened
+`d` strings were compared by treating every number in them as an alternating x,y pair,
+which path data is not -- relative commands, `h`, `v` and arc flags all put numbers into
+that stream that are not coordinates.
 
-Rendering the two fonts through rsvg and comparing the result -- which is what should have
-been done first -- gives 28575 against 28057 ink and identical bounding boxes.  They differ
-in one glyph, the "T".  Nor was it the conversion: `--export-text-to-path` and the GUI's
-own `object-to-path` action produce byte-identical output, which was also checked.
+Rendered and compared as pixels, the two give 28575 against 28057 ink and identical
+bounding boxes; they differ in one glyph, the "T".  Nor was it the conversion:
+`--export-text-to-path` produces **byte-identical** output to the GUI's `object-to-path`,
+checked on the real artwork by stripping the hand-made paths layer out of
+`overall_panel_inkscape_prior.svg` and re-flattening the text beside it.
 
-Two lessons, and the second cost the time.  **Measure the rendered output, not the source
-text**, whenever the question is about how something looks.  And a threshold ink count is a
-blunt instrument -- it says a shape has more ink without saying where, and the answer here
-was never in the stems.  One pixel profile across one gap said in a single reading what the
-ink totals never would have.
+The artwork is on Earth everywhere now, which is one fewer variable.
 
 
 ### What is not wired yet
