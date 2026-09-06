@@ -78,10 +78,10 @@ The LCD font is fine, for contrast: **MatrixSans is SIL OFL 1.1** and could be s
 if there were ever a reason to.
 
 **So:** building needs nothing. Changing the artwork needs Inkscape, rsvg-convert and
-the font — and if you have the first two but not the font, Inkscape substitutes in
-SILENCE and you get a panel set in Noto Sans that looks like somebody redesigned it.
-`panel_export.py` now warns when fontconfig would not give it the face the artwork asks
-for.
+the font — and having the first two but not the third is the trap, because Inkscape
+substitutes in SILENCE and produces a panel set in Noto Sans that looks like somebody
+redesigned it. `panel_export.py` asks fontconfig what it would actually use and
+**refuses to export** when that is not the face the artwork named.
 
 ### `[!]` Why a hash and not a timestamp
 
@@ -98,8 +98,12 @@ survives a checkout.
 Practical consequences:
 
 - Touching an SVG changes nothing. Only changing its *contents* re-exports.
-- If the artwork changed and Inkscape is missing, the build **stops** rather than
-  quietly shipping the previous panel.
+- If the artwork changed and Inkscape **or the font** is missing, the build **stops**.
+  A missing tool is obvious; a missing font is not — Inkscape substitutes in silence and
+  exports paths regardless, so an export on a fontless machine does not merely produce
+  something wrong, it *overwrites something right*. `panel_export.py` refuses rather
+  than warns for exactly that reason. `--allow-font-substitution` overrides it if you
+  ever genuinely mean to.
 - `make artwork` forces a re-export.
 - Commit `plugin/generated/` in the same commit as the SVG change. `git status` will
   show it; that is the reminder.

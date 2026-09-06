@@ -843,12 +843,8 @@ def reframe(root, offset, canvas):
 
 # ---------------------------------------------------------------- fonts
 
-# Warned about at most once per family per run, since seven SVGs name the same faces.
-_font_warned = set()
-
-
 def check_fonts(root):
-    """Warn if a font the artwork names is not installed.
+    """Return the set of fonts the artwork names that are not installed.
 
     Inkscape substitutes a missing face IN SILENCE and exports paths anyway, so the
     panel comes out in whatever fontconfig picked and the build reports success.  It
@@ -869,19 +865,17 @@ def check_fonts(root):
         if attr:
             families.add(attr.strip().strip('\'"'))
 
-    for fam in sorted(families - _font_warned):
+    missing = {}
+    for fam in sorted(families):
         pattern = fam.replace('-', r'\-')
         try:
             got = subprocess.run(['fc-match', '-f', '%{family}', pattern],
                                  capture_output=True, text=True).stdout.strip()
         except FileNotFoundError:
-            return                              # no fontconfig; nothing to check
+            return {}                           # no fontconfig; nothing to check
         if got.split(',')[0] != fam:
-            _font_warned.add(fam)
-            sys.stderr.write(
-                f'panel_export: warning: font "{fam}" is not installed -- fontconfig '
-                f'would use "{got}" instead.  The lettering in the exported panel is '
-                f'NOT the artwork.\n')
+            missing[fam] = got
+    return missing
 
 
 # ---------------------------------------------------------------- text->path
@@ -930,7 +924,6 @@ def flatten(svg_path, out_path, drop_ids=(), offset=(0.0, 0.0), canvas=None,
                 prune(child)
 
     prune(root)
-    check_fonts(root)
     if canvas is not None:
         reframe(root, offset, canvas)
 
@@ -1118,6 +1111,8 @@ def main():
     ap.add_argument('--background', action='store_true',
                     help='also pre-render what nanosvg cannot draw')
     ap.add_argument('-q', '--quiet', action='store_true')
+    ap.add_argument('--allow-font-substitution', action='store_true',
+                    help='export anyway when a font the artwork names is missing')
     args = ap.parse_args()
 
     elements, pivots, warnings, canvas, rasters, _ = scan(args.svg)
@@ -1141,6 +1136,36 @@ def main():
 
     for w in warnings:
         sys.stderr.write(f'panel_export: warning: {w}\n')
+
+    # [!] Checked HERE, before a single file is written, and fatal by default.
+    #
+    # Inkscape substitutes a missing face in SILENCE and exports paths regardless, so
+    # this used to be a warning -- and a warning was survivable only while generated/
+    # was a throwaway.  Now that the exported artwork is CHECKED IN, an export on a
+    # machine without the font does not merely produce something wrong, it OVERWRITES
+    # something right: the committed panel is replaced by one set in Noto Sans, and the
+    # only trace is a line that scrolled past in a build log.
+    #
+    # The font cannot be shipped (see CLONING.md), so this is the normal state of any
+    # clone, not a rare one.  Refusing is what keeps that harmless.
+    missing = {}
+    for path in [args.svg] + [p.path for p in pages]:
+        try:
+            missing.update(check_fonts(ET.parse(path).getroot()))
+        except ET.ParseError:
+            pass
+    if missing:
+        for fam, got in sorted(missing.items()):
+            sys.stderr.write(f'panel_export: font "{fam}" is not installed -- '
+                             f'fontconfig would use "{got}" instead\n')
+        if not args.allow_font_substitution:
+            sys.stderr.write(
+                'panel_export: REFUSING to export; the lettering would not be the '
+                'artwork, and\n                     the export overwrites artwork that '
+                'is checked in and correct.\n'
+                '                     Install the font, or pass '
+                '--allow-font-substitution if you mean it.\n')
+            return 1
 
     n_controls = sum(len(p.elements) for p in pages)
     if args.check:
