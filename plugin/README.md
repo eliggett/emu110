@@ -897,6 +897,23 @@ and a line's leading spaces are repeated on every row it wraps onto, so an inden
 still reads as a list at any width. That last part is why the renderer does its own
 wrapping instead of calling NanoVG's `textBox()`, which strips leading whitespace.
 
+Both prose overlays -- this and RESET -- are set on `overlayRowH()`, which is three steps
+of body text above the self check's row. That page is a *listing*, scanned for the one line
+that names your problem, and it earns its density by fitting the whole report on screen at
+once; these two are read a sentence at a time, and the same row height made that genuinely
+hard. Everything in both boxes is a multiple of one row, so raising it scales the layout
+together and the wrap comes out the shape it always did.
+
+The bigger row means fewer lines fit, so the About box says which way there is more of it:
+a caret in the right-hand gutter at whichever end continues, and `line N of M` in the
+footer. A box one line short of showing everything looks exactly like a box showing
+everything -- and the credits end in the list of MAME sources, which is the part somebody
+scrolling is most likely after. The carets are drawn as paths rather than typed as
+`U+25BC`: the panel's font is chosen for the lettering on the artwork, and a missing glyph
+would come out blank in the one place whose whole job is to say "there is more". The gutter
+is reserved whether or not anything overflows, because the wrap width decides the row count
+and a width that changed once the text overflowed would be deciding its own input.
+
 The logo's hit box comes out of the artwork like every other one: `panel_export.py` exports
 the bounds of the element labelled `logo_text_as_path` as `kLogo`, so moving the logo in
 Inkscape moves the button. If that label ever goes away the rect exports as zero and the UI
@@ -941,6 +958,11 @@ booting. The borrowed `SETUP:MIDI:EXCLUSIVE` switch is handed back there and the
 than by a timer that would fire into a half-booted machine -- except on an initialise,
 where putting one byte back into memory the user just asked to have wiped would be the one
 thing they did not ask for.
+
+The RESET box does not scroll, so it is set on the row it can *afford*: it has a fixed
+number of entries and all of them matter, and a menu whose last option is off the bottom of
+the window is a menu with a missing option. The row shrinks back towards the self check's
+below about 280 px of window height, which is the only case that notices.
 
 The destructive entry is coloured as such and says what it costs on its own line, so it
 cannot be picked out of a list of four by muscle memory. It is also recoverable in the way

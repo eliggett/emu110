@@ -1083,6 +1083,37 @@ private:
         return h < 9.0f ? 9.0f : (h > 18.0f ? 18.0f : h);
     }
 
+    /// The row the About and RESET boxes are set on.
+    ///
+    /// Bigger than the self check's, and on purpose: that page is a LISTING, scanned for
+    /// the one line that names your problem, and it earns its density by fitting the whole
+    /// report on screen at once.  These two are PROSE, read a sentence at a time, which
+    /// the same row height made genuinely hard.  Three steps up on the body text, with the
+    /// row grown to match so nothing collides -- everything in both boxes is a multiple of
+    /// this, so the layout scales together and the wrap comes out the shape it always did.
+    float overlayRowH() const
+    {
+        // Three steps of body text at 0.78 rows to the step, rounded to a whole pixel.
+        return diagRowH() + 4.0f;
+    }
+
+    /// A triangle marking text that carries on past the edge of the box.
+    ///
+    /// Drawn rather than typed: the panel's font is chosen for the lettering on the
+    /// artwork and nothing guarantees it has a glyph at U+25BC, which would come out as a
+    /// blank or a box in the one place whose whole job is to say "there is more".
+    void drawScrollCaret(float cx, float cy, float size, bool down)
+    {
+        const float dy = down ? size * 0.5f : -size * 0.5f;
+        beginPath();
+        moveTo(cx - size * 0.6f, cy - dy);
+        lineTo(cx + size * 0.6f, cy - dy);
+        lineTo(cx, cy + dy);
+        closePath();
+        fillColor(Color(0, 163, 224, 0.85f));
+        fill();
+    }
+
     int diagRows() const
     {
         const float rowH = diagRowH();
@@ -1219,7 +1250,7 @@ private:
     /// Same window-not-dialog reasoning as the self-check above.
     void drawAboutBox()
     {
-        const float rowH = diagRowH();
+        const float rowH = overlayRowH();
         const float pad  = std::floor(float(getHeight()) * 0.04f) + 4.0f;
         // Capped rather than filling the window: a line of prose is unreadable when it
         // runs the full width of a panel that is three times as wide as it is tall.
@@ -1251,7 +1282,10 @@ private:
         text(x + rowH * 0.6f, y + rowH * 1.1f, "ABOUT VOLTAIRE 110", nullptr);
 
         const float bodyX = x + rowH * 0.7f;
-        const float bodyW = w - rowH * 1.4f;
+        // The right-hand gutter is reserved whether or not there is anything to scroll,
+        // because the carets live in it and the wrap width decides the row count -- a
+        // width that changed once the text overflowed would be deciding its own input.
+        const float bodyW = w - rowH * 2.2f;
         const float bodyTop = y + rowH * 2.0f;
         const int rows = std::max(1, int((h - rowH * 3.2f) / rowH));
 
@@ -1284,11 +1318,27 @@ private:
         }
         restore();
 
+        // Which way there is more of it.  A box that is one line short of showing
+        // everything looks exactly like a box showing everything, and the credits end in
+        // the list of MAME sources -- the part somebody scrolling is most likely after.
+        const float caretX = x + w - rowH * 1.0f;
+        const float caretY = bodyTop + float(rows) * rowH;
+        if (m_aboutScroll > 0)
+            drawScrollCaret(caretX, bodyTop + rowH * 0.55f, rowH * 0.5f, false);
+        if (m_aboutScroll < m_aboutLast)
+            drawScrollCaret(caretX, caretY - rowH * 0.55f, rowH * 0.5f, true);
+
+        char foot[160];
+        if (m_aboutLast > 0)
+            std::snprintf(foot, sizeof(foot),
+                          "wheel scrolls   |   click anywhere to close   |   "
+                          "line %u of %u",
+                          unsigned(m_aboutScroll + 1), unsigned(m_aboutRows.size()));
+        else
+            std::snprintf(foot, sizeof(foot), "click anywhere to close");
         fontSize(rowH * 0.72f);
         fillColor(Color(140, 146, 156));
-        text(x + rowH * 0.6f, y + h - rowH * 0.8f,
-             m_aboutLast > 0 ? "wheel scrolls   |   click anywhere to close"
-                             : "click anywhere to close", nullptr);
+        text(x + rowH * 0.6f, y + h - rowH * 0.8f, foot, nullptr);
     }
 
     // ---- the RESET button's menu ----------------------------------------------------
@@ -1333,17 +1383,30 @@ private:
     /// outside the panel transform, so a mouse position needs no conversion.
     struct ResetLayout { float x, y, w, h, rowH, top, cell; };
 
+    /// Every measurement in the box is a multiple of one row, including its own height:
+    /// 2.4 rows of heading, four cells of 3.4, and 1.2 for the footer.
+    static constexpr float kResetCellRows = 3.4f;
+    static constexpr float kResetBoxRows =
+            2.4f + kResetCellRows * float(kResetCount) + 1.2f;
+
     ResetLayout resetLayout() const
     {
         ResetLayout L;
-        L.rowH = diagRowH();
-        L.cell = L.rowH * 3.4f;
         const float pad = std::floor(float(getHeight()) * 0.04f) + 4.0f;
+
+        // This box does not scroll, so the row it is set on is the row it can AFFORD:
+        // unlike the About box it has a fixed number of entries and all of them matter,
+        // and a menu whose last option is off the bottom of the window is a menu with a
+        // missing option.  Only a window shorter than about 280 px ever notices.
+        const float room = (float(getHeight()) - pad * 2.0f) / kResetBoxRows;
+        L.rowH = std::min(overlayRowH(), room);
+        L.cell = L.rowH * kResetCellRows;
+
         L.w = float(getWidth()) - pad * 2.0f;
         const float wmax = L.rowH * 50.0f;
         if (L.w > wmax)
             L.w = wmax;
-        L.h = L.rowH * 3.6f + L.cell * float(kResetCount);
+        L.h = L.rowH * kResetBoxRows;
         L.x = std::floor((float(getWidth()) - L.w) * 0.5f);
         L.y = std::floor((float(getHeight()) - L.h) * 0.5f);
         if (L.y < pad)
