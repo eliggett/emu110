@@ -107,6 +107,10 @@ Practical consequences:
 - `make artwork` forces a re-export.
 - Commit `plugin/generated/` in the same commit as the SVG change. `git status` will
   show it; that is the reminder.
+- The exporters are inputs to the hash too, so editing `panel_export.py` forces a
+  re-export — and therefore needs the font, even for a change that turns out to produce
+  identical output. That is the honest cost of a font that cannot be shipped, and it is
+  the strongest practical argument for moving the panel to an OFL face.
 - The flattened output depends on the Inkscape build that produced it — an AppImage and
   a distro package do not agree to the byte. A re-export on a different Inkscape is
   still correct, it will just show a larger diff than you expected.
