@@ -2394,6 +2394,21 @@ private:
     {
         const float tol = kCurveTolerancePx / (px > 0.0f ? px : 1.0f);
         const float tol2 = tol * tol;
+
+        // Which way round the OUTER contour runs, taken as the direction of the biggest
+        // subpath.  It has to be measured rather than assumed, because the two font
+        // formats disagree: TrueType winds an outer contour clockwise, CFF/OpenType
+        // counter-clockwise.  See the note on pathWinding() below for why that matters
+        // here of all places.
+        float outer = 0.0f;
+        for (NSVGpath *q = sh->paths; q != nullptr; q = q->next)
+        {
+            const float a = subpathArea(q);
+            if (std::fabs(a) > std::fabs(outer))
+                outer = a;
+        }
+        const bool outerPositive = outer >= 0.0f;
+
         beginPath();
         for (NSVGpath *p = sh->paths; p != nullptr; p = p->next)
         {
@@ -2409,8 +2424,22 @@ private:
             // NanoVG FORCES every subpath to CCW unless told otherwise, so the
             // counters inside letters -- the hole in an "o" -- get reversed and the
             // glyph fills solid.  nanosvg already hands over correctly opposed
-            // windings, so preserving each subpath's own direction is the whole fix.
-            pathWinding(subpathArea(p) >= 0.0f ? CCW : CW);
+            // windings; what has to be declared is which of the two is the solid one.
+            //
+            // [!] Declaring each subpath by its OWN direction is not the same thing, and
+            // that is what this used to do.  It looks equivalent -- the contours stay
+            // opposed either way, so the fill is right and the counters stay open -- but
+            // NanoVG builds its antialias fringe along the point order, so the half-pixel
+            // feather lands OUTSIDE the glyph for one winding convention and INSIDE it
+            // for the other.  Since TrueType and CFF wind outer contours opposite ways,
+            // the same artwork in an .otf renders 31% heavier than in a .ttf: at a 16 px
+            // cap height the 2 px gaps between letters close up and the lettering reads
+            // as squished.  Measured against rsvg-convert at the same size, the two
+            // fonts are within 2.5% of each other, so the weight was never the font's.
+            //
+            // Deciding solid-vs-hole RELATIVE to the outer contour is what makes this
+            // independent of which format the artwork's face happens to be in.
+            pathWinding((subpathArea(p) >= 0.0f) == outerPositive ? CCW : CW);
         }
     }
 

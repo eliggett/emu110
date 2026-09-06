@@ -363,13 +363,59 @@ checked on the real artwork by stripping the hand-made paths layer out of
 The artwork went to plain **Earth** everywhere while that was being chased, to hold one
 variable still.  Now that the font was cleared, it is back on **Earth-Mod** -- the face the
 panel was designed in -- in `overall_panel_inkscape.svg` and every `dive_*.svg` the
-exporter reads.  The two differ in the "T" and in nothing else that renders.
+exporter reads.  The two differ in the "T" and in nothing else that renders -- though
+getting them to render the SAME took a fix in the panel renderer, below.
 
 One practical note for anyone regenerating: `earth.ttf` is TrueType and
 `EarthNormal-Modified.otf` is CFF, so the flattened panel goes from quadratic `q`
 segments to cubic `c` ones.  That is a quick way to tell which face an export actually
 picked up -- a missing font falls back in SILENCE, and a fallback looks like a font
 change rather than an error.
+
+### `[!]` The panel rendered a `.otf` 31% heavier than a `.ttf`, and the font got blamed
+
+Putting Earth-Mod back made the whole panel look squished -- letters touching, `CARTRIDGE
+MANAGER` reading as one blob.  The obvious suspect is the face, and the obvious suspect
+was innocent for the third time in this file.
+
+The numbers, all at the same size, cyan ink in the panel header:
+
+| | rsvg-convert (reference) | the plugin |
+|---|---|---|
+| Earth (`.ttf`) | 23744 | 24889 (+4.8%) |
+| Earth-Mod (`.otf`) | 23015 | **30267 (+31.5%)** |
+
+The reference renderer makes Earth-Mod 2.5% *lighter*.  The plugin made it 31.5%
+*heavier*.  So the weight was never in the font; it was in `shapePath()`:
+
+```cpp
+pathWinding(subpathArea(p) >= 0.0f ? CCW : CW);   // the bug
+```
+
+That declares each subpath by its OWN geometric direction.  It looks right, and the fill
+IS right -- outer and hole stay opposed, so counters stay open and nothing looks broken.
+But **NanoVG builds its antialias fringe along the point order**, so the half-pixel
+feather lands outside the glyph for one winding direction and inside it for the other.
+
+**TrueType winds outer contours clockwise; CFF/OpenType winds them counter-clockwise.**
+Two font formats, opposite conventions, so the same artwork gained about a pixel per edge
+purely by being set in an `.otf`.  At a 16 px cap height the 2 px gaps between letters are
+gone, and the eye reads that as bad letter-spacing.
+
+The fix is to decide solid-vs-hole RELATIVE to the outer contour -- taken as the largest
+subpath -- instead of trusting the raw sign, which makes it independent of what the
+artwork's face happens to be built in.  Both fonts now land at +5.0% and +5.2%, the
+residual being the feather itself, which is the same for both and correct.
+
+**Two lessons.** The first is that a rendering difference between two *fonts* is worth
+suspecting the *renderer* for, because a font is data and data rarely has a 31% opinion.
+The second is that the reference render is what settles it: comparing the two fonts
+against each other only ever said "these differ", and both plausible culprits differed.
+Comparing each against `rsvg-convert` at the plugin's real size said which one was wrong.
+
+This is also why the check is a runtime capture and not a flattened-SVG render.  Every
+measurement in this section that was made outside the running program agreed with the
+wrong answer.
 
 
 ### What is not wired yet
