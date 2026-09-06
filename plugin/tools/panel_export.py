@@ -841,6 +841,49 @@ def reframe(root, offset, canvas):
     root.set('viewBox', '0 0 %.5f %.5f' % canvas)
 
 
+# ---------------------------------------------------------------- fonts
+
+# Warned about at most once per family per run, since seven SVGs name the same faces.
+_font_warned = set()
+
+
+def check_fonts(root):
+    """Warn if a font the artwork names is not installed.
+
+    Inkscape substitutes a missing face IN SILENCE and exports paths anyway, so the
+    panel comes out in whatever fontconfig picked and the build reports success.  It
+    does not look like an error; it looks like somebody changed the artwork.  The
+    faces are not in the repository -- they are installed locally -- so this is the
+    normal experience of a fresh clone, not a rare one.
+
+    fc-match answers with the family it would ACTUALLY use, which is the question.
+    The pattern has to be escaped first: unescaped, fontconfig reads the '-' in
+    'Earth-Mod' as the start of a style and cheerfully answers 'Earth' -- a wrong
+    answer that looks like a right one.
+    """
+    families = set()
+    for e in root.iter():
+        for m in re.finditer(r'font-family:\s*([^;]+)', e.get('style') or ''):
+            families.add(m.group(1).strip().strip('\'"'))
+        attr = e.get('font-family')
+        if attr:
+            families.add(attr.strip().strip('\'"'))
+
+    for fam in sorted(families - _font_warned):
+        pattern = fam.replace('-', r'\-')
+        try:
+            got = subprocess.run(['fc-match', '-f', '%{family}', pattern],
+                                 capture_output=True, text=True).stdout.strip()
+        except FileNotFoundError:
+            return                              # no fontconfig; nothing to check
+        if got.split(',')[0] != fam:
+            _font_warned.add(fam)
+            sys.stderr.write(
+                f'panel_export: warning: font "{fam}" is not installed -- fontconfig '
+                f'would use "{got}" instead.  The lettering in the exported panel is '
+                f'NOT the artwork.\n')
+
+
 # ---------------------------------------------------------------- text->path
 
 def flatten(svg_path, out_path, drop_ids=(), offset=(0.0, 0.0), canvas=None,
@@ -887,6 +930,7 @@ def flatten(svg_path, out_path, drop_ids=(), offset=(0.0, 0.0), canvas=None,
                 prune(child)
 
     prune(root)
+    check_fonts(root)
     if canvas is not None:
         reframe(root, offset, canvas)
 

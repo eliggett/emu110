@@ -360,7 +360,16 @@ bounding boxes; they differ in one glyph, the "T".  Nor was it the conversion:
 checked on the real artwork by stripping the hand-made paths layer out of
 `overall_panel_inkscape_prior.svg` and re-flattening the text beside it.
 
-The artwork is on Earth everywhere now, which is one fewer variable.
+The artwork went to plain **Earth** everywhere while that was being chased, to hold one
+variable still.  Now that the font was cleared, it is back on **Earth-Mod** -- the face the
+panel was designed in -- in `overall_panel_inkscape.svg` and every `dive_*.svg` the
+exporter reads.  The two differ in the "T" and in nothing else that renders.
+
+One practical note for anyone regenerating: `earth.ttf` is TrueType and
+`EarthNormal-Modified.otf` is CFF, so the flattened panel goes from quadratic `q`
+segments to cubic `c` ones.  That is a quick way to tell which face an export actually
+picked up -- a missing font falls back in SILENCE, and a fallback looks like a font
+change rather than an error.
 
 
 ### What is not wired yet
