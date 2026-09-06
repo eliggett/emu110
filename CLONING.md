@@ -46,16 +46,66 @@ What each is for:
 - `libjack-jackd2-dev` — the standalone (`bin/Voltaire110`) speaks JACK. Under
   PipeWire this Just Works; you do not need to run `jackd` yourself.
 - the X11 / GL / cairo / dbus set — DPF's DGL, which draws the panel.
-- **`inkscape` and `librsvg2-bin` (`rsvg-convert`) are regeneration tools only.**
-  The artwork exporter uses Inkscape to flatten text to paths and rsvg-convert to
-  pre-render the two constructs nanosvg cannot draw. Nothing in `generated/` is
-  checked in, so a fresh clone *does* need them on the first build. See
-  `plugin/README.md` for why.
-- `python3-pil` and `python3-fonttools` — `tools/make_lcd_cgrom.py` bakes the LCD
-  character set out of MatrixSans Screen at build time. Same reasoning: the table
-  is generated, not checked in.
+- **`inkscape`, `librsvg2-bin` (`rsvg-convert`), `python3-pil` and
+  `python3-fonttools` are needed only to CHANGE the artwork**, not to build it. The
+  exported panel is checked in — see the next section for why — so a clone builds the
+  panel we ship without any of them. Install them if you intend to edit the Inkscape
+  files or the LCD character set.
 
 Disk: `mame/` is about **2 GB** checked out, plus ~220 MB of history.
+
+### `[!]` The exported artwork is checked in, and the font is not
+
+`plugin/generated/` is a build product, and it is committed anyway. That is a
+deliberate exception and it is worth understanding before you touch it.
+
+**The panel is lettered in a font we cannot redistribute.** `earth.ttf` declares
+`Copyright 1992 by Elfring Soft Fonts, All rights reserved`, carries no licence string
+and no licence URL, and the archive it arrived in contains nothing but a generic
+"how to install a font" readme from an aggregator site. A download page calling
+something a free font is not a grant from the rights holder. `EarthNormal-Modified.otf`
+is a derivative of it and stands on the same ground or worse. So the font is not in this
+repository and must not be added to it.
+
+What *is* committed is the flattened result: outlines, in `panel_flat.svg` and the
+headers built from it. A typeface *design* and the font *program* that draws it are
+different things — in the US the program is copyrightable and the design expressly is
+not (37 CFR 202.1(e)) — and baking glyphs to paths in artwork is ordinary practice.
+That is a weaker claim outside the US, where design rights can apply, and it is the
+reason to move to an OFL face eventually rather than a reason to relax.
+
+The LCD font is fine, for contrast: **MatrixSans is SIL OFL 1.1** and could be shipped
+if there were ever a reason to.
+
+**So:** building needs nothing. Changing the artwork needs Inkscape, rsvg-convert and
+the font — and if you have the first two but not the font, Inkscape substitutes in
+SILENCE and you get a panel set in Noto Sans that looks like somebody redesigned it.
+`panel_export.py` now warns when fontconfig would not give it the face the artwork asks
+for.
+
+### `[!]` Why a hash and not a timestamp
+
+`tools/artwork.sh` decides whether to re-export by hashing the Inkscape files, not by
+comparing modification times, and `make` calls it instead of using a normal file rule.
+
+**Git does not record modification times.** Every file in a fresh clone is stamped with
+the moment it was written, in whatever order the checkout happened to run. A timestamp
+rule therefore fires or does not fire essentially at random on a clone — and on the run
+where it fires without the font installed, it silently overwrites the correct committed
+artwork with a substituted one. Content hashes are the only input to that decision that
+survives a checkout.
+
+Practical consequences:
+
+- Touching an SVG changes nothing. Only changing its *contents* re-exports.
+- If the artwork changed and Inkscape is missing, the build **stops** rather than
+  quietly shipping the previous panel.
+- `make artwork` forces a re-export.
+- Commit `plugin/generated/` in the same commit as the SVG change. `git status` will
+  show it; that is the reminder.
+- The flattened output depends on the Inkscape build that produced it — an AppImage and
+  a distro package do not agree to the byte. A re-export on a different Inkscape is
+  still correct, it will just show a larger diff than you expected.
 
 ---
 

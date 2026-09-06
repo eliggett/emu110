@@ -1,0 +1,2401 @@
+{
+  "source": "resources/graphics/overall_panel_inkscape.svg",
+  "design_width": 779.48499,
+  "design_height": 676.16971,
+  "elements": [
+    {
+      "label": "overall_outline",
+      "id": "rect9",
+      "kind": "rect",
+      "x": 2.0,
+      "y": 2.0,
+      "w": 775.4852,
+      "h": 209.0232
+    },
+    {
+      "label": "logo_text_as_path",
+      "id": "path22",
+      "kind": "path",
+      "x": 16.694,
+      "y": 12.1532,
+      "w": 319.8896,
+      "h": 31.4689
+    },
+    {
+      "label": "BUT_part_jump",
+      "id": "rect3",
+      "kind": "rect",
+      "x": 480.1989,
+      "y": 29.7837,
+      "w": 59.4823,
+      "h": 22.2454
+    },
+    {
+      "label": "BUT_left",
+      "id": "rect4",
+      "kind": "rect",
+      "x": 573.9124,
+      "y": 30.056,
+      "w": 59.4823,
+      "h": 22.2454
+    },
+    {
+      "label": "BUT_right",
+      "id": "rect5",
+      "kind": "rect",
+      "x": 667.6259,
+      "y": 30.056,
+      "w": 59.4823,
+      "h": 22.2454
+    },
+    {
+      "label": "BUT_edit_exit",
+      "id": "rect6",
+      "kind": "rect",
+      "x": 481.713,
+      "y": 97.3993,
+      "w": 59.4823,
+      "h": 22.2454
+    },
+    {
+      "label": "BUT_dec",
+      "id": "rect7",
+      "kind": "rect",
+      "x": 573.9124,
+      "y": 97.3993,
+      "w": 59.4823,
+      "h": 22.2454
+    },
+    {
+      "label": "BUT_inc_exit",
+      "id": "rect8",
+      "kind": "rect",
+      "x": 669.0034,
+      "y": 97.3993,
+      "w": 59.4823,
+      "h": 22.2454
+    },
+    {
+      "label": "BUT_filter",
+      "id": "rect10",
+      "kind": "rect",
+      "x": 38.1489,
+      "y": 69.195,
+      "w": 21.885,
+      "h": 38.2988
+    },
+    {
+      "label": "BUT_reset",
+      "id": "rect36",
+      "kind": "rect",
+      "x": 300.7933,
+      "y": 131.3654,
+      "w": 59.4823,
+      "h": 11.6583
+    },
+    {
+      "label": "BUT_Patch_Menu",
+      "id": "rect14",
+      "kind": "rect",
+      "x": 189.6255,
+      "y": 176.0089,
+      "w": 59.4823,
+      "h": 22.2454
+    },
+    {
+      "label": "BUT_tone",
+      "id": "rect15",
+      "kind": "rect",
+      "x": 281.825,
+      "y": 176.0089,
+      "w": 59.4823,
+      "h": 22.2454
+    },
+    {
+      "label": "BUT_dive",
+      "id": "rect17",
+      "kind": "rect",
+      "x": 376.916,
+      "y": 176.0089,
+      "w": 59.4823,
+      "h": 22.2454
+    },
+    {
+      "label": "BUT_Cart",
+      "id": "rect38",
+      "kind": "rect",
+      "x": 472.007,
+      "y": 176.0089,
+      "w": 256.5959,
+      "h": 22.2454
+    },
+    {
+      "label": "VU_Horiz_Stereo",
+      "id": "rect39",
+      "kind": "rect",
+      "x": 24.8509,
+      "y": 176.0089,
+      "w": 131.8599,
+      "h": 22.2454
+    },
+    {
+      "label": "KNOB_volume_outline",
+      "id": "path2",
+      "kind": "circle",
+      "x": 111.3199,
+      "y": 70.0499,
+      "w": 36.5891,
+      "h": 36.5891
+    },
+    {
+      "label": "KNOB_volume_pointer",
+      "id": "path39",
+      "kind": "path",
+      "x": 116.2811,
+      "y": 88.3719,
+      "w": 13.304,
+      "h": 12.4991
+    },
+    {
+      "label": "LCD_outer",
+      "id": "rect2",
+      "kind": "rect",
+      "x": 184.4372,
+      "y": 57.0556,
+      "w": 257.1494,
+      "h": 62.5776
+    },
+    {
+      "label": "LCD_inner",
+      "id": "rect16",
+      "kind": "rect",
+      "x": 196.5165,
+      "y": 62.7724,
+      "w": 232.9907,
+      "h": 51.144
+    },
+    {
+      "label": "dive_with_tabs_max_outline",
+      "id": "rect389",
+      "kind": "rect",
+      "x": 2.0,
+      "y": 211.0232,
+      "w": 775.4852,
+      "h": 463.1465
+    },
+    {
+      "label": "dive_controls_max_outline",
+      "id": "rect11",
+      "kind": "rect",
+      "x": 2.0,
+      "y": 312.2595,
+      "w": 775.4852,
+      "h": 361.9102
+    },
+    {
+      "label": "BUT_P6",
+      "id": "rect54",
+      "kind": "rect",
+      "x": 703.1826,
+      "y": 211.0232,
+      "w": 74.3026,
+      "h": 50.6182
+    },
+    {
+      "label": "BUT_P5",
+      "id": "rect53",
+      "kind": "rect",
+      "x": 628.8799,
+      "y": 211.0232,
+      "w": 74.3026,
+      "h": 50.6182
+    },
+    {
+      "label": "BUT_P4",
+      "id": "rect52",
+      "kind": "rect",
+      "x": 554.5773,
+      "y": 211.0232,
+      "w": 74.3026,
+      "h": 50.6182
+    },
+    {
+      "label": "BUT_P3",
+      "id": "rect51",
+      "kind": "rect",
+      "x": 480.2748,
+      "y": 211.0232,
+      "w": 74.3026,
+      "h": 50.6182
+    },
+    {
+      "label": "BUT_P2",
+      "id": "rect50",
+      "kind": "rect",
+      "x": 405.9722,
+      "y": 211.0232,
+      "w": 74.3026,
+      "h": 50.6182
+    },
+    {
+      "label": "BUT_P1",
+      "id": "rect49",
+      "kind": "rect",
+      "x": 331.6696,
+      "y": 211.0232,
+      "w": 74.3026,
+      "h": 50.6182
+    },
+    {
+      "label": "BUT_common",
+      "id": "rect59",
+      "kind": "rect",
+      "x": 123.4311,
+      "y": 211.0232,
+      "w": 208.2385,
+      "h": 50.6182
+    },
+    {
+      "label": "BUT_set",
+      "id": "rect60",
+      "kind": "rect",
+      "x": 2.0,
+      "y": 211.0232,
+      "w": 121.4311,
+      "h": 50.6182
+    },
+    {
+      "label": "BUT_LFO",
+      "id": "rect64",
+      "kind": "rect",
+      "x": 534.28,
+      "y": 261.6414,
+      "w": 144.5373,
+      "h": 50.6182
+    },
+    {
+      "label": "BUT_pitch",
+      "id": "rect63",
+      "kind": "rect",
+      "x": 389.7427,
+      "y": 261.6414,
+      "w": 144.5373,
+      "h": 50.6182
+    },
+    {
+      "label": "BUT_level",
+      "id": "rect62",
+      "kind": "rect",
+      "x": 245.2054,
+      "y": 261.6414,
+      "w": 144.5373,
+      "h": 50.6182
+    },
+    {
+      "label": "BUT_basic",
+      "id": "rect65",
+      "kind": "rect",
+      "x": 100.6682,
+      "y": 261.6414,
+      "w": 144.5373,
+      "h": 50.6182
+    },
+    {
+      "label": "T_P6",
+      "id": "text48",
+      "kind": "text",
+      "x": 716.2175,
+      "y": 245.2124,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_P4",
+      "id": "text34",
+      "kind": "text",
+      "x": 567.5627,
+      "y": 245.2,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_P5",
+      "id": "text47",
+      "kind": "text",
+      "x": 641.3072,
+      "y": 245.2,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_P3",
+      "id": "text49",
+      "kind": "text",
+      "x": 493.0679,
+      "y": 245.2124,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_P2",
+      "id": "text35",
+      "kind": "text",
+      "x": 418.3374,
+      "y": 245.2124,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_P1",
+      "id": "text37",
+      "kind": "text",
+      "x": 351.2344,
+      "y": 245.2,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_common",
+      "id": "text40",
+      "kind": "text",
+      "x": 143.4067,
+      "y": 245.107,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_set",
+      "id": "text60",
+      "kind": "text",
+      "x": 24.1877,
+      "y": 245.2124,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_LFO",
+      "id": "text64",
+      "kind": "text",
+      "x": 571.9662,
+      "y": 295.8182,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_pitch",
+      "id": "text63",
+      "kind": "text",
+      "x": 409.6006,
+      "y": 295.8305,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_level",
+      "id": "text62",
+      "kind": "text",
+      "x": 256.6174,
+      "y": 295.5887,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_basic",
+      "id": "text65",
+      "kind": "text",
+      "x": 120.1664,
+      "y": 295.8305,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "LED_part_jump",
+      "id": "rect30",
+      "kind": "rect",
+      "x": 495.3332,
+      "y": 29.7837,
+      "w": 29.2137,
+      "h": 6.1505
+    },
+    {
+      "label": "LED_edit_exit",
+      "id": "rect32",
+      "kind": "rect",
+      "x": 496.8473,
+      "y": 97.3993,
+      "w": 29.2137,
+      "h": 6.1505
+    },
+    {
+      "label": "LED_clip",
+      "id": "rect33",
+      "kind": "rect",
+      "x": 115.0075,
+      "y": 57.166,
+      "w": 29.2137,
+      "h": 6.1505
+    },
+    {
+      "label": "LED_filt",
+      "id": "rect34",
+      "kind": "rect",
+      "x": 35.3672,
+      "y": 57.166,
+      "w": 29.2137,
+      "h": 6.1505
+    },
+    {
+      "label": "LED_midi",
+      "id": "rect35",
+      "kind": "rect",
+      "x": 185.8856,
+      "y": 134.1193,
+      "w": 29.2137,
+      "h": 6.1505
+    },
+    {
+      "label": "T_vol",
+      "id": "text17",
+      "kind": "text",
+      "x": 104.5204,
+      "y": 133.9666,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_filt",
+      "id": "text18",
+      "kind": "text",
+      "x": 20.9423,
+      "y": 134.1361,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_midi",
+      "id": "text19",
+      "kind": "text",
+      "x": 221.3886,
+      "y": 143.2303,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_jump",
+      "id": "text20",
+      "kind": "text",
+      "x": 479.4312,
+      "y": 64.6318,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_part",
+      "id": "text21",
+      "kind": "text",
+      "x": 477.2126,
+      "y": 27.2546,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_edit",
+      "id": "text22",
+      "kind": "text",
+      "x": 484.6455,
+      "y": 94.8537,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_exit",
+      "id": "text23",
+      "kind": "text",
+      "x": 483.8848,
+      "y": 134.0306,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_dec",
+      "id": "text24",
+      "kind": "text",
+      "x": 580.4651,
+      "y": 94.8537,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_inc",
+      "id": "text25",
+      "kind": "text",
+      "x": 680.2297,
+      "y": 94.8702,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_enter",
+      "id": "text26",
+      "kind": "text",
+      "x": 673.7015,
+      "y": 134.262,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_reset",
+      "id": "text36",
+      "kind": "text",
+      "x": 369.2714,
+      "y": 143.3006,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_p_right",
+      "id": "path30",
+      "kind": "path",
+      "x": 693.037,
+      "y": 17.5268,
+      "w": 8.6603,
+      "h": 10.0
+    },
+    {
+      "label": "T_p_left",
+      "id": "path29",
+      "kind": "path",
+      "x": 598.3706,
+      "y": 17.5268,
+      "w": 8.6603,
+      "h": 10.0
+    },
+    {
+      "label": "T_Patch",
+      "id": "text27",
+      "kind": "text",
+      "x": 183.1863,
+      "y": 173.4633,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_Tone",
+      "id": "text28",
+      "kind": "text",
+      "x": 279.0538,
+      "y": 173.4633,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_Dive",
+      "id": "text29",
+      "kind": "text",
+      "x": 378.8056,
+      "y": 173.4633,
+      "w": 0.0,
+      "h": 0.0
+    },
+    {
+      "label": "T_Cart",
+      "id": "text39",
+      "kind": "text",
+      "x": 473.27,
+      "y": 173.4633,
+      "w": 0.0,
+      "h": 0.0
+    }
+  ],
+  "knobs": {
+    "volume": {
+      "angle_deg": -43.2132,
+      "x": 129.6144,
+      "y": 88.3444,
+      "shape_id": "path39"
+    }
+  },
+  "dive": [
+    {
+      "name": "set",
+      "source": "dive_setup.svg",
+      "hides_row2": true,
+      "offset": [
+        0.99999,
+        260.64139
+      ],
+      "elements": [
+        {
+          "label": "dive_controls_max_outline",
+          "id": "rect11",
+          "kind": "rect",
+          "x": 2.0,
+          "y": 261.6414,
+          "w": 775.4852,
+          "h": 361.9102
+        },
+        {
+          "label": "T_Control_Channel",
+          "id": "text30",
+          "kind": "text",
+          "x": 377.6746,
+          "y": 371.1572,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Control_Change",
+          "id": "text31",
+          "kind": "text",
+          "x": 394.8974,
+          "y": 397.4026,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Channel_Pressure",
+          "id": "text32",
+          "kind": "text",
+          "x": 360.5267,
+          "y": 449.8934,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Program_Change",
+          "id": "text33",
+          "kind": "text",
+          "x": 389.1096,
+          "y": 423.6481,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Polyphonic_Pressure",
+          "id": "text42",
+          "kind": "text",
+          "x": 326.6104,
+          "y": 477.8833,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Pitch_Bender",
+          "id": "text44",
+          "kind": "text",
+          "x": 434.2791,
+          "y": 502.3842,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Exclusive",
+          "id": "text45",
+          "kind": "text",
+          "x": 483.3179,
+          "y": 530.2832,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_MIDI",
+          "id": "text47",
+          "kind": "text",
+          "x": 399.7344,
+          "y": 341.8475,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Map_Edit",
+          "id": "text49",
+          "kind": "text",
+          "x": 199.7356,
+          "y": 544.6128,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Master_Tune",
+          "id": "text227-6",
+          "kind": "text",
+          "x": 46.9135,
+          "y": 544.6128,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "SB_Master_Tune",
+          "id": "g63",
+          "kind": "g",
+          "x": 86.024,
+          "y": 311.0812,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g62",
+          "kind": "g",
+          "x": 86.024,
+          "y": 325.587,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "path290",
+          "id": "path62-3",
+          "kind": "path",
+          "x": 86.024,
+          "y": 504.462,
+          "w": 28.6869,
+          "h": 0.0
+        },
+        {
+          "label": "slider_path",
+          "id": "rect62",
+          "kind": "rect",
+          "x": 96.3675,
+          "y": 311.0812,
+          "w": 8.0,
+          "h": 206.7601
+        },
+        {
+          "label": "ST_Master_Tune",
+          "id": "rect63",
+          "kind": "rect",
+          "x": 85.8675,
+          "y": 412.1123,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "BUT_Control_Change",
+          "id": "rect12",
+          "kind": "rect",
+          "x": 647.3747,
+          "y": 382.1746,
+          "w": 57.44,
+          "h": 22.2454
+        },
+        {
+          "label": "BUT_Channel_Pressure",
+          "id": "rect18",
+          "kind": "rect",
+          "x": 647.3749,
+          "y": 434.6654,
+          "w": 57.44,
+          "h": 22.2454
+        },
+        {
+          "label": "BUT_Program_Change",
+          "id": "rect13",
+          "kind": "rect",
+          "x": 647.3747,
+          "y": 408.4201,
+          "w": 57.44,
+          "h": 22.2454
+        },
+        {
+          "label": "BUT_Polyphonic_Pressure",
+          "id": "rect45",
+          "kind": "rect",
+          "x": 647.3749,
+          "y": 460.9109,
+          "w": 57.44,
+          "h": 22.2454
+        },
+        {
+          "label": "BUT_Pitch_Bender",
+          "id": "rect46",
+          "kind": "rect",
+          "x": 647.3749,
+          "y": 487.1563,
+          "w": 57.44,
+          "h": 22.2454
+        },
+        {
+          "label": "BUT_Exclusive",
+          "id": "rect47",
+          "kind": "rect",
+          "x": 647.3749,
+          "y": 513.4017,
+          "w": 57.44,
+          "h": 22.2454
+        },
+        {
+          "label": "L_MIDI",
+          "id": "path36",
+          "kind": "path",
+          "x": 310.7489,
+          "y": 335.3245,
+          "w": 419.0786,
+          "h": 222.1383
+        },
+        {
+          "label": "M_Control_Channel",
+          "id": "rect11-3",
+          "kind": "rect",
+          "x": 647.3747,
+          "y": 355.9293,
+          "w": 57.44,
+          "h": 22.2454
+        },
+        {
+          "label": "M_Map_Edit",
+          "id": "rect49",
+          "kind": "rect",
+          "x": 199.4624,
+          "y": 494.5958,
+          "w": 57.44,
+          "h": 22.2454
+        }
+      ],
+      "travel": {
+        "SB_Master_Tune": [
+          86.024,
+          325.587,
+          114.7109,
+          504.462
+        ]
+      }
+    },
+    {
+      "name": "common",
+      "source": "dive_common.svg",
+      "hides_row2": true,
+      "offset": [
+        0.99999,
+        260.64139
+      ],
+      "elements": [
+        {
+          "label": "dive_controls_max_outline",
+          "id": "rect11",
+          "kind": "rect",
+          "x": 2.0,
+          "y": 261.6414,
+          "w": 775.4852,
+          "h": 361.9102
+        },
+        {
+          "label": "T_Chorus_Rate",
+          "id": "text309",
+          "kind": "text",
+          "x": 373.8506,
+          "y": 559.9783,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Chorus_Depth",
+          "id": "text321",
+          "kind": "text",
+          "x": 474.2823,
+          "y": 559.9783,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Tremolo_Rate",
+          "id": "text345",
+          "kind": "text",
+          "x": 573.9513,
+          "y": 559.9783,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Tremolo_Depth",
+          "id": "text357",
+          "kind": "text",
+          "x": 653.6774,
+          "y": 559.9783,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_patch_name",
+          "id": "text369",
+          "kind": "text",
+          "x": 121.1857,
+          "y": 349.1418,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_output_mode",
+          "id": "text373",
+          "kind": "text",
+          "x": 69.6921,
+          "y": 384.3751,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_preset_left",
+          "id": "text376",
+          "kind": "text",
+          "x": 134.3412,
+          "y": 455.2918,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_preset_right",
+          "id": "text377",
+          "kind": "text",
+          "x": 125.982,
+          "y": 486.7606,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_preset_LR_dry",
+          "id": "text378",
+          "kind": "text",
+          "x": 111.2232,
+          "y": 522.0908,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_preset_LR_efx",
+          "id": "text379",
+          "kind": "text",
+          "x": 109.6275,
+          "y": 557.421,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_presets",
+          "id": "text385",
+          "kind": "text",
+          "x": 137.5458,
+          "y": 419.7984,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_write",
+          "id": "text386",
+          "kind": "text",
+          "x": 414.0058,
+          "y": 318.2379,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "SB_Chorus_Rate",
+          "id": "g19",
+          "kind": "g",
+          "x": 397.1855,
+          "y": 339.917,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g18",
+          "kind": "g",
+          "x": 397.1855,
+          "y": 354.4228,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "path290",
+          "id": "path290",
+          "kind": "path",
+          "x": 397.1855,
+          "y": 533.2978,
+          "w": 28.6869,
+          "h": 0.0
+        },
+        {
+          "label": "slider_path",
+          "id": "rect290",
+          "kind": "rect",
+          "x": 407.5289,
+          "y": 339.917,
+          "w": 8.0,
+          "h": 206.7601
+        },
+        {
+          "label": "SB_Chorus_Depth",
+          "id": "g54",
+          "kind": "g",
+          "x": 497.301,
+          "y": 339.917,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g53",
+          "kind": "g",
+          "x": 497.301,
+          "y": 354.4228,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "path290",
+          "id": "path53",
+          "kind": "path",
+          "x": 497.301,
+          "y": 533.2978,
+          "w": 28.6869,
+          "h": 0.0
+        },
+        {
+          "label": "slider_path",
+          "id": "rect53",
+          "kind": "rect",
+          "x": 507.6444,
+          "y": 339.917,
+          "w": 8.0,
+          "h": 206.7601
+        },
+        {
+          "label": "SB_Tremolo_Rate",
+          "id": "g65",
+          "kind": "g",
+          "x": 587.0636,
+          "y": 339.917,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g64",
+          "kind": "g",
+          "x": 587.0636,
+          "y": 354.4228,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "path290",
+          "id": "path64",
+          "kind": "path",
+          "x": 587.0636,
+          "y": 533.2978,
+          "w": 28.6869,
+          "h": 0.0
+        },
+        {
+          "label": "slider_path",
+          "id": "rect64",
+          "kind": "rect",
+          "x": 597.407,
+          "y": 339.917,
+          "w": 8.0,
+          "h": 206.7601
+        },
+        {
+          "label": "SB_Tremolo_Depth",
+          "id": "g76",
+          "kind": "g",
+          "x": 671.2669,
+          "y": 339.917,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g75",
+          "kind": "g",
+          "x": 671.2669,
+          "y": 354.4228,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "path290",
+          "id": "path75",
+          "kind": "path",
+          "x": 671.2669,
+          "y": 533.2978,
+          "w": 28.6869,
+          "h": 0.0
+        },
+        {
+          "label": "slider_path",
+          "id": "rect75",
+          "kind": "rect",
+          "x": 681.6103,
+          "y": 339.917,
+          "w": 8.0,
+          "h": 206.7601
+        },
+        {
+          "label": "ST_Chorus_Rate",
+          "id": "rect291",
+          "kind": "rect",
+          "x": 397.029,
+          "y": 351.5638,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_Chorus_Depth",
+          "id": "rect55",
+          "kind": "rect",
+          "x": 497.1444,
+          "y": 351.5638,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_Tremolo_Rate",
+          "id": "rect65",
+          "kind": "rect",
+          "x": 586.907,
+          "y": 351.5638,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_Tremolo_Depth",
+          "id": "rect76",
+          "kind": "rect",
+          "x": 671.1103,
+          "y": 351.5638,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "BUT_write",
+          "id": "rect386",
+          "kind": "rect",
+          "x": 526.8887,
+          "y": 302.7827,
+          "w": 134.8885,
+          "h": 22.2454
+        },
+        {
+          "label": "BUT_preset_left",
+          "id": "rect376",
+          "kind": "rect",
+          "x": 221.0304,
+          "y": 438.7782,
+          "w": 59.4823,
+          "h": 22.2454
+        },
+        {
+          "label": "BUT_preset_right",
+          "id": "rect379",
+          "kind": "rect",
+          "x": 221.0304,
+          "y": 472.7234,
+          "w": 59.4823,
+          "h": 22.2454
+        },
+        {
+          "label": "BUT_preset_LR_dry",
+          "id": "rect381",
+          "kind": "rect",
+          "x": 221.0304,
+          "y": 506.6686,
+          "w": 59.4823,
+          "h": 22.2454
+        },
+        {
+          "label": "BUT_preset_LR_efx",
+          "id": "rect382",
+          "kind": "rect",
+          "x": 221.0304,
+          "y": 540.6138,
+          "w": 59.4823,
+          "h": 22.2454
+        },
+        {
+          "label": "L_presets",
+          "id": "rect383",
+          "kind": "path",
+          "x": 64.5807,
+          "y": 416.2919,
+          "w": 269.4077,
+          "h": 168.101
+        },
+        {
+          "label": "LCD_Patch_Name",
+          "id": "rect369",
+          "kind": "rect",
+          "x": 123.9298,
+          "y": 300.8,
+          "w": 160.2894,
+          "h": 26.2142
+        },
+        {
+          "label": "M_output_mode",
+          "id": "rect370",
+          "kind": "rect",
+          "x": 267.4636,
+          "y": 366.0332,
+          "w": 57.44,
+          "h": 26.214
+        }
+      ],
+      "travel": {
+        "SB_Chorus_Rate": [
+          397.1855,
+          354.4228,
+          425.8724,
+          533.2978
+        ],
+        "SB_Chorus_Depth": [
+          497.301,
+          354.4228,
+          525.9878,
+          533.2978
+        ],
+        "SB_Tremolo_Rate": [
+          587.0636,
+          354.4228,
+          615.7505,
+          533.2978
+        ],
+        "SB_Tremolo_Depth": [
+          671.2669,
+          354.4228,
+          699.9537,
+          533.2978
+        ]
+      }
+    },
+    {
+      "name": "basic",
+      "source": "dive_basic.svg",
+      "hides_row2": false,
+      "offset": [
+        0.99999,
+        311.25955
+      ],
+      "elements": [
+        {
+          "label": "dive_controls_max_outline",
+          "id": "rect11",
+          "kind": "rect",
+          "x": 2.0,
+          "y": 312.2595,
+          "w": 775.4852,
+          "h": 361.9102
+        },
+        {
+          "label": "T_tone",
+          "id": "text293",
+          "kind": "text",
+          "x": 480.4306,
+          "y": 445.986,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_output_assign",
+          "id": "text295",
+          "kind": "text",
+          "x": 86.6482,
+          "y": 445.9879,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_midi_rx_channel",
+          "id": "text296",
+          "kind": "text",
+          "x": 121.1184,
+          "y": 478.2934,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_program_change",
+          "id": "text297",
+          "kind": "text",
+          "x": 57.0149,
+          "y": 553.7515,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_map",
+          "id": "text301",
+          "kind": "text",
+          "x": 230.0935,
+          "y": 518.3241,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_key_low",
+          "id": "text302",
+          "kind": "text",
+          "x": 435.7243,
+          "y": 482.9386,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_key_high",
+          "id": "text303",
+          "kind": "text",
+          "x": 437.1961,
+          "y": 521.3833,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_defaults",
+          "id": "text307",
+          "kind": "text",
+          "x": 417.7327,
+          "y": 556.1818,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "BUT_defaults",
+          "id": "rect307",
+          "kind": "rect",
+          "x": 562.1011,
+          "y": 539.1391,
+          "w": 59.4823,
+          "h": 22.2454
+        },
+        {
+          "label": "BUT_program_change",
+          "id": "rect306",
+          "kind": "rect",
+          "x": 298.2194,
+          "y": 538.5236,
+          "w": 57.44,
+          "h": 22.2454
+        },
+        {
+          "label": "LCD_tone",
+          "id": "rect17-7",
+          "kind": "rect",
+          "x": 561.2153,
+          "y": 425.0448,
+          "w": 156.3942,
+          "h": 26.2142
+        },
+        {
+          "label": "M_output_assign",
+          "id": "rect295",
+          "kind": "rect",
+          "x": 298.2194,
+          "y": 429.0155,
+          "w": 57.44,
+          "h": 22.2454
+        },
+        {
+          "label": "M_midi_rx_channel",
+          "id": "rect296",
+          "kind": "rect",
+          "x": 298.2194,
+          "y": 463.0656,
+          "w": 57.44,
+          "h": 22.2454
+        },
+        {
+          "label": "M_key_low",
+          "id": "rect299",
+          "kind": "rect",
+          "x": 561.2153,
+          "y": 466.0571,
+          "w": 95.0109,
+          "h": 22.2454
+        },
+        {
+          "label": "M_key_high",
+          "id": "rect300",
+          "kind": "rect",
+          "x": 561.2153,
+          "y": 504.3405,
+          "w": 95.0109,
+          "h": 22.2454
+        },
+        {
+          "label": "M_map",
+          "id": "rect305",
+          "kind": "rect",
+          "x": 298.2194,
+          "y": 501.1656,
+          "w": 57.44,
+          "h": 22.2454
+        }
+      ],
+      "travel": {}
+    },
+    {
+      "name": "level",
+      "source": "dive_level.svg",
+      "hides_row2": false,
+      "offset": [
+        0.99999,
+        311.25955
+      ],
+      "elements": [
+        {
+          "label": "dive_controls_max_outline",
+          "id": "rect11",
+          "kind": "rect",
+          "x": 2.0,
+          "y": 312.2595,
+          "w": 775.4852,
+          "h": 361.9102
+        },
+        {
+          "label": "T_Part_Level",
+          "id": "text43",
+          "kind": "text",
+          "x": 187.749,
+          "y": 595.8543,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Velocity_Sensitivity",
+          "id": "text55",
+          "kind": "text",
+          "x": 276.1388,
+          "y": 595.8543,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_ENV_Attack_Rate",
+          "id": "text68",
+          "kind": "text",
+          "x": 359.1181,
+          "y": 596.0279,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_ENV_Release_Rate",
+          "id": "text83",
+          "kind": "text",
+          "x": 448.2303,
+          "y": 596.0279,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Channel_Pressure_Sensitivity",
+          "id": "text96",
+          "kind": "text",
+          "x": 512.4665,
+          "y": 595.8543,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "SB_Part_Level",
+          "id": "g1",
+          "kind": "g",
+          "x": 204.2905,
+          "y": 375.793,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g52",
+          "kind": "g",
+          "x": 204.2905,
+          "y": 390.2988,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "SB_Velocity_Sensitivity",
+          "id": "g2",
+          "kind": "g",
+          "x": 287.645,
+          "y": 375.793,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g64",
+          "kind": "g",
+          "x": 287.645,
+          "y": 390.2988,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "SB_ENV_Attack_Rate",
+          "id": "g3",
+          "kind": "g",
+          "x": 370.9994,
+          "y": 375.793,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g77",
+          "kind": "g",
+          "x": 370.9994,
+          "y": 390.2988,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "SB_ENV_Release_Rate",
+          "id": "g4",
+          "kind": "g",
+          "x": 454.3538,
+          "y": 375.793,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g92",
+          "kind": "g",
+          "x": 454.3538,
+          "y": 390.2988,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "SB_Channel_Pressure_Sensitivity",
+          "id": "g5",
+          "kind": "g",
+          "x": 537.7083,
+          "y": 375.793,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g105",
+          "kind": "g",
+          "x": 537.7083,
+          "y": 390.2988,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "ST_Part_Level",
+          "id": "rect53",
+          "kind": "rect",
+          "x": 204.134,
+          "y": 388.4293,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_Velocity_Sensitivity",
+          "id": "rect65",
+          "kind": "rect",
+          "x": 287.4884,
+          "y": 388.4293,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_ENV_Attack_Rate",
+          "id": "rect78",
+          "kind": "rect",
+          "x": 370.8429,
+          "y": 388.4293,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_ENV_Release_Rate",
+          "id": "rect93",
+          "kind": "rect",
+          "x": 454.1973,
+          "y": 388.4293,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_Channel_Pressure_Sensitivity",
+          "id": "rect106",
+          "kind": "rect",
+          "x": 537.5518,
+          "y": 388.4293,
+          "w": 29.0,
+          "h": 5.718
+        }
+      ],
+      "travel": {
+        "SB_Part_Level": [
+          204.2905,
+          390.2988,
+          232.9774,
+          569.1738
+        ],
+        "SB_Velocity_Sensitivity": [
+          287.645,
+          390.2988,
+          316.3319,
+          569.1738
+        ],
+        "SB_ENV_Attack_Rate": [
+          370.9994,
+          390.2988,
+          399.6863,
+          569.1738
+        ],
+        "SB_ENV_Release_Rate": [
+          454.3538,
+          390.2988,
+          483.0407,
+          569.1738
+        ],
+        "SB_Channel_Pressure_Sensitivity": [
+          537.7083,
+          390.2988,
+          566.3952,
+          569.1738
+        ]
+      }
+    },
+    {
+      "name": "pitch",
+      "source": "dive_pitch.svg",
+      "hides_row2": false,
+      "offset": [
+        0.99999,
+        311.25955
+      ],
+      "elements": [
+        {
+          "label": "dive_controls_max_outline",
+          "id": "rect11",
+          "kind": "rect",
+          "x": 2.0,
+          "y": 312.2595,
+          "w": 775.4852,
+          "h": 361.9102
+        },
+        {
+          "label": "T_Shift_Course",
+          "id": "text109",
+          "kind": "text",
+          "x": 192.4765,
+          "y": 595.9411,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Shift_Fine",
+          "id": "text120",
+          "kind": "text",
+          "x": 278.8465,
+          "y": 595.9411,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Bend_Range",
+          "id": "text132",
+          "kind": "text",
+          "x": 355.2451,
+          "y": 595.9411,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Detune_Depth",
+          "id": "text143",
+          "kind": "text",
+          "x": 437.8675,
+          "y": 595.9411,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Polyphonic_Pressure_Sensitivity",
+          "id": "text154",
+          "kind": "text",
+          "x": 527.6579,
+          "y": 595.9411,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "SB_Shift_Course",
+          "id": "g9",
+          "kind": "g",
+          "x": 215.6284,
+          "y": 375.8798,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g118",
+          "kind": "g",
+          "x": 215.6284,
+          "y": 390.3856,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "SB_Shift_Fine",
+          "id": "g8",
+          "kind": "g",
+          "x": 291.3914,
+          "y": 375.8798,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g129",
+          "kind": "g",
+          "x": 291.3914,
+          "y": 390.3856,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "SB_Bend_Range",
+          "id": "g7",
+          "kind": "g",
+          "x": 373.3244,
+          "y": 375.8798,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g141",
+          "kind": "g",
+          "x": 373.3244,
+          "y": 390.3856,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "SB_Detune_Depth",
+          "id": "g6",
+          "kind": "g",
+          "x": 458.2617,
+          "y": 375.8798,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g152",
+          "kind": "g",
+          "x": 458.2617,
+          "y": 390.3856,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "SB_Polyphonic_Pressure_Sensitivity",
+          "id": "g5",
+          "kind": "g",
+          "x": 542.9643,
+          "y": 375.8798,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g163",
+          "kind": "g",
+          "x": 542.9643,
+          "y": 390.3856,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "ST_Shift_Course",
+          "id": "rect119",
+          "kind": "rect",
+          "x": 215.4719,
+          "y": 387.3689,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_Shift_Fine",
+          "id": "rect130",
+          "kind": "rect",
+          "x": 291.2348,
+          "y": 387.3689,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_Bend_Range",
+          "id": "rect142",
+          "kind": "rect",
+          "x": 373.1679,
+          "y": 387.3689,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_Detune_Depth",
+          "id": "rect153",
+          "kind": "rect",
+          "x": 458.1052,
+          "y": 387.3689,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_Polyphonic_Pressure_Sensitivity",
+          "id": "rect164",
+          "kind": "rect",
+          "x": 542.8078,
+          "y": 387.3689,
+          "w": 29.0,
+          "h": 5.718
+        }
+      ],
+      "travel": {
+        "SB_Shift_Course": [
+          215.6284,
+          390.3856,
+          244.3153,
+          569.2606
+        ],
+        "SB_Shift_Fine": [
+          291.3914,
+          390.3856,
+          320.0783,
+          569.2606
+        ],
+        "SB_Bend_Range": [
+          373.3244,
+          390.3856,
+          402.0113,
+          569.2606
+        ],
+        "SB_Detune_Depth": [
+          458.2617,
+          390.3856,
+          486.9486,
+          569.2606
+        ],
+        "SB_Polyphonic_Pressure_Sensitivity": [
+          542.9643,
+          390.3856,
+          571.6512,
+          569.2606
+        ]
+      }
+    },
+    {
+      "name": "lfo",
+      "source": "dive_LFO.svg",
+      "hides_row2": false,
+      "offset": [
+        0.99999,
+        311.25955
+      ],
+      "elements": [
+        {
+          "label": "dive_controls_max_outline",
+          "id": "rect11",
+          "kind": "rect",
+          "x": 2.0,
+          "y": 312.2595,
+          "w": 775.4852,
+          "h": 361.9102
+        },
+        {
+          "label": "T_Polyphonic_Pressure_Sensitivity",
+          "id": "text281",
+          "kind": "text",
+          "x": 642.5621,
+          "y": 590.9158,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Channel_Pressure_Sensitivity",
+          "id": "text268",
+          "kind": "text",
+          "x": 552.0291,
+          "y": 590.9158,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Manual_Rise_Time",
+          "id": "text256",
+          "kind": "text",
+          "x": 478.5453,
+          "y": 590.9158,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Manual_Depth",
+          "id": "text227",
+          "kind": "text",
+          "x": 401.7761,
+          "y": 590.9158,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Auto_Rise_Time",
+          "id": "text216",
+          "kind": "text",
+          "x": 328.3805,
+          "y": 590.9158,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Auto_Delay_Time",
+          "id": "text205",
+          "kind": "text",
+          "x": 246.0924,
+          "y": 590.9158,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_Auto_Depth",
+          "id": "text194",
+          "kind": "text",
+          "x": 162.3105,
+          "y": 590.9158,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "T_LFO_Rate",
+          "id": "text183",
+          "kind": "text",
+          "x": 90.4225,
+          "y": 590.9158,
+          "w": 0.0,
+          "h": 0.0
+        },
+        {
+          "label": "SB_Polyphonic_Pressure_Sensitivity",
+          "id": "g19",
+          "kind": "g",
+          "x": 651.3504,
+          "y": 370.8544,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g18",
+          "kind": "g",
+          "x": 651.3504,
+          "y": 385.3603,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "path290",
+          "id": "path290",
+          "kind": "path",
+          "x": 651.3504,
+          "y": 564.2353,
+          "w": 28.6869,
+          "h": 0.0
+        },
+        {
+          "label": "slider_path",
+          "id": "rect290",
+          "kind": "rect",
+          "x": 661.6939,
+          "y": 370.8544,
+          "w": 8.0,
+          "h": 206.7601
+        },
+        {
+          "label": "SB_Channel_Pressure_Sensitivity",
+          "id": "g41",
+          "kind": "g",
+          "x": 572.8725,
+          "y": 370.8544,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g40",
+          "kind": "g",
+          "x": 572.8725,
+          "y": 385.3603,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "path290",
+          "id": "path40",
+          "kind": "path",
+          "x": 572.8725,
+          "y": 564.2353,
+          "w": 28.6869,
+          "h": 0.0
+        },
+        {
+          "label": "slider_path",
+          "id": "rect40",
+          "kind": "rect",
+          "x": 583.216,
+          "y": 370.8544,
+          "w": 8.0,
+          "h": 206.7601
+        },
+        {
+          "label": "SB_Manual_Rise_Time",
+          "id": "g52",
+          "kind": "g",
+          "x": 490.8641,
+          "y": 370.8544,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g51",
+          "kind": "g",
+          "x": 490.8641,
+          "y": 385.3603,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "path290",
+          "id": "path51",
+          "kind": "path",
+          "x": 490.8641,
+          "y": 564.2353,
+          "w": 28.6869,
+          "h": 0.0
+        },
+        {
+          "label": "slider_path",
+          "id": "rect51",
+          "kind": "rect",
+          "x": 501.2076,
+          "y": 370.8544,
+          "w": 8.0,
+          "h": 206.7601
+        },
+        {
+          "label": "SB_Manual_Depth",
+          "id": "g63",
+          "kind": "g",
+          "x": 415.7818,
+          "y": 370.8544,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g62",
+          "kind": "g",
+          "x": 415.7818,
+          "y": 385.3603,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "path290",
+          "id": "path62",
+          "kind": "path",
+          "x": 415.7818,
+          "y": 564.2353,
+          "w": 28.6869,
+          "h": 0.0
+        },
+        {
+          "label": "slider_path",
+          "id": "rect62",
+          "kind": "rect",
+          "x": 426.1252,
+          "y": 370.8544,
+          "w": 8.0,
+          "h": 206.7601
+        },
+        {
+          "label": "SB_Auto_Rise_Time",
+          "id": "g86",
+          "kind": "g",
+          "x": 340.6773,
+          "y": 370.8544,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g85",
+          "kind": "g",
+          "x": 340.6773,
+          "y": 385.3603,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "path290",
+          "id": "path85",
+          "kind": "path",
+          "x": 340.6773,
+          "y": 564.2353,
+          "w": 28.6869,
+          "h": 0.0
+        },
+        {
+          "label": "slider_path",
+          "id": "rect85",
+          "kind": "rect",
+          "x": 351.0208,
+          "y": 370.8544,
+          "w": 8.0,
+          "h": 206.7601
+        },
+        {
+          "label": "SB_Auto_Delay_Time",
+          "id": "g97",
+          "kind": "g",
+          "x": 262.8416,
+          "y": 370.8544,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g96",
+          "kind": "g",
+          "x": 262.8416,
+          "y": 385.3603,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "path290",
+          "id": "path96",
+          "kind": "path",
+          "x": 262.8416,
+          "y": 564.2353,
+          "w": 28.6869,
+          "h": 0.0
+        },
+        {
+          "label": "slider_path",
+          "id": "rect96",
+          "kind": "rect",
+          "x": 273.1851,
+          "y": 370.8544,
+          "w": 8.0,
+          "h": 206.7601
+        },
+        {
+          "label": "SB_Auto_Depth",
+          "id": "g108",
+          "kind": "g",
+          "x": 179.8349,
+          "y": 370.8544,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g107",
+          "kind": "g",
+          "x": 179.8349,
+          "y": 385.3603,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "path290",
+          "id": "path107",
+          "kind": "path",
+          "x": 179.8349,
+          "y": 564.2353,
+          "w": 28.6869,
+          "h": 0.0
+        },
+        {
+          "label": "slider_path",
+          "id": "rect108",
+          "kind": "rect",
+          "x": 190.1784,
+          "y": 370.8544,
+          "w": 8.0,
+          "h": 206.7601
+        },
+        {
+          "label": "SB_LFO_Rate",
+          "id": "g119",
+          "kind": "g",
+          "x": 102.0682,
+          "y": 370.8544,
+          "w": 28.6869,
+          "h": 206.7601
+        },
+        {
+          "label": "slider_lines",
+          "id": "g118",
+          "kind": "g",
+          "x": 102.0682,
+          "y": 385.3603,
+          "w": 28.6869,
+          "h": 178.875
+        },
+        {
+          "label": "path290",
+          "id": "path118",
+          "kind": "path",
+          "x": 102.0682,
+          "y": 564.2353,
+          "w": 28.6869,
+          "h": 0.0
+        },
+        {
+          "label": "slider_path",
+          "id": "rect118",
+          "kind": "rect",
+          "x": 112.4116,
+          "y": 370.8544,
+          "w": 8.0,
+          "h": 206.7601
+        },
+        {
+          "label": "ST_Polyphonic_Pressure_Sensitivity",
+          "id": "rect291",
+          "kind": "rect",
+          "x": 651.1938,
+          "y": 382.5013,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_Channel_Pressure_Sensitivity",
+          "id": "rect41",
+          "kind": "rect",
+          "x": 572.716,
+          "y": 382.5013,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_Manual_Rise_Time",
+          "id": "rect52",
+          "kind": "rect",
+          "x": 490.7076,
+          "y": 382.5013,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_Manual_Depth",
+          "id": "rect63",
+          "kind": "rect",
+          "x": 415.6252,
+          "y": 382.5013,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_Auto_Rise_Time",
+          "id": "rect86",
+          "kind": "rect",
+          "x": 340.5208,
+          "y": 382.5013,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_Auto_Delay_Time",
+          "id": "rect97",
+          "kind": "rect",
+          "x": 262.6851,
+          "y": 382.5013,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_Auto_Depth",
+          "id": "rect109",
+          "kind": "rect",
+          "x": 179.6784,
+          "y": 382.5013,
+          "w": 29.0,
+          "h": 5.718
+        },
+        {
+          "label": "ST_LFO_Rate",
+          "id": "rect119",
+          "kind": "rect",
+          "x": 101.9116,
+          "y": 382.5013,
+          "w": 29.0,
+          "h": 5.718
+        }
+      ],
+      "travel": {
+        "SB_Polyphonic_Pressure_Sensitivity": [
+          651.3504,
+          385.3603,
+          680.0373,
+          564.2353
+        ],
+        "SB_Channel_Pressure_Sensitivity": [
+          572.8725,
+          385.3603,
+          601.5594,
+          564.2353
+        ],
+        "SB_Manual_Rise_Time": [
+          490.8641,
+          385.3603,
+          519.551,
+          564.2353
+        ],
+        "SB_Manual_Depth": [
+          415.7818,
+          385.3603,
+          444.4686,
+          564.2353
+        ],
+        "SB_Auto_Rise_Time": [
+          340.6773,
+          385.3603,
+          369.3642,
+          564.2353
+        ],
+        "SB_Auto_Delay_Time": [
+          262.8416,
+          385.3603,
+          291.5285,
+          564.2353
+        ],
+        "SB_Auto_Depth": [
+          179.8349,
+          385.3603,
+          208.5218,
+          564.2353
+        ],
+        "SB_LFO_Rate": [
+          102.0682,
+          385.3603,
+          130.7551,
+          564.2353
+        ]
+      }
+    }
+  ]
+}

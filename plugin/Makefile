@@ -66,12 +66,15 @@ ttl: dpf/utils/lv2_ttl_generator
 		&& echo "  LV2 manifest declares the UI" \
 		|| echo "  WARNING: LV2 manifest has no UI entry"
 
-# Everything in generated/ is a build product: the panel geometry and artwork come from the
-# Inkscape SVG, the LCD character set from MatrixSans.  Neither is checked in, so a fresh
-# clone rebuilds them rather than inheriting a stale copy.
-GENERATED = generated/panel_geometry.h generated/panel_svg.h \
-            generated/panel_background.h generated/dive_pages.h \
-            generated/u110_cgrom.h
+# The exported artwork IS CHECKED IN, which is deliberate.  The panel is lettered in a
+# font that cannot be redistributed (CLONING.md), so a clone has to be able to build the
+# panel we ship without owning that font -- and without Inkscape or rsvg-convert either.
+# Only someone CHANGING the artwork needs any of them.
+#
+# tools/artwork.sh decides whether an export is needed by HASHING the inputs, because
+# make cannot: git does not preserve modification times, so on a fresh clone a timestamp
+# rule fires at random -- and when it fires without the font installed, Inkscape
+# substitutes silently and the build replaces our panel with one set in Noto Sans.
 
 # The DIVE drawer's content is one Inkscape file per tab; a change to any of them
 # re-exports everything, because they are placed relative to the panel.
@@ -80,21 +83,14 @@ PANEL_SVG = ../resources/graphics/overall_panel_inkscape.svg
 DIVE_SVG  = $(filter-out %dive_panel_inkscape.svg,\
               $(wildcard ../resources/graphics/dive_*.svg))
 
-generated: $(GENERATED)
+generated:
+	@tools/artwork.sh
 
-# panel_export.py needs Inkscape to flatten text to paths and rsvg-convert to render the
-# artwork's raster layer -- nanosvg can draw neither.  Both are regeneration tools, not
-# runtime ones: what ships is the flattened SVG and the pre-rendered PNG, embedded.
-# GROUPED target (&:), not an ordinary multi-target rule.  With "a b c:" make treats the
-# recipe as producing ONE of them per invocation and, under -j, cheerfully runs it once
-# per target in parallel -- three copies of the exporter writing and deleting each other's
-# temporary files.  "&:" says one run makes all four, which is the truth.
-generated/panel_geometry.h generated/panel_svg.h generated/panel_background.h generated/dive_pages.h &: $(PANEL_SVG) $(DIVE_SVG) tools/panel_export.py
-	@tools/panel_export.py --text-to-path --background
-
-generated/u110_cgrom.h: ../tools/make_lcd_cgrom.py
-	@mkdir -p generated
-	@python3 ../tools/make_lcd_cgrom.py --header generated/u110_cgrom.h
+# Re-export whatever the hashes say.  For when the exporter's OUTPUT needs to change
+# without its input having changed -- a new header field, say -- and for checking that a
+# clean export still matches what is checked in.
+artwork:
+	@tools/artwork.sh --force
 
 # The DPF targets link libu110core.a but make has no rule tying them to it, so a change
 # in the core or the shim would build a fresh archive and quietly relink NOTHING -- the
@@ -152,7 +148,7 @@ win:
 dpf/utils/lv2_ttl_generator:
 	@$(MAKE) --no-print-directory -C dpf/utils/lv2-ttl-generator > /dev/null
 
-.PHONY: core generated ttl patches
+.PHONY: core generated artwork ttl patches
 
 # A minimal LV2 host, so what gets tested is what a user loads.  Building the core and
 # null-testing it proves the emulation; this proves the PLUGIN -- DPF, the resampler at the

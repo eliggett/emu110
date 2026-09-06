@@ -16,7 +16,8 @@ plugin/
                compile here unchanged.  See PLUGIN-PLAN.md section 3.
   src/         GPL-3.0-or-later.  The plugin: DPF glue, panel UI, patch management
   tools/       build-time and test tools (panel export, null test, CGROM baking)
-  generated/   build products.  Not tracked, never edited by hand.
+  generated/   build products, never edited by hand.  The exported ARTWORK is
+               tracked (CLONING.md says why); everything else here is not.
   build/       object files and the built plugin bundles.  Not tracked.
 ```
 
@@ -607,8 +608,13 @@ The plugin's streaming now matches a single continuous offline pass at **correla
 
 ## The panel
 
-`make` builds it; everything in `generated/` is a build product and none of it is checked
-in, so a fresh clone regenerates from the Inkscape artwork and the font.
+`make` builds it. Everything in `generated/` is a build product, but the exported artwork
+is **checked in** and the rest is not: the panel is lettered in a font that cannot be
+redistributed, so a clone has to be able to build the panel we ship without owning it.
+`tools/artwork.sh` re-exports only when the hash of an Inkscape file actually changes --
+hash rather than timestamp, because git does not preserve modification times and a
+timestamp rule fires at random on a fresh clone. `make artwork` forces it. The full
+reasoning, and the font's licence position, is in CLONING.md section 1.
 
 **No coordinate is typed into the UI source.** Every rectangle comes from
 `generated/panel_geometry.h`, which `panel_export.py` composes out of the SVG. Move a
