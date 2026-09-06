@@ -902,6 +902,59 @@ the bounds of the element labelled `logo_text_as_path` as `kLogo`, so moving the
 Inkscape moves the button. If that label ever goes away the rect exports as zero and the UI
 reads that as "no About button" rather than putting one in the corner of the panel.
 
+## RESET, and the two boot options that are the machine's own
+
+The RESET button opens a four-entry palette in the same style as the About box: reboot,
+reboot into the service test menu, initialise the memory and reboot, and cancel. Hover
+highlights an entry, a click anywhere else or Escape closes it, and `VOLTAIRE_RESET=1`
+opens it at startup for a headless screenshot.
+
+**Two of the three are not plugin features.** The firmware reads the key matrix exactly
+once while it boots and branches on what it finds (`analysis/ROM-ANALYSIS.md` section 8.5):
+
+| held at power-on | what the machine does |
+|---|---|
+| DEC + INC | the eleven-entry service test menu |
+| PART + EDIT | the `Mem Initialized` copy loop -- the factory patch set, back from EPROM |
+
+So there is no test mode to write and no memory to erase. There is a pair of keys to hold
+down while the machine comes up, and the whole implementation is holding them for long
+enough. The menu's entries say which keys they stand in for, because that is what they are.
+
+**How long is long enough was measured, not guessed.** The look at the key matrix lands
+between **3.62 s and 3.68 s** of emulated time after `reset()`: release at 3.6 s and the
+machine boots normally, release at 4.0 s and it comes up in the test menu. The keys are
+held for **4.5 s** and let go. Holding them longer is harmless -- nothing scans them again
+until the play screen is up, and a 6 s hold tested identically -- so the margin is free.
+
+The reboot runs from `run()`, like the patch selector and the DIVE editor, because a boot
+is five and a half seconds of *emulated* time and the audio thread is the only one that
+has any. The user watches the machine's own boot screen scroll past on the LCD, which is
+exactly what a U-110 does. `U110Core::reset()` allocates nothing on the way through --
+checked with `tools/rt_audit.c` rather than assumed, since that is the one thing that would
+make this the wrong thread for it.
+
+A reboot cancels whatever the other state machines were half way through: their held
+buttons, their pending requests, the queued DIVE writes, and `m_machineUp`, so the drawer
+waits for the play screen again instead of reading RAM out of a machine that is still
+booting. The borrowed `SETUP:MIDI:EXCLUSIVE` switch is handed back there and then rather
+than by a timer that would fire into a half-booted machine -- except on an initialise,
+where putting one byte back into memory the user just asked to have wiped would be the one
+thing they did not ask for.
+
+The destructive entry is coloured as such and says what it costs on its own line, so it
+cannot be picked out of a list of four by muscle memory. It is also recoverable in the way
+that matters in a DAW: the project on disk still holds the old NVRAM until the host saves
+again, so reopening the project brings the patches back.
+
+**CARTRIDGE MANAGER opens the self check**, which is the same page the LCD opens and
+deliberately the same code path -- what the cards are and whether the machine can see them
+is one question with one answer, and two pages that drifted apart would be worse than one
+page reached two ways. Which also means the button feedback deliberately does *not* light
+CARTRIDGE MANAGER while that page is up: it may equally have come from the LCD, and
+lighting a button that was not pressed is the bug that was fixed when the About box was
+added.
+
 ## Session state
 
 What persists is the **NVRAM, and only the NVRAM** — the work/setup RAM at `0x2100`–`0x3FFF`

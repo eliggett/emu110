@@ -333,6 +333,7 @@ enum States
     kStateDiveWrite,
     kStateDiag,
     kStateDiagReq,
+    kStateReboot,
     kStateCount
 };
 
@@ -606,6 +607,15 @@ protected:
             state.hints = kStateIsOnlyForDSP;
             state.defaultValue = "";
             break;
+
+        case kStateReboot:
+            state.key = "reboot";
+            state.label = "Restart the machine";
+            // The RESET button.  Nothing to save: a session records what the memory HOLDS,
+            // and how the machine last came up is not part of that.
+            state.hints = kStateIsOnlyForDSP;
+            state.defaultValue = "";
+            break;
         }
     }
 
@@ -720,6 +730,19 @@ protected:
             return;
         }
 
+        if (std::strcmp(key, "reboot") == 0)
+        {
+            // Left for run() to carry out, like every other request from the UI: a reboot
+            // is five and a half seconds of EMULATED time, which only run() has.
+            if (std::strcmp(value, "warm") == 0)
+                m_rebootRequest.store(kRebootWarm, std::memory_order_relaxed);
+            else if (std::strcmp(value, "test") == 0)
+                m_rebootRequest.store(kRebootTest, std::memory_order_relaxed);
+            else if (std::strcmp(value, "init") == 0)
+                m_rebootRequest.store(kRebootInit, std::memory_order_relaxed);
+            return;
+        }
+
         if (std::strcmp(key, "diagreq") == 0)
         {
             // Composed HERE, on the UI's thread, and only handed over as a finished
@@ -823,7 +846,9 @@ protected:
         const uint32_t coreFrames = m_resampler[0].inputsFor(frames);
 
         // Before the render, so a button edge lands at the start of the block it belongs
-        // to rather than at the start of the next one.
+        // to rather than at the start of the next one.  The reboot goes first because it
+        // cancels the other three.
+        tickReboot(coreFrames);
         tickPatchSelect(coreFrames);
         tickToneSelect(coreFrames);
         tickDive(coreFrames);
@@ -1472,6 +1497,99 @@ private:
         }
         *p = '\0';
         updateStateValue("divevals", m_diveText);
+    }
+
+    // ---- the RESET button -----------------------------------------------------------
+    //
+    // Three ways of starting the machine again, and all three are the HARDWARE'S, not the
+    // plugin's.  The firmware reads the key matrix once during boot and branches on what
+    // it finds (ROM-ANALYSIS.md section 8.5): DEC+INC gives the service test menu, and
+    // PART+EDIT runs the "Mem Initialized" copy loop that puts the factory patches back.
+    // So there is no test mode to write and no memory to erase -- there is only a pair of
+    // keys to hold down while the machine comes up.
+    //
+    // It runs from run() for the same reason the patch selector does: a boot is five and a
+    // half seconds of EMULATED time and the audio thread is the only one that has any.
+    // The machine plays its own boot screen while it happens, which is what a U-110 does.
+    // reset() allocates nothing -- checked with tools/rt_audit.c, not assumed.
+
+    enum { kRebootNone = 0, kRebootWarm, kRebootTest, kRebootInit };
+
+    /// How long the boot keys stay down, in emulated frames.
+    ///
+    /// MEASURED, not guessed.  The firmware's one look at the key matrix lands between
+    /// 3.62 s and 3.68 s after reset -- release at 3.6 s and the machine boots normally,
+    /// release at 4.0 s and it comes up in the test menu.  4.5 s clears that with room to
+    /// spare.  Holding longer is harmless (nothing scans the keys again until the play
+    /// screen is up, and 6 s tested identically), so the margin costs nothing.
+    static constexpr uint32_t kBootHoldFrames = voltaire::kCoreSampleRate * 4500 / 1000;
+
+    void tickReboot(uint32_t coreFrames)
+    {
+        const int want = m_rebootRequest.exchange(kRebootNone, std::memory_order_relaxed);
+        if (want != kRebootNone && m_romsLoaded)
+        {
+            // Whatever the other state machines were half way through pressing is over:
+            // the machine they were talking to is about to stop existing.  Their requests
+            // go too, so a click that arrived a moment before the reboot does not get
+            // carried out against the machine that replaces it.
+            m_patchStep = PatchStep::Idle;
+            m_patchRequest.store(-1, std::memory_order_relaxed);
+            m_toneRequest.store(-1, std::memory_order_relaxed);
+            m_diveBusy = false;
+            m_diveJobReady.store(false, std::memory_order_relaxed);
+            m_nameWritePending.store(false, std::memory_order_relaxed);
+            m_diveWrTail.store(m_diveWrHead.load(std::memory_order_acquire),
+                               std::memory_order_release);
+            // The drawer waits for the play screen again; until then RAM would read as
+            // whatever a booting machine happens to have there.
+            m_machineUp = false;
+
+            // The borrowed SETUP:MIDI:EXCLUSIVE switch, handed back now rather than by a
+            // timer that would fire into a machine mid-boot.  Not on an initialise: that
+            // memory is being wiped on purpose and putting one byte of it back would be
+            // the one thing the user did not ask for.
+            if (m_rxRestoreWait != 0)
+            {
+                if (want != kRebootInit)
+                    m_core.writeMem(kRxSwitchAddr, m_rxSaved);
+                m_rxRestoreWait = 0;
+            }
+
+            for (int b = 0; b < voltaire::kButtonCount; b ++)
+                m_autoButtons[b] = false;
+            if (want == kRebootTest)
+            {
+                m_autoButtons[voltaire::kButtonDec] = true;
+                m_autoButtons[voltaire::kButtonIncEnter] = true;
+            }
+            else if (want == kRebootInit)
+            {
+                m_autoButtons[voltaire::kButtonPartJump] = true;
+                m_autoButtons[voltaire::kButtonEditExit] = true;
+            }
+            // The keys have to be down BEFORE the reset, because the firmware's look at
+            // them is part of the boot it is about to start.
+            for (int b = 0; b < voltaire::kButtonCount; b ++)
+                applyButton(voltaire::Button(b));
+
+            m_core.reset();
+            m_rebootHold = want == kRebootWarm ? 0 : kBootHoldFrames;
+        }
+
+        if (m_rebootHold == 0)
+            return;
+        if (m_rebootHold > coreFrames)
+        {
+            m_rebootHold -= coreFrames;
+            return;
+        }
+        m_rebootHold = 0;
+        for (int b = 0; b < voltaire::kButtonCount; b ++)
+        {
+            m_autoButtons[b] = false;
+            applyButton(voltaire::Button(b));
+        }
     }
 
     // ---- picking a patch by name ----------------------------------------------------
@@ -2218,6 +2336,8 @@ private:
     uint8_t m_cardIdSeen[voltaire::kNumCardSlots] = { 0 };
     uint32_t m_rxRestoreWait = 0;
     uint8_t m_rxSaved = 0;
+    std::atomic<int> m_rebootRequest { kRebootNone };
+    uint32_t m_rebootHold = 0;
     std::atomic<int> m_patchRequest { -1 };
     PatchStep m_patchStep = PatchStep::Idle;
     uint32_t m_patchWait = 0;

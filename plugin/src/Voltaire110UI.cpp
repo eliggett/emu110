@@ -93,6 +93,10 @@ public:
         if (std::getenv("VOLTAIRE_ABOUT") != nullptr)
             m_menu = Menu::About;
 
+        // And for the RESET menu.
+        if (std::getenv("VOLTAIRE_RESET") != nullptr)
+            m_menu = Menu::Reset;
+
         // The credits are one string with newlines in it, because that is what a text
         // file is; split once here rather than on every frame.
         for (const char *p = voltaire::kAboutText; *p != '\0'; )
@@ -433,6 +437,8 @@ protected:
             drawDiagMenu();
         else if (m_menu == Menu::About)
             drawAboutBox();
+        else if (m_menu == Menu::Reset)
+            drawResetMenu();
         else
             drawDiveTooltip();
 
@@ -473,6 +479,22 @@ protected:
                 m_menu = Menu::None;
                 repaint();
             }
+            return true;
+        }
+
+        if (m_menu == Menu::Reset)
+        {
+            if (!ev.press)
+                return true;
+            const int hit = resetHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            m_menu = Menu::None;
+            m_menuHover = -1;
+            // Cancel is an entry rather than only a click in the dark, because a menu
+            // whose only way out is "click somewhere that does nothing" reads as a menu
+            // you are stuck in.  Its arg is null, and so is a click that missed.
+            if (hit >= 0 && kResetItems[hit].arg != nullptr)
+                setState("reboot", kResetItems[hit].arg);
+            repaint();
             return true;
         }
 
@@ -634,6 +656,25 @@ protected:
                         repaint();
                         return true;
                     }
+                    if (i == voltaire::panel::BUT_RESET)
+                    {
+                        m_menu = Menu::Reset;
+                        m_menuHover = -1;
+                        repaint();
+                        return true;
+                    }
+                    if (i == voltaire::panel::BUT_CART)
+                    {
+                        // The same page the LCD opens, and deliberately the same code:
+                        // what the cards are and whether the machine can see them is one
+                        // question with one answer, and two pages that drifted apart
+                        // would be worse than one page reached two ways.
+                        askForDiag();
+                        m_menu = Menu::Diag;
+                        m_diagScroll = 0;
+                        repaint();
+                        return true;
+                    }
                     if (i == voltaire::panel::BUT_DIVE)
                     {
                         m_diveOpen = !m_diveOpen;
@@ -685,6 +726,13 @@ protected:
         if (m_menu == Menu::Value)
         {
             const int hit = valueHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            if (hit != m_menuHover)
+            { m_menuHover = hit; repaint(); }
+            return true;
+        }
+        if (m_menu == Menu::Reset)
+        {
+            const int hit = resetHit(float(ev.pos.getX()), float(ev.pos.getY()));
             if (hit != m_menuHover)
             { m_menuHover = hit; repaint(); }
             return true;
@@ -1241,6 +1289,133 @@ private:
         text(x + rowH * 0.6f, y + h - rowH * 0.8f,
              m_aboutLast > 0 ? "wheel scrolls   |   click anywhere to close"
                              : "click anywhere to close", nullptr);
+    }
+
+    // ---- the RESET button's menu ----------------------------------------------------
+    //
+    // Three ways to start the machine again and a way out, in the same palette the About
+    // box uses.  Two of the three are the HARDWARE'S own boot options rather than
+    // anything the plugin invented -- the firmware looks at the key matrix once while it
+    // comes up and branches on what is held (ROM-ANALYSIS.md section 8.5) -- which is why
+    // each entry says which keys it is standing in for.  Somebody who knows the machine
+    // should recognise what this menu is doing, and somebody who does not should be able
+    // to learn it from here.
+
+    struct ResetItem
+    {
+        const char *title;
+        const char *detail;
+        const char *note;       ///< a second line, or null
+        const char *arg;        ///< the "reboot" state value, or null for Cancel
+        bool destructive;
+    };
+
+    static constexpr ResetItem kResetItems[] = {
+        { "Reboot",
+          "The machine restarts and keeps its memory: a U-110 switched off and on.",
+          nullptr, "warm", false },
+        { "Reboot into the service test menu",
+          "DEC and INC held at power-on. RAM, LCD, keys, battery, MIDI, wave ROM,",
+          "sound and output checks. LEFT+RIGHT and DEC+INC step through them.",
+          "test", false },
+        { "Initialise the memory and reboot",
+          "PART and EDIT held at power-on: the machine's own factory reset.",
+          "THE 64 USER PATCHES GO BACK TO THE FACTORY SET -- reopening the saved "
+          "project is what brings them back.",
+          "init", true },
+        { "Cancel",
+          "Leave the machine running.",
+          nullptr, nullptr, false },
+    };
+    static constexpr int kResetCount = int(sizeof(kResetItems) / sizeof(kResetItems[0]));
+
+    /// Where the box and its entries are, in WINDOW pixels -- the overlays are drawn
+    /// outside the panel transform, so a mouse position needs no conversion.
+    struct ResetLayout { float x, y, w, h, rowH, top, cell; };
+
+    ResetLayout resetLayout() const
+    {
+        ResetLayout L;
+        L.rowH = diagRowH();
+        L.cell = L.rowH * 3.4f;
+        const float pad = std::floor(float(getHeight()) * 0.04f) + 4.0f;
+        L.w = float(getWidth()) - pad * 2.0f;
+        const float wmax = L.rowH * 50.0f;
+        if (L.w > wmax)
+            L.w = wmax;
+        L.h = L.rowH * 3.6f + L.cell * float(kResetCount);
+        L.x = std::floor((float(getWidth()) - L.w) * 0.5f);
+        L.y = std::floor((float(getHeight()) - L.h) * 0.5f);
+        if (L.y < pad)
+            L.y = pad;
+        L.top = L.y + L.rowH * 2.4f;
+        return L;
+    }
+
+    int resetHit(float px, float py) const
+    {
+        const ResetLayout L = resetLayout();
+        if (px < L.x || px > L.x + L.w || py < L.top)
+            return -1;
+        const int i = int((py - L.top) / L.cell);
+        return i >= 0 && i < kResetCount ? i : -1;
+    }
+
+    void drawResetMenu()
+    {
+        const ResetLayout L = resetLayout();
+
+        beginPath();
+        rect(0, 0, getWidth(), getHeight());
+        fillColor(Color(0, 0, 0, 0.72f));
+        fill();
+
+        beginPath();
+        roundedRect(L.x, L.y, L.w, L.h, L.rowH * 0.4f);
+        fillColor(Color(22, 24, 28));
+        fill();
+        strokeColor(Color(96, 102, 112));
+        strokeWidth(1.0f);
+        stroke();
+
+        fontFace(m_font);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        fontSize(L.rowH * 0.95f);
+        fillColor(Color(255, 180, 90));
+        text(L.x + L.rowH * 0.7f, L.y + L.rowH * 1.2f, "RESET THE MACHINE", nullptr);
+
+        for (int i = 0; i < kResetCount; i ++)
+        {
+            const ResetItem &it = kResetItems[i];
+            const float top = L.top + float(i) * L.cell;
+
+            if (i == m_menuHover)
+            {
+                beginPath();
+                roundedRect(L.x + L.rowH * 0.4f, top, L.w - L.rowH * 0.8f,
+                            L.cell - L.rowH * 0.2f, L.rowH * 0.25f);
+                fillColor(Color(0, 163, 224, 0.30f));
+                fill();
+            }
+
+            fontSize(L.rowH * 0.9f);
+            // The one entry that throws something away is coloured as such, so it cannot
+            // be picked out of a list of four by muscle memory alone.
+            fillColor(it.destructive ? Color(255, 150, 120) : Color(225, 228, 232));
+            text(L.x + L.rowH * 0.9f, top + L.rowH * 0.85f, it.title, nullptr);
+
+            fontSize(L.rowH * 0.72f);
+            fillColor(Color(168, 174, 184));
+            text(L.x + L.rowH * 1.3f, top + L.rowH * 1.95f, it.detail, nullptr);
+            if (it.note != nullptr)
+                text(L.x + L.rowH * 1.3f, top + L.rowH * 2.8f, it.note, nullptr);
+        }
+
+        fontSize(L.rowH * 0.72f);
+        fillColor(Color(140, 146, 156));
+        text(L.x + L.rowH * 0.7f, L.y + L.h - L.rowH * 0.7f,
+             "the machine takes about five seconds to come up   |   Escape closes this",
+             nullptr);
     }
 
     void drawPatchMenu()
@@ -2121,9 +2296,10 @@ private:
         editParameter(index, false);
     }
 
-    /// Panel button -> plugin parameter.  The artwork carries controls the machine does
-    /// not have (FILTER, RESET, PATCH, TONE, DIVE, CARTRIDGE MANAGER); those are drawn and
-    /// clickable but do nothing yet, which is what was asked for.
+    /// Panel button -> plugin parameter.  Only the six the machine actually has are
+    /// here.  The others the artwork carries -- FILTER, RESET, PATCH, TONE, DIVE,
+    /// CARTRIDGE MANAGER -- are the plugin's own and are handled where they are clicked,
+    /// above; a switch the hardware has no contact for has no parameter to drive.
     static int mapButton(int id)
     {
         switch (id)
@@ -2868,13 +3044,16 @@ private:
     {
         // A latching button shows its state, not a momentary press.  So does the PATCH
         // button while its menu is up.
-        // Only the two that a panel button opens.  The self-check and the About box are
+        // Only the ones a panel button opens.  The self-check and the About box are
         // reached from the LCD and the logo, and lighting PATCH for those said the wrong
-        // thing about where they came from.
-        if (m_menu == Menu::Patch || m_menu == Menu::Tone)
+        // thing about where they came from -- as would lighting CARTRIDGE MANAGER for a
+        // self-check that came from the LCD, which is why Diag is not in this list.
+        const int lit = m_menu == Menu::Patch ? voltaire::panel::BUT_PATCH_MENU
+                      : m_menu == Menu::Tone  ? voltaire::panel::BUT_TONE
+                      : m_menu == Menu::Reset ? voltaire::panel::BUT_RESET : -1;
+        if (lit >= 0)
         {
-            const auto &b = voltaire::panel::kButton[m_menu == Menu::Tone
-                    ? voltaire::panel::BUT_TONE : voltaire::panel::BUT_PATCH_MENU];
+            const auto &b = voltaire::panel::kButton[lit];
             beginPath();
             roundedRect(b.x, b.y, b.w, b.h, b.h * 0.15f);
             fillColor(Color(255, 255, 255, 0.22f));
@@ -2958,7 +3137,7 @@ private:
     uint32_t m_cgramIn = 0;
     uint8_t m_leds = 0, m_cursorPos = 0, m_cursorFlags = 0;
 
-    enum class Menu { None, Patch, Tone, Value, Diag, About };
+    enum class Menu { None, Patch, Tone, Value, Diag, About, Reset };
     Menu m_menu = Menu::None;
 
     // The About text as lines, split once at startup; m_aboutRows is those lines wrapped
