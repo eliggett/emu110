@@ -15,7 +15,8 @@ plugin/
   compat/      BSD-3-Clause.  Our drop-in emu.h -- lets MAME's device sources
                compile here unchanged.  See PLUGIN-PLAN.md section 3.
   src/         GPL-3.0-or-later.  The plugin: DPF glue, panel UI, patch management
-  tools/       build-time and test tools (panel export, null test, CGROM baking)
+  tools/       build-time and test tools (panel export, null test, CGROM baking,
+               the About text)
   generated/   build products, never edited by hand.  The exported ARTWORK is
                tracked (CLONING.md says why); everything else here is not.
   build/       object files and the built plugin bundles.  Not tracked.
@@ -868,6 +869,38 @@ The text is composed on the UI's thread in `setState("diagreq")` and only handed
 `run()` as a finished string -- `run()` may not allocate, and this walks directories and
 builds kilobytes. `VOLTAIRE_DIAG=1` opens it at startup so it can be screenshotted
 headlessly.
+
+## The About box, and where its text lives
+
+Clicking the logo opens the credits. It is the same kind of page as the self check above --
+drawn over the panel, dismissed by a click anywhere, scrolled with the wheel -- for the same
+reasons, and `VOLTAIRE_ABOUT=1` opens it at startup so it too can be screenshotted.
+
+The text is **`resources/about.txt` and nowhere else**. `tools/make_about.py` turns that
+file into `generated/about_text.h` at build time and the UI compiles it in. Two things
+follow from compiling it rather than reading it:
+
+- A plugin bundle is copied wherever the host wants it, so at runtime there is no
+  directory to look the file up in. The credits have to be *inside* the binary.
+- A build cannot ship without them. For a GPL plugin that links BSD sources and names a
+  third party's font, that is the whole point of having credits at all.
+
+Unlike the artwork it is **not checked in and needs no hash stamp**: making it takes
+`python3` and a text file, which every clone has, so a plain timestamp rule is right here.
+The artwork is the opposite case -- it needs Inkscape and a font that cannot be
+redistributed -- which is why that one is committed instead. Same directory, opposite
+answers, for a reason worth being able to state.
+
+The file's format is that there isn't one: `#` in the first column is a comment, a blank
+line is a blank line, and every other line appears as typed. Long lines wrap to the window,
+and a line's leading spaces are repeated on every row it wraps onto, so an indented list
+still reads as a list at any width. That last part is why the renderer does its own
+wrapping instead of calling NanoVG's `textBox()`, which strips leading whitespace.
+
+The logo's hit box comes out of the artwork like every other one: `panel_export.py` exports
+the bounds of the element labelled `logo_text_as_path` as `kLogo`, so moving the logo in
+Inkscape moves the button. If that label ever goes away the rect exports as zero and the UI
+reads that as "no About button" rather than putting one in the corner of the panel.
 
 ## Session state
 

@@ -44,6 +44,7 @@ Elements are recognised by their Inkscape label:
     ST_<name>     a slider tap      -> the draggable part, at its zero position
     LCD_<name>    an LCD-style field-> hit/draw rect
     L_<name>      a section frame   -> rounded rect with a gap for T_<name>
+    logo_text_as_path               -> the logo's bounds; it is the About box's button
 
 Usage:
     plugin/tools/panel_export.py                 # extract
@@ -620,6 +621,20 @@ def emit_header(path, elements, pivots, canvas, svg_rel, pages=(), row2_h=0.0):
             e = lcds[label]
             A(f'inline constexpr Rect k{c_ident(label).title().replace("_","")} = '
               f'{{ {e.x:.4f}f, {e.y:.4f}f, {e.w:.4f}f, {e.h:.4f}f }};')
+    A('')
+
+    # The logo doubles as the About box's button, so its bounds have to come from the
+    # artwork like every other hit box -- the lettering is a path whose extent nothing
+    # outside Inkscape knows.  A zero rect if the label is gone, which the UI reads as
+    # "no About button" rather than putting one in the top-left corner.
+    logo = by_label.get('logo_text_as_path')
+    A("// The logo, which is also the About box's button.  Zero if the artwork has no")
+    A('// element labelled logo_text_as_path.')
+    if logo is not None:
+        A(f'inline constexpr Rect kLogo = '
+          f'{{ {logo.x:.4f}f, {logo.y:.4f}f, {logo.w:.4f}f, {logo.h:.4f}f }};')
+    else:
+        A('inline constexpr Rect kLogo = { 0.0f, 0.0f, 0.0f, 0.0f };')
     A('')
 
     for name, piv in sorted(pivots.items()):

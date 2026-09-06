@@ -25,8 +25,10 @@
 #include "panel_background.h"
 #include "dive_pages.h"
 #include "u110_cgrom.h"
+#include "about_text.h"
 #include "DiveParams.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cctype>
@@ -86,6 +88,21 @@ public:
         // that can only be reached by clicking cannot be looked at under Xvfb.
         if (std::getenv("VOLTAIRE_DIAG") != nullptr)
             m_menu = Menu::Diag;
+
+        // Same again for the About box, which is likewise only reachable by clicking.
+        if (std::getenv("VOLTAIRE_ABOUT") != nullptr)
+            m_menu = Menu::About;
+
+        // The credits are one string with newlines in it, because that is what a text
+        // file is; split once here rather than on every frame.
+        for (const char *p = voltaire::kAboutText; *p != '\0'; )
+        {
+            const char *nl = std::strchr(p, '\n');
+            m_aboutLines.emplace_back(p, nl != nullptr ? size_t(nl - p) : std::strlen(p));
+            if (nl == nullptr)
+                break;
+            p = nl + 1;
+        }
 
         // VOLTAIRE_DIVE=<tab> opens the drawer on that tab at startup.  The drawer is
         // otherwise only reachable by clicking, which a headless screenshot cannot do,
@@ -414,6 +431,8 @@ protected:
             drawValueMenu();
         else if (m_menu == Menu::Diag)
             drawDiagMenu();
+        else if (m_menu == Menu::About)
+            drawAboutBox();
         else
             drawDiveTooltip();
 
@@ -447,7 +466,7 @@ protected:
         // click meant to dismiss it cannot also press whatever is underneath.
         // The report is a wall of text with nothing to pick, so any click dismisses it --
         // the wheel is what reads it, and that is taken in onScroll before this.
-        if (m_menu == Menu::Diag)
+        if (m_menu == Menu::Diag || m_menu == Menu::About)
         {
             if (ev.press)
             {
@@ -548,6 +567,19 @@ protected:
         // The LCD is the one thing on the panel that is always visible and never does
             // anything, which makes it the natural place to hang "tell me what is wrong"
             // off -- and the place somebody stares at when nothing is happening.
+            // The logo is the About box's button.  A maker's mark is where anyone
+            // looks for the credits, and it is the one thing on the panel the real
+            // machine never had, so nothing is being taken away to put it there.
+            const auto &lo = voltaire::panel::kLogo;
+            if (lo.w > 0.0f && x >= lo.x && x <= lo.x + lo.w
+                    && y >= lo.y && y <= lo.y + lo.h)
+            {
+                m_menu = Menu::About;
+                m_aboutScroll = 0;
+                repaint();
+                return true;
+            }
+
             const auto &lg = voltaire::panel::kLcdInner;
             if (x >= lg.x && x <= lg.x + lg.w && y >= lg.y && y <= lg.y + lg.h)
             {
@@ -701,6 +733,17 @@ protected:
             const int last = int(m_diagLines.size()) - diagRows();
             if (m_diagScroll > last) m_diagScroll = last;
             if (m_diagScroll < 0)    m_diagScroll = 0;
+            repaint();
+            return true;
+        }
+        if (m_menu == Menu::About)
+        {
+            // Clamped against the LAST wrapped row count, which is a drawing-time
+            // measurement -- the window can be narrower than the text and only the
+            // renderer knows how many rows that made.
+            m_aboutScroll -= int(ev.delta.getY() * 3.0f);
+            if (m_aboutScroll > m_aboutLast) m_aboutScroll = m_aboutLast;
+            if (m_aboutScroll < 0)           m_aboutScroll = 0;
             repaint();
             return true;
         }
@@ -1079,6 +1122,125 @@ private:
         fontSize(rowH * 0.72f);
         fillColor(Color(140, 146, 156));
         text(x + rowH * 0.6f, y + h - rowH * 0.8f, foot, nullptr);
+    }
+
+    /// One line of the About text, wrapped to `w` pixels, keeping its indent on every
+    /// row it takes.
+    ///
+    /// NanoVG has textBox() for this and it is not usable here: it strips leading
+    /// whitespace, which is the one piece of markup resources/about.txt has.  An
+    /// indented line is a list item and has to stay looking like one.
+    void wrapAboutLine(const std::string &src, float w, std::vector<std::string> &out)
+    {
+        const size_t ind = src.find_first_not_of(' ');
+        if (ind == std::string::npos)
+        {
+            out.emplace_back();
+            return;
+        }
+        const std::string pad(ind, ' ');
+        std::string row = pad;
+        bool empty = true;
+        size_t i = ind;
+        while (i < src.size())
+        {
+            size_t sp = src.find(' ', i);
+            if (sp == std::string::npos)
+                sp = src.size();
+            const std::string cand = empty ? row + src.substr(i, sp - i)
+                                           : row + " " + src.substr(i, sp - i);
+            Rectangle<float> b;
+            if (!empty && textBounds(0.0f, 0.0f, cand.c_str(), nullptr, b) > w)
+            {
+                out.push_back(row);
+                row = pad + src.substr(i, sp - i);
+            }
+            else
+                row = cand;
+            empty = false;
+            for (i = sp; i < src.size() && src[i] == ' '; i ++)
+                ;
+        }
+        out.push_back(row);
+    }
+
+    /// The credits, as a page laid over the panel.
+    ///
+    /// The text is resources/about.txt, compiled in by tools/make_about.py -- there is no
+    /// copy of it in this file to fall out of step, and a bundle cannot ship without it.
+    /// Same window-not-dialog reasoning as the self-check above.
+    void drawAboutBox()
+    {
+        const float rowH = diagRowH();
+        const float pad  = std::floor(float(getHeight()) * 0.04f) + 4.0f;
+        // Capped rather than filling the window: a line of prose is unreadable when it
+        // runs the full width of a panel that is three times as wide as it is tall.
+        float w = float(getWidth()) - pad * 2.0f;
+        const float wmax = rowH * 62.0f;
+        if (w > wmax)
+            w = wmax;
+        const float x = std::floor((float(getWidth()) - w) * 0.5f);
+        const float y = pad;
+        const float h = float(getHeight()) - pad * 2.0f;
+
+        beginPath();
+        rect(0, 0, getWidth(), getHeight());
+        fillColor(Color(0, 0, 0, 0.72f));
+        fill();
+
+        beginPath();
+        roundedRect(x, y, w, h, rowH * 0.4f);
+        fillColor(Color(22, 24, 28));
+        fill();
+        strokeColor(Color(96, 102, 112));
+        strokeWidth(1.0f);
+        stroke();
+
+        fontFace(m_font);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        fontSize(rowH * 0.95f);
+        fillColor(Color(0, 163, 224));                   // the logo's own cyan
+        text(x + rowH * 0.6f, y + rowH * 1.1f, "ABOUT VOLTAIRE 110", nullptr);
+
+        const float bodyX = x + rowH * 0.7f;
+        const float bodyW = w - rowH * 1.4f;
+        const float bodyTop = y + rowH * 2.0f;
+        const int rows = std::max(1, int((h - rowH * 3.2f) / rowH));
+
+        // Wrapped at the width it is about to be drawn at, every frame, because that
+        // width changes with the window and the wrap is what decides the row count.
+        fontSize(rowH * 0.78f);
+        m_aboutRows.clear();
+        for (const std::string &ln : m_aboutLines)
+            wrapAboutLine(ln, bodyW, m_aboutRows);
+
+        m_aboutLast = int(m_aboutRows.size()) - rows;
+        if (m_aboutLast < 0)             m_aboutLast = 0;
+        if (m_aboutScroll > m_aboutLast) m_aboutScroll = m_aboutLast;
+        if (m_aboutScroll < 0)           m_aboutScroll = 0;
+
+        save();
+        scissor(x + rowH * 0.5f, bodyTop, w - rowH, float(rows) * rowH);
+        for (int i = 0; i < rows; i ++)
+        {
+            const int li = m_aboutScroll + i;
+            if (li < 0 || size_t(li) >= m_aboutRows.size())
+                break;
+            const std::string &line = m_aboutRows[size_t(li)];
+            if (line.empty())
+                continue;               // NanoVG's text() asserts on an empty string
+            // Indented lines are the file's lists; dimming them is the whole of the
+            // formatting, and it costs the text file no markup to get it.
+            fillColor(line[0] == ' ' ? Color(168, 174, 184) : Color(214, 216, 220));
+            text(bodyX, bodyTop + (float(i) + 0.5f) * rowH, line.c_str(), nullptr);
+        }
+        restore();
+
+        fontSize(rowH * 0.72f);
+        fillColor(Color(140, 146, 156));
+        text(x + rowH * 0.6f, y + h - rowH * 0.8f,
+             m_aboutLast > 0 ? "wheel scrolls   |   click anywhere to close"
+                             : "click anywhere to close", nullptr);
     }
 
     void drawPatchMenu()
@@ -2706,7 +2868,10 @@ private:
     {
         // A latching button shows its state, not a momentary press.  So does the PATCH
         // button while its menu is up.
-        if (m_menu != Menu::None)
+        // Only the two that a panel button opens.  The self-check and the About box are
+        // reached from the LCD and the logo, and lighting PATCH for those said the wrong
+        // thing about where they came from.
+        if (m_menu == Menu::Patch || m_menu == Menu::Tone)
         {
             const auto &b = voltaire::panel::kButton[m_menu == Menu::Tone
                     ? voltaire::panel::BUT_TONE : voltaire::panel::BUT_PATCH_MENU];
@@ -2793,8 +2958,15 @@ private:
     uint32_t m_cgramIn = 0;
     uint8_t m_leds = 0, m_cursorPos = 0, m_cursorFlags = 0;
 
-    enum class Menu { None, Patch, Tone, Value, Diag };
+    enum class Menu { None, Patch, Tone, Value, Diag, About };
     Menu m_menu = Menu::None;
+
+    // The About text as lines, split once at startup; m_aboutRows is those lines wrapped
+    // to the window's current width, which only the renderer can know.
+    std::vector<std::string> m_aboutLines;
+    std::vector<std::string> m_aboutRows;
+    int m_aboutScroll = 0;
+    int m_aboutLast = 0;
 
     // ---- the self-diagnosis, and what the LCD says while the machine is silent.
     /// About two seconds at the UI's idle rate.  Long enough that a host which is simply

@@ -134,6 +134,10 @@ inline constexpr const char *kMeterSvgId[METERID_COUNT] = {
 inline constexpr Rect kLcdOuter = { 184.4372f, 57.0556f, 257.1494f, 62.5776f };
 inline constexpr Rect kLcdInner = { 196.5165f, 62.7724f, 232.9907f, 51.1440f };
 
+// The logo, which is also the About box's button.  Zero if the artwork has no
+// element labelled logo_text_as_path.
+inline constexpr Rect kLogo = { 16.6940f, 12.1532f, 319.8896f, 31.4689f };
+
 // The pointer shape "path39" is drawn by the SVG; rotate it about
 // (cx, cy).  zero_deg is where the artwork already points, so a value of
 // 0.0 needs no rotation at all.

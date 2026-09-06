@@ -1,0 +1,43 @@
+# resources/about.txt -- the text of the plugin's About box, and the only place it lives.
+#
+# Edit this file and rebuild; plugin/tools/make_about.py turns it into a header the UI
+# compiles in, so there is no file to install alongside the plugin and no way for a
+# bundle to arrive without its own credits.
+#
+# Format, such as it is:
+#   * a line starting with '#' in the first column is a comment and is not shown
+#   * a blank line is a blank line
+#   * every other line is shown as written, and wrapped if the window is too narrow
+#     to hold it; leading spaces are kept, so an indented list stays indented
+# There is no markup.  What you type is what appears.
+
+Voltaire 110 is an emulator of the classic Roland U-110 rompler.
+
+The plugin is copyright Elliott H. Liggett.
+
+This plugin is open source (GNU GPL), see https://github.com/eliggett/emu110/ for the source code.
+
+Credits:
+
+LCD font (used indirectly): MatrixSans Screen, from Fried Orange, available here
+    https://github.com/FriedOrange/MatrixSans
+
+MAME: MAME is not part of this plugin, but was used extensively in the development and
+exploration of the U-110 ROM. BSD-licensed sources from MAME are compiled into the
+plugin to emulate its chips:
+
+    src/devices/sound/roland_lp.cpp     the LP PCM sound chip
+    src/devices/cpu/mcs96/mcs96.cpp     the MCS-96 CPU core
+    src/devices/cpu/mcs96/i8x9x.cpp     the 8x9x built on it, which is the U-110's CPU
+    src/devices/video/msm6222b.cpp      the LCD controller
+    src/devices/sound/flt_biquad.cpp    the output filters
+    src/devices/sound/flt_rc.cpp
+
+and, because those sources will not link without them:
+
+    src/devices/cpu/mcs96/mcs96d.cpp    the disassembler the CPU core refers to
+    src/devices/cpu/mcs96/i8x9xd.cpp
+    src/lib/util/strformat.cpp          string formatting and the disassembler interface
+    src/lib/util/disasmintf.cpp
+
+Engineering: Claude Opus 5

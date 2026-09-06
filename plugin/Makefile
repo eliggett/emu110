@@ -83,7 +83,20 @@ PANEL_SVG = ../resources/graphics/overall_panel_inkscape.svg
 DIVE_SVG  = $(filter-out %dive_panel_inkscape.svg,\
               $(wildcard ../resources/graphics/dive_*.svg))
 
-generated:
+# The About box's text is resources/about.txt and nothing else; make_about.py compiles it
+# in.  Unlike the artwork this is NOT checked in and needs no stamp -- it takes python3 and
+# a text file, so every clone can just make it, and a timestamp rule is the right tool for
+# once.  The About box has to work in a bundle a host has copied somewhere we never see,
+# which rules out reading the file at runtime.
+ABOUT_TXT = ../resources/about.txt
+ABOUT_H   = generated/about_text.h
+
+$(ABOUT_H): $(ABOUT_TXT) tools/make_about.py
+	@mkdir -p generated
+	@python3 tools/make_about.py $(ABOUT_TXT) $@
+	@echo "  about text <- $(ABOUT_TXT)"
+
+generated: $(ABOUT_H)
 	@tools/artwork.sh
 
 # Re-export whatever the hashes say.  For when the exporter's OUTPUT needs to change
