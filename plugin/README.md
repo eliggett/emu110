@@ -678,7 +678,13 @@ promptly. There is no refresh rate to compromise over.
 VOLTAIRE_FPS=1 ./bin/Voltaire110      # prints the rate and the cost per redraw
 VOLTAIRE_DIVE=P1 ./bin/Voltaire110    # start with the drawer open on a tab
 VOLTAIRE_MENU=patch ./bin/Voltaire110 # start with a palette open (patch|tone)
+VOLTAIRE_DIAG=1 ./bin/Voltaire110     # start with the self check open
 ```
+
+`VOLTAIRE_TRACE_STATE=1` makes the UI count the panel updates it decodes, which is what
+`tools/clap_check.sh` reads. It counts DECODED panels rather than state messages on
+purpose: the snapshot a host hands over when the UI opens carries no panel, so a count of
+even one can only have arrived by being pushed.
 
 `VOLTAIRE_DIVE` takes a tab name as the artwork spells it (`set`, `common`, `P1`..`P6`,
 `basic`, `level`, `pitch`, `LFO`) and is there so a page can be screenshotted headlessly
@@ -731,13 +737,28 @@ on account of it, and is left that way on purpose — an audit tuned until it pa
 being an audit. Not zero, and worth knowing. Continuous data must not go this way -- a VU meter at 30 Hz
 would be 60 allocations a second, forever, which is why meters stay on control ports.
 
-### `[!]` A patch to DPF
+### `[!]` Two patches to DPF, for one hole in two backends
 
-`updateStateValue()` is implemented for LV2, CLAP, AU and Carla, but **not for the JACK
-standalone or VST3** -- those pass `nullptr` for the callback. The standalone is the daily
-development loop, so `dpf/distrho/src/DistrhoPluginJACK.cpp` carries a small local patch: a
-fixed 16-slot ring the audio thread writes without allocating or blocking, drained by the UI
-thread in idle. It is the same shape as DPF's other backends and could go upstream.
+`updateStateValue()` -- the DSP->UI channel -- is implemented for LV2, AU and Carla, and
+**not for the JACK standalone or VST3**, which pass `nullptr` for the callback.
+`dpf/distrho/src/DistrhoPluginJACK.cpp` therefore carries a local patch: a fixed 16-slot
+ring the audio thread writes without allocating or blocking, drained by the UI thread in
+idle.
+
+**CLAP looked implemented and was not.** `PluginCLAP::updateState()` was
+`{ return true; }` -- it took every push, dropped it, and answered success. The wiring
+around it was all present and correct, which is why it read as working: the callback is
+passed, `setStateFromPlugin()` exists, and the UI is handed a full snapshot of state when
+its window opens. Nothing ever pushed again. The plugin loads, the artwork draws, the
+buttons work, and the LCD is blank forever.
+
+That is a worse failure than the JACK one, because a blank display looks like a plugin
+that has not found its ROMs. It cost a Windows debugging session to find, and it was never
+a Windows bug -- the Linux CLAP in `bin/` had it too, and had had it all along, because
+nothing in the suite had ever opened a UI under CLAP. `0003-clap-dsp-to-ui-state.patch`
+gives CLAP the same ring, and `make selftest` now ends by running a real CLAP host
+(`tools/clap_selftest.c`) against the built plugin and failing if the UI decodes no panel
+updates. With the patch reversed it reports zero; with it in, 32.
 
 **VST3 still has no path**, so its panel will not update. That target is already documented
 as built-but-untested.
@@ -746,6 +767,46 @@ The patch lives in `plugin/patches/` and `make` applies it to the submodule, ide
 before building. DPF is not forked -- a fresh clone gets upstream DPF and the patch on top,
 and if upstream ever moves under it the build says so rather than silently producing a
 plugin whose panel does not update.
+
+## The self check, and what the LCD says when there is no machine
+
+A plugin that cannot find its ROMs still loads. The window opens, the artwork draws, the
+buttons move -- and nothing else happens, because `run()` returns early and the panel is
+never sent. Every diagnosis of that goes to `stderr`, and a DAW on Windows has no terminal
+attached, so in the case where the message matters most there is nobody listening.
+
+So the plugin diagnoses itself and reports **into its own window**, which is the one place
+a user is certain to be looking.
+
+- Before the machine's first word, the LCD shows a stand-in in its own dot-matrix font:
+  `NO ROM FILE`, `BAD ROM FILE`, `NO WAVE ROM`, `NO DSP ANSWER`, over `CLICK FOR INFO`.
+  The trigger is **whether a panel blob has ever decoded**, not what the LCD contains: an
+  all-spaces display is something the firmware really does draw, so the content cannot
+  tell the two apart. Once the machine speaks, the glass belongs to the firmware.
+- Clicking the LCD opens the report: every directory searched and *why* it was searched
+  (which environment variable put it there), a listing of what is actually in each one
+  with sizes, the exact filenames wanted, what was loaded, and the live state -- host
+  sample rate, and how many audio blocks the host has processed.
+
+That last number answers a question nothing else could: **the host may never call
+`run()`**. A muted track, a disabled instrument slot, nothing routed through it -- the
+machine cannot start no matter how correct the ROMs are, and the report says so in those
+words rather than blaming the files.
+
+The report also separates *missing* from *present but wrong*, which is most of its value
+in practice. `fileSize()` exists for exactly this: a dump one byte short, a `.zip` nobody
+expanded, a zero-byte file from a failed copy, and a genuinely absent file all look
+identical to code that only asks whether the read succeeded, and every one of them needs
+something different done about it. A wrong-sized file is called out by name and size.
+
+It is drawn as a page over the panel rather than as a native dialog. A message box would
+mean one implementation per platform for the one feature whose entire job is to work when
+something else did not, and it would block the host's UI thread while it was up.
+
+The text is composed on the UI's thread in `setState("diagreq")` and only handed to
+`run()` as a finished string -- `run()` may not allocate, and this walks directories and
+builds kilobytes. `VOLTAIRE_DIAG=1` opens it at startup so it can be screenshotted
+headlessly.
 
 ## Session state
 

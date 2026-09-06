@@ -81,6 +81,12 @@ public:
         if (const char *m = std::getenv("VOLTAIRE_MENU"))
             m_menu = sameName(m, "tone") ? Menu::Tone : Menu::Patch;
 
+        // VOLTAIRE_DIAG opens the self-check at startup, for the same reason: it is the
+        // one page whose whole job is to be readable when something is wrong, and a page
+        // that can only be reached by clicking cannot be looked at under Xvfb.
+        if (std::getenv("VOLTAIRE_DIAG") != nullptr)
+            m_menu = Menu::Diag;
+
         // VOLTAIRE_DIVE=<tab> opens the drawer on that tab at startup.  The drawer is
         // otherwise only reachable by clicking, which a headless screenshot cannot do,
         // and a page whose layout nobody can look at is a page nobody checked.
@@ -161,6 +167,29 @@ protected:
             return;
         }
 
+        // Why the machine is or is not running.  First line is "status: <word>" for the
+        // LCD to act on; the rest is the text a person reads.
+        if (std::strcmp(key, "diag") == 0)
+        {
+            m_diagLines.clear();
+            m_diagStatus.clear();
+            for (const char *p = value; *p != '\0'; )
+            {
+                const char *const nl = std::strchr(p, '\n');
+                std::string line(p, nl != nullptr ? size_t(nl - p) : std::strlen(p));
+                if (m_diagLines.empty() && m_diagStatus.empty()
+                        && line.compare(0, 8, "status: ") == 0)
+                    m_diagStatus = line.substr(8);
+                else
+                    m_diagLines.push_back(std::move(line));
+                if (nl == nullptr)
+                    break;
+                p = nl + 1;
+            }
+            m_dirty = true;
+            return;
+        }
+
         if (std::strcmp(key, "patches") == 0)
         {
             m_patchNames.clear();
@@ -213,6 +242,20 @@ protected:
         if (!decodeHex(value, reinterpret_cast<uint8_t *>(&blob), sizeof(blob)))
             return;
 
+        // The machine has spoken at least once, which is what retires the placeholder on
+        // the glass.  Nothing else can stand in for this: an all-spaces LCD is a thing the
+        // firmware really does draw, so the CONTENT cannot be used to tell the two apart.
+        m_panelSeen = true;
+        // VOLTAIRE_TRACE_STATE counts panels that actually DECODED, which is the only
+        // proof that the DSP -> UI push is alive: the snapshot a host hands over when the
+        // UI opens carries no panel at all, so a count of even one can only have been
+        // pushed.  tools/clap_selftest.c is what reads this.
+        static const bool trace = std::getenv("VOLTAIRE_TRACE_STATE") != nullptr;
+        if (trace)
+        {
+            static int seen = 0;
+            d_stdout("ui panel #%d", ++ seen);
+        }
         std::memcpy(m_lcd, blob.lcd, sizeof(m_lcd));
         std::memcpy(m_cgram, blob.cgram, sizeof(m_cgram));
         m_leds = blob.leds;
@@ -285,6 +328,16 @@ protected:
         }
         else if (!m_caretOn)
             m_caretOn = true;
+
+        // Same reason as the DIVE read below: a constructor has nowhere to send a
+        // setState() yet, so the first ask happens on the first idle.
+        if (!m_diagAsked)
+        {
+            m_diagAsked = true;
+            askForDiag();
+        }
+        else if (m_diagStatus.empty() && m_diagWait < kDiagWaitIdles && ++ m_diagWait == kDiagWaitIdles)
+            m_dirty = true;          // give up waiting and say so on the glass
 
         // Asking is deferred to here rather than done at the click, because setState()
         // is a message to the DSP and a constructor has nowhere to send one yet.
@@ -359,6 +412,8 @@ protected:
             drawToneMenu();
         else if (m_menu == Menu::Value)
             drawValueMenu();
+        else if (m_menu == Menu::Diag)
+            drawDiagMenu();
         else
             drawDiveTooltip();
 
@@ -390,6 +445,18 @@ protected:
     {
         // A menu is modal while it is up: it takes the click wherever it lands, so a
         // click meant to dismiss it cannot also press whatever is underneath.
+        // The report is a wall of text with nothing to pick, so any click dismisses it --
+        // the wheel is what reads it, and that is taken in onScroll before this.
+        if (m_menu == Menu::Diag)
+        {
+            if (ev.press)
+            {
+                m_menu = Menu::None;
+                repaint();
+            }
+            return true;
+        }
+
         if (m_menu == Menu::Patch)
         {
             if (!ev.press)
@@ -477,6 +544,21 @@ protected:
             // in a plugin does; Escape is how you throw it away.
             commitPatchName();
         }
+
+        // The LCD is the one thing on the panel that is always visible and never does
+            // anything, which makes it the natural place to hang "tell me what is wrong"
+            // off -- and the place somebody stares at when nothing is happening.
+            const auto &lg = voltaire::panel::kLcdInner;
+            if (x >= lg.x && x <= lg.x + lg.w && y >= lg.y && y <= lg.y + lg.h)
+            {
+                // Asked again rather than shown from memory: the usual way this ends is
+                // somebody copying the ROMs in and clicking to see whether that did it.
+                askForDiag();
+                m_menu = Menu::Diag;
+                m_diagScroll = 0;
+                repaint();
+                return true;
+            }
 
         const int tab = diveTabHit(x, y);
             if (tab >= 0)
@@ -613,6 +695,15 @@ protected:
 
     bool onScroll(const ScrollEvent &ev) override
     {
+        if (m_menu == Menu::Diag)
+        {
+            m_diagScroll -= int(ev.delta.getY() * 3.0f);
+            const int last = int(m_diagLines.size()) - diagRows();
+            if (m_diagScroll > last) m_diagScroll = last;
+            if (m_diagScroll < 0)    m_diagScroll = 0;
+            repaint();
+            return true;
+        }
         if (m_menu != Menu::None)
             return true;
 
@@ -891,6 +982,103 @@ private:
             fillColor(current ? Color(190, 255, 190) : Color(214, 216, 220));
             text(x + m.fontSize * 0.4f, y + m.rowH * 0.5f, item, nullptr);
         }
+    }
+
+    /// A line of the report, and how many of them fit.  The wheel needs the second one
+    /// to know where the end is.
+    float diagRowH() const
+    {
+        const float h = float(getHeight()) / 34.0f;
+        return h < 9.0f ? 9.0f : (h > 18.0f ? 18.0f : h);
+    }
+
+    int diagRows() const
+    {
+        const float rowH = diagRowH();
+        const float pad = std::floor(float(getHeight()) * 0.04f) + 4.0f;
+        const int n = int((float(getHeight()) - pad * 2.0f - rowH * 3.0f) / rowH);
+        return n < 1 ? 1 : n;
+    }
+
+    /// The report, as a page laid over the panel.
+    ///
+    /// A window rather than a message box on purpose.  A native dialog would mean one
+    /// piece of code per platform for the one feature whose entire job is to work when
+    /// something else did not, and it would block the host's UI thread while it was up.
+    void drawDiagMenu()
+    {
+        const float rowH = diagRowH();
+        const float pad  = std::floor(float(getHeight()) * 0.04f) + 4.0f;
+        const float x = pad, y = pad;
+        const float w = float(getWidth()) - pad * 2.0f;
+        const float h = float(getHeight()) - pad * 2.0f;
+
+        beginPath();
+        rect(0, 0, getWidth(), getHeight());
+        fillColor(Color(0, 0, 0, 0.72f));
+        fill();
+
+        beginPath();
+        roundedRect(x, y, w, h, rowH * 0.4f);
+        fillColor(Color(22, 24, 28));
+        fill();
+        strokeColor(Color(96, 102, 112));
+        strokeWidth(1.0f);
+        stroke();
+
+        fontFace(m_font);
+        fontSize(rowH * 0.95f);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        fillColor(m_diagStatus == "ok" ? Color(150, 255, 150) : Color(255, 180, 90));
+        text(x + rowH * 0.6f, y + rowH * 1.1f, "VOLTAIRE 110 -- SELF CHECK", nullptr);
+
+        const int rows = diagRows();
+        const float bodyTop = y + rowH * 2.0f;
+
+        if (m_diagLines.empty())
+        {
+            fontSize(rowH * 0.8f);
+            fillColor(Color(214, 216, 220));
+            text(x + rowH * 0.7f, bodyTop + rowH,
+                 "The DSP side has not answered. If this does not clear in a second or",
+                 nullptr);
+            text(x + rowH * 0.7f, bodyTop + rowH * 2.0f,
+                 "two, the host has loaded the UI but is not running the plugin.", nullptr);
+        }
+        else
+        {
+            save();
+            scissor(x + rowH * 0.5f, bodyTop, w - rowH, float(rows) * rowH);
+            fontSize(rowH * 0.78f);
+            for (int i = 0; i < rows; i ++)
+            {
+                const int li = m_diagScroll + i;
+                if (li < 0 || size_t(li) >= m_diagLines.size())
+                    break;
+                const std::string &line = m_diagLines[size_t(li)];
+                // The report uses blank lines to separate its sections, and NanoVG's
+                // text() asserts on an empty string rather than drawing nothing.
+                if (line.empty())
+                    continue;
+                // Headings are the lines that start hard left; the listings under them are
+                // indented.  Colouring on that alone means the report can grow new sections
+                // without this having to be told about them.
+                const bool heading = !line.empty() && line[0] != ' ';
+                fillColor(heading ? Color(235, 235, 235) : Color(168, 174, 184));
+                text(x + rowH * 0.7f, bodyTop + (float(i) + 0.5f) * rowH, line.c_str(),
+                     nullptr);
+            }
+            restore();
+        }
+
+        char foot[160];
+        std::snprintf(foot, sizeof(foot),
+                      "wheel scrolls   |   click anywhere to close   |   line %u of %u",
+                      unsigned(m_diagLines.empty() ? 0 : m_diagScroll + 1),
+                      unsigned(m_diagLines.size()));
+        fontSize(rowH * 0.72f);
+        fillColor(Color(140, 146, 156));
+        text(x + rowH * 0.6f, y + h - rowH * 0.8f, foot, nullptr);
     }
 
     void drawPatchMenu()
@@ -2325,6 +2513,41 @@ private:
                      float((c >> 24) & 0xff) / 255.0f * opacity);
     }
 
+    /// One line of the 16x2, centred, in the display's own character codes.
+    static void lcdCentre(uint8_t *row, const char *text)
+    {
+        const size_t n = std::strlen(text);
+        const size_t at = n >= 16 ? 0 : (16 - n) / 2;
+        for (size_t i = 0; i < n && at + i < 16; i ++)
+            row[at + i] = uint8_t(text[i]);
+    }
+
+    /// What to show instead of the LCD, or nullptr to show the LCD.
+    ///
+    /// Only ever used before the machine's first word.  Once a panel blob has arrived the
+    /// display belongs to the firmware, whatever it decides to put there.
+    const char *lcdStandIn() const
+    {
+        if (m_panelSeen)
+            return nullptr;
+        if (m_diagStatus == "no-program-rom")  return "NO ROM FILE";
+        if (m_diagStatus == "bad-program-rom") return "BAD ROM FILE";
+        if (m_diagStatus == "no-wave-rom")     return "NO WAVE ROM";
+        // "ok" means the ROMs loaded and the panel is merely on its way, which is a
+        // fraction of a second and not worth flashing a message about.
+        if (m_diagStatus == "ok" || m_diagStatus == "not-loaded")
+            return nullptr;
+        if (m_diagStatus.empty())
+            return m_diagWait >= kDiagWaitIdles ? "NO DSP ANSWER" : nullptr;
+        return "MACHINE STOPPED";
+    }
+
+    void askForDiag()
+    {
+        m_diagWait = 0;
+        setState("diagreq", "1");
+    }
+
     /// The LCD, built from character codes.  Codes 0x00-0x0F come from the firmware's own
     /// CGRAM and change while it runs; everything else comes from the baked table.
     void drawLcd()
@@ -2344,10 +2567,23 @@ private:
         const float dotH = g.h / (2.0f * 9.0f - 1.0f);
         const float dw = dotW * 0.86f, dh = dotH * 0.86f;
 
+        // What goes on the glass when the machine has never sent anything.  A blank LCD
+        // with a working panel around it looks like a plugin that is fine and quiet; it
+        // is not, and the only place a DAW user can be told so is here.
+        uint8_t stand_in[32];
+        const uint8_t *cells = m_lcd;
+        if (const char *const msg = lcdStandIn())
+        {
+            std::memset(stand_in, ' ', sizeof(stand_in));
+            lcdCentre(stand_in, msg);
+            lcdCentre(stand_in + 16, "CLICK FOR INFO");
+            cells = stand_in;
+        }
+
         for (int cell = 0; cell < 32; cell ++)
         {
             const int col = cell % 16, row = cell / 16;
-            const uint8_t code = m_lcd[cell];
+            const uint8_t code = cells[cell];
             const unsigned char *glyph = nullptr;
             if (code >= 0x20 && code < 0x80)
                 glyph = kU110Cgrom[code - 0x20];
@@ -2528,8 +2764,19 @@ private:
     uint32_t m_cgramIn = 0;
     uint8_t m_leds = 0, m_cursorPos = 0, m_cursorFlags = 0;
 
-    enum class Menu { None, Patch, Tone, Value };
+    enum class Menu { None, Patch, Tone, Value, Diag };
     Menu m_menu = Menu::None;
+
+    // ---- the self-diagnosis, and what the LCD says while the machine is silent.
+    /// About two seconds at the UI's idle rate.  Long enough that a host which is simply
+    /// slow to start is not accused of anything.
+    static constexpr int kDiagWaitIdles = 120;
+    std::vector<std::string> m_diagLines;
+    std::string m_diagStatus;
+    bool m_panelSeen = false;
+    bool m_diagAsked = false;
+    int  m_diagWait = 0;
+    int  m_diagScroll = 0;
     int m_valueCtl = -1;          ///< which DIVE control the value list belongs to
 
     uint8_t m_patch = 0;

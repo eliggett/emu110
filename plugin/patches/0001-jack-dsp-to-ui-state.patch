@@ -1,5 +1,5 @@
 diff --git a/distrho/src/DistrhoPluginJACK.cpp b/distrho/src/DistrhoPluginJACK.cpp
-index 0539807..4e5cffb 100644
+index 0539807..446a911 100644
 --- a/distrho/src/DistrhoPluginJACK.cpp
 +++ b/distrho/src/DistrhoPluginJACK.cpp
 @@ -136,7 +136,12 @@ class PluginJack
@@ -34,16 +34,20 @@ index 0539807..4e5cffb 100644
          fUI.exec_idle();
      }
  #endif
-@@ -589,6 +605,36 @@ private:
+@@ -589,6 +605,40 @@ private:
      UIExporter     fUI;
  #endif
  
 +#if DISTRHO_PLUGIN_WANT_STATE && DISTRHO_PLUGIN_HAS_UI
-+    // DSP -> UI state, which this backend did not implement (LV2, CLAP, AU and Carla do).
++    // DSP -> UI state, which this backend did not implement.  Neither did CLAP, whose
++    // updateState() was a stub that answered true and threw the value away; only LV2, AU
++    // and Carla ever carried it.
 +    // A fixed ring, so the audio thread neither allocates nor blocks; the UI thread drains
 +    // it in idle.
++    // The value is sized for a state that is a whole list rather than a scalar: a
++    // truncated push is worse than a dropped one, because the UI cannot tell it was short.
 +    static constexpr uint32_t kStateQueueSize = 16;
-+    struct StateMessage { char key[64]; char value[4096]; };
++    struct StateMessage { char key[64]; char value[16384]; };
 +    StateMessage fStateQueue[kStateQueueSize];
 +    volatile uint32_t fStateQueueWrite = 0, fStateQueueRead = 0;
 +

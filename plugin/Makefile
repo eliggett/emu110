@@ -36,10 +36,12 @@ all:
 	@$(MAKE) --no-print-directory $(TARGETS)
 	@$(MAKE) --no-print-directory ttl
 
-# DPF is a submodule and we do not fork it, so the one change we need travels as a patch
-# applied at build time.  DPF implements updateStateValue -- the DSP -> UI channel -- for
-# LV2, CLAP, AU and Carla but not for the JACK standalone, so without this the standalone's
-# panel stays blank.  Idempotent: --check tells us whether it is already in.
+# DPF is a submodule and we do not fork it, so the changes we need travel as patches
+# applied at build time.  Two of them are the same bug in two places: updateStateValue --
+# the DSP -> UI channel -- was missing from the JACK standalone and, less obviously, from
+# CLAP, whose implementation was a stub that answered true and dropped the value.  Without
+# them the panel is drawn but never updated.  tools/clap_check.sh is what now notices.
+# Idempotent: --check tells us whether they are already in.
 patches:
 	@for p in patches/*.patch; do \
 		if git -C dpf apply --check --reverse "$(CURDIR)/$$p" 2>/dev/null; then \
@@ -175,6 +177,16 @@ selftest: all
 		bin/$(NAME).lv2/$(NAME)_dsp.so \
 		"https://github.com/eliggett/emu110/voltaire110" build/lv2_tone.wav 0 tone \
 		2>&1 | grep -E "^tone:"
+	@echo
+	@$(MAKE) --no-print-directory clapcheck
+
+# The DSP -> UI channel under CLAP, checked with a real CLAP host (tools/clap_selftest.c).
+# Its own target as well as part of selftest, because it is the one check that needs a
+# display and is therefore the one that gets skipped.
+clapcheck:
+	@tools/clap_check.sh bin/$(NAME).clap
+
+.PHONY: clapcheck
 
 # Real-time safety.  The audio callback has a hard deadline and what matters is the worst
 # case, so anything that can block -- malloc, free, locks, getenv -- must not be reachable

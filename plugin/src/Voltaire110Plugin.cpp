@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstdarg>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -33,44 +34,81 @@ START_NAMESPACE_DISTRHO
 
 namespace {
 
+/// One place the plugin looks, and what put it on the list.
+///
+/// The origin is carried only so the report the UI can show says WHY a directory is being
+/// searched.  "It looked in C:/Users/me/AppData/Local/u110/roms" is a fact; "it looked
+/// there because that is what %LOCALAPPDATA% expands to" is the half that tells you what
+/// to fix when the answer is not the directory you filled.
+struct RomDir
+{
+    std::string path;
+    std::string origin;
+};
+
 /// Where ROM images are looked for, in order (PLUGIN-PLAN.md section 9).  ROMs are DATA,
 /// not configuration, so they do not live in ~/.config.  Nothing is bundled with the
 /// plugin: the user supplies their own dumps.
-std::vector<std::string> romSearchPath()
+std::vector<RomDir> romSearchDirs()
 {
-    std::vector<std::string> bases;
+    std::vector<RomDir> bases;
+    const auto fromEnv = [&bases](const char *var, const char *tail)
+    {
+        const char *const v = std::getenv(var);
+        if (v == nullptr || v[0] == '\0')
+            return;
+        bases.push_back(RomDir { std::string(v) + tail, std::string(var) });
+    };
+
     // The override is the same everywhere, so a note telling someone where to put their
     // dumps does not have to ask which OS they are on first.
-    if (const char *env = std::getenv("U110_DATA_DIR"))
-        bases.push_back(std::string(env) + "/roms");
+    fromEnv("U110_DATA_DIR", "/roms");
    #ifdef _WIN32
     // Forward slashes are fine: the Win32 file APIs accept them, and keeping one separator
     // in this file means the paths a log line prints look the same on every platform.
-    if (const char *local = std::getenv("LOCALAPPDATA"))
-        bases.push_back(std::string(local) + "/u110/roms");
-    if (const char *shared = std::getenv("PROGRAMDATA"))
-        bases.push_back(std::string(shared) + "/u110/roms");
+    fromEnv("LOCALAPPDATA", "/u110/roms");
+    fromEnv("PROGRAMDATA", "/u110/roms");
    #else
-    if (const char *xdg = std::getenv("XDG_DATA_HOME"))
-        bases.push_back(std::string(xdg) + "/u110/roms");
-    if (const char *home = std::getenv("HOME"))
-        bases.push_back(std::string(home) + "/.local/share/u110/roms");
-    bases.push_back("/usr/share/u110/roms");
+    fromEnv("XDG_DATA_HOME", "/u110/roms");
+    fromEnv("HOME", "/.local/share/u110/roms");
+    bases.push_back(RomDir { "/usr/share/u110/roms", "built in" });
    #endif
     // Development convenience: the project's own roms/ directory.
-    if (const char *env = std::getenv("U110_SOURCE_ROMS"))
-        bases.push_back(env);
+    fromEnv("U110_SOURCE_ROMS", "");
 
     // Section 9 puts cards in roms/cards/, but a flat roms/ is what most people end up
     // with, so both are searched and neither is required.
-    std::vector<std::string> out;
-    for (const std::string &b : bases)
+    std::vector<RomDir> out;
+    for (const RomDir &b : bases)
     {
         out.push_back(b);
-        out.push_back(b + "/cards");
+        out.push_back(RomDir { b.path + "/cards", b.origin });
     }
     return out;
 }
+
+std::vector<std::string> romSearchPath()
+{
+    std::vector<std::string> out;
+    for (const RomDir &d : romSearchDirs())
+        out.push_back(d.path);
+    return out;
+}
+
+/// The names the program ROM may go by, and how big it has to be.
+const char *const kPgmNames[] = {
+    "roland_u110_pgm_(15179960).bin", "roland_u110_pgm_15179960.bin",
+    "U110v203.BIN", "u110_v203.bin", "U110v200.BIN", "u110_v200.bin",
+};
+constexpr size_t kNumPgmNames = sizeof(kPgmNames) / sizeof(kPgmNames[0]);
+constexpr size_t kPgmBytes    = 0x10000;
+
+/// Caps on the report: files listed per directory, and how long the whole thing may be.
+/// The message that carries it to the UI is a fixed buffer, so something has to give --
+/// and a cut made here, which can say it was cut, beats one made in the transport, which
+/// cannot.
+constexpr unsigned kDiagMaxEntries = 60;
+constexpr size_t   kDiagMaxChars   = 15000;
 
 std::vector<uint8_t> readFile(const std::string &path)
 {
@@ -89,6 +127,20 @@ std::vector<uint8_t> readFile(const std::string &path)
     }
     std::fclose(f);
     return data;
+}
+
+/// How big a file is, or -1 if there is no such file.
+///
+/// Telling "not there" apart from "there but the wrong size" is the whole point.  A dump
+/// that is a byte short, a .zip nobody expanded, a 0-byte file left by a failed copy --
+/// all of them look exactly like a missing ROM to code that only asks whether the read
+/// worked, and all of them need a different thing done about them.
+long fileSize(const std::string &path)
+{
+    struct stat st;
+    if (::stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+        return -1;
+    return long(st.st_size);
 }
 
 std::vector<uint8_t> findRom(const char *const *names, size_t count, size_t wantSize,
@@ -279,6 +331,8 @@ enum States
     kStateDiveVals,
     kStateDiveRead,
     kStateDiveWrite,
+    kStateDiag,
+    kStateDiagReq,
     kStateCount
 };
 
@@ -534,6 +588,24 @@ protected:
             state.hints = kStateIsOnlyForDSP;
             state.defaultValue = "";
             break;
+        case kStateDiag:
+            state.key = "diag";
+            state.label = "Why the machine is or is not running";
+            // The self-diagnosis, in words, for the UI to show when the LCD is clicked.
+            // Not saved: it describes THIS machine's filesystem, and a session carried to
+            // another one would be reporting somebody else's directories.
+            state.hints = kStateIsOnlyForUI;
+            state.defaultValue = "";
+            break;
+        case kStateDiagReq:
+            state.key = "diagreq";
+            state.label = "Ask for the report";
+            // The UI asking.  Composed on demand rather than pushed continuously: it is
+            // some kilobytes of directory listing and nothing looks at it until somebody
+            // clicks.
+            state.hints = kStateIsOnlyForDSP;
+            state.defaultValue = "";
+            break;
         }
     }
 
@@ -546,6 +618,11 @@ protected:
             return String(m_patchesText);
         if (std::strcmp(key, "tones") == 0)
             return String(m_tonesText);
+        // Answered here as well as pushed, because a UI opening into a host that is not
+        // running audio yet gets its whole first picture through getState() -- and a
+        // machine that never started is exactly the case this report is for.
+        if (std::strcmp(key, "diag") == 0)
+            return String(composeDiag().c_str());
         if (std::strcmp(key, "nvram") != 0)
             return String();
 
@@ -643,6 +720,16 @@ protected:
             return;
         }
 
+        if (std::strcmp(key, "diagreq") == 0)
+        {
+            // Composed HERE, on the UI's thread, and only handed over as a finished
+            // string: run() may not allocate, and this one allocates freely -- it walks
+            // directories and builds some kilobytes of text.
+            m_diagOut = composeDiag();
+            m_diagPending.store(true, std::memory_order_release);
+            return;
+        }
+
         if (std::strcmp(key, "settings") == 0)
         {
             setSettingsState(value);
@@ -711,6 +798,19 @@ protected:
     {
         float *const outL = outputs[0];
         float *const outR = outputs[1];
+
+        // Counted before anything can return early, because "the host has never called
+        // this" is itself one of the answers the report has to be able to give.
+        m_runCount.fetch_add(1, std::memory_order_relaxed);
+
+        // Above the ROM check on purpose: the report matters MOST when the machine did
+        // not start, and everything below this line is skipped in that case.  The text
+        // was built on the UI's thread; all that happens here is handing it over.
+        if (m_diagPending.load(std::memory_order_acquire))
+        {
+            m_diagPending.store(false, std::memory_order_relaxed);
+            updateStateValue("diag", m_diagOut.c_str());
+        }
 
         if (!m_romsLoaded)
         {
@@ -1785,14 +1885,64 @@ private:
                      "but byte for byte the same image).", slot, path.c_str());
     }
 
+    static const char *loadResultName(voltaire::LoadResult r)
+    {
+        switch (r)
+        {
+        case voltaire::LoadResult::Ok:        return "ok";
+        case voltaire::LoadResult::WrongSize: return "wrong size";
+        case voltaire::LoadResult::BadImage:  return "the image did not check out";
+        case voltaire::LoadResult::NoSuchSlot: return "no such slot";
+        }
+        return "unknown";
+    }
+
     void loadRoms()
     {
-        static const char *const pgm[] = {
-            "roland_u110_pgm_(15179960).bin", "roland_u110_pgm_15179960.bin",
-            "U110v203.BIN", "u110_v203.bin", "U110v200.BIN", "u110_v200.bin",
-        };
-        std::vector<uint8_t> rom = findRom(pgm, sizeof(pgm) / sizeof(pgm[0]), 0x10000,
-                                           &m_pgmFound);
+        loadRomImages();
+        if (m_romsLoaded)
+            return;
+        // Whatever went wrong, say the one thing that leads somewhere.  A DAW on Windows
+        // has no terminal attached, so every d_stderr2 above this line went nowhere any
+        // user will ever read; the LCD and the report behind it are the only channel.
+        d_stderr2("Voltaire 110: the machine is NOT running -- no sound, and the panel "
+                  "stays blank. Click the LCD in the plugin's own window for the full "
+                  "report of where it looked and what it found.");
+    }
+
+    void loadRomImages()
+    {
+        m_diagStatus = "no-program-rom";
+        m_diagNotes.clear();
+
+        // Walked by hand rather than through findRom(), because a file that is THERE but
+        // the wrong size is the single most useful thing this can report and findRom()
+        // cannot tell the difference -- it answers with an empty vector either way.
+        std::vector<uint8_t> rom;
+        for (const std::string &dir : romSearchPath())
+        {
+            for (size_t i = 0; i < kNumPgmNames && rom.empty(); i ++)
+            {
+                const std::string path = dir + "/" + kPgmNames[i];
+                const long n = fileSize(path);
+                if (n < 0)
+                    continue;
+                if (size_t(n) != kPgmBytes)
+                {
+                    addNote("%s is %ld bytes; the program ROM has to be exactly %u",
+                            path.c_str(), n, unsigned(kPgmBytes));
+                    continue;
+                }
+                rom = readFile(path);
+                if (rom.size() == kPgmBytes)
+                    m_pgmFound = kPgmNames[i];
+                else
+                    addNote("%s is the right size but could not be read", path.c_str());
+            }
+            if (!rom.empty())
+                break;
+        }
+
         if (rom.empty())
         {
             d_stderr2("Voltaire 110: no U-110 program ROM found. Put your own dumps in "
@@ -1804,8 +1954,19 @@ private:
                       " (or set U110_DATA_DIR). The plugin will stay silent until then.");
             return;
         }
-        if (m_core.loadProgramRom(rom.data(), rom.size()) != voltaire::LoadResult::Ok)
+
+        const voltaire::LoadResult pr = m_core.loadProgramRom(rom.data(), rom.size());
+        if (pr != voltaire::LoadResult::Ok)
+        {
+            // This used to return in silence, which meant a corrupt dump of exactly the
+            // right length was indistinguishable from having no dump at all.
+            m_diagStatus = "bad-program-rom";
+            addNote("%s is the right size but the core rejected it (%s)",
+                    m_pgmFound.c_str(), loadResultName(pr));
+            d_stderr2("Voltaire 110: %s was read but the core rejected it (%s).",
+                      m_pgmFound.c_str(), loadResultName(pr));
             return;
+        }
         m_pgmSha = voltaire::Sha256::of(rom.data(), rom.size());
         m_pgmName = m_pgmFound;
 
@@ -1818,17 +1979,179 @@ private:
             std::vector<uint8_t> w = findRom(names, 1, voltaire::kCardBytes);
             if (w.empty())
             {
+                m_diagStatus = "no-wave-rom";
+                addNote("wave ROM bank %u is missing: nothing called %s, %u bytes long, "
+                        "anywhere on the search path", b, name,
+                        unsigned(voltaire::kCardBytes));
                 d_stderr2("Voltaire 110: wave ROM bank %u not found; no sound.", b);
                 return;
             }
-            m_core.loadWaveRom(b, w.data(), w.size());
+            const voltaire::LoadResult wr = m_core.loadWaveRom(b, w.data(), w.size());
+            if (wr != voltaire::LoadResult::Ok)
+            {
+                m_diagStatus = "no-wave-rom";
+                addNote("wave ROM bank %u was read but the core rejected it (%s)",
+                        b, loadResultName(wr));
+                d_stderr2("Voltaire 110: wave ROM bank %u rejected (%s); no sound.",
+                          b, loadResultName(wr));
+                return;
+            }
         }
 
         loadCards();
 
         m_core.reset();
         m_romsLoaded = true;
+        m_diagStatus = "ok";
         d_stdout("Voltaire 110: ROMs loaded, core running.");
+    }
+
+    /// One line of the report, printf style.
+    void addNote(const char *fmt, ...)
+    {
+        char line[1024];
+        va_list ap;
+        va_start(ap, fmt);
+        std::vsnprintf(line, sizeof(line), fmt, ap);
+        va_end(ap);
+        m_diagNotes += "  ";
+        m_diagNotes += line;
+        m_diagNotes += "\n";
+    }
+
+    /// Everything the plugin knows about why the machine is or is not running.
+    ///
+    /// Built fresh each time it is asked for, so it reports the filesystem as it is NOW
+    /// rather than as it was when the plugin was constructed -- somebody who copies the
+    /// ROMs in, then asks again, should see them.
+    std::string composeDiag() const
+    {
+        std::string r;
+        // First line is machine-readable and everything after it is for a person.  The UI
+        // needs one word to decide what to put on the LCD, and would rather not parse
+        // prose to get it.
+        r  = "status: ";
+        r += m_romsLoaded ? "ok" : m_diagStatus;
+        r += "\n";
+
+        char buf[1024];
+        std::snprintf(buf, sizeof(buf),
+                "Voltaire 110 -- where the ROMs were looked for\n\n%s\n"
+                "Host sample rate %.0f Hz; the host has processed %llu audio blocks.\n",
+                m_romsLoaded
+                    ? "The machine IS running."
+                    : "The machine is NOT running: no sound, and the panel stays blank.",
+                m_hostRate, (unsigned long long) m_runCount.load());
+        r += buf;
+        if (m_runCount.load() == 0)
+            r += "\nThe host has never asked this plugin for audio. Until it does, the\n"
+                 "machine cannot run even with every ROM in place -- check that the track\n"
+                 "is not muted or disabled, and that something is routed through it.\n";
+
+        if (!m_diagNotes.empty())
+        {
+            r += "\nWorth knowing:\n";
+            r += m_diagNotes;
+        }
+
+        if (!m_pgmName.empty())
+        {
+            std::snprintf(buf, sizeof(buf), "\nProgram ROM in use: %s  (sha %s)\n",
+                          m_pgmName.c_str(), m_pgmSha.substr(0, 12).c_str());
+            r += buf;
+        }
+
+        unsigned mounted = 0;
+        for (unsigned i = 0; i < voltaire::kNumCardSlots; i ++)
+            if (m_cards[i].present)
+            {
+                if (mounted ++ == 0)
+                    r += "\nCards mounted:\n";
+                std::snprintf(buf, sizeof(buf), "  slot %u: SN-U110-%02u  %s\n",
+                              i + 1, m_cards[i].number, m_cards[i].path.c_str());
+                r += buf;
+            }
+        if (mounted == 0)
+            r += "\nNo cards mounted. Cards are optional; the internal tones do not need "
+                 "them.\n";
+
+        r += "\nIt needs, in one of the directories below:\n";
+        std::snprintf(buf, sizeof(buf),
+                "  the program ROM, exactly %u bytes, under any one of these names:\n",
+                unsigned(kPgmBytes));
+        r += buf;
+        for (size_t i = 0; i < kNumPgmNames; i ++)
+        {
+            r += "    ";
+            r += kPgmNames[i];
+            r += "\n";
+        }
+        std::snprintf(buf, sizeof(buf),
+                "  all %u wave ROMs, %u bytes each:\n",
+                unsigned(voltaire::kNumWaveBanks), unsigned(voltaire::kCardBytes));
+        r += buf;
+        for (unsigned b = 0; b < voltaire::kNumWaveBanks; b ++)
+        {
+            std::snprintf(buf, sizeof(buf),
+                          "    roland_t110_u110_u220_waverom%u.bin\n", b);
+            r += buf;
+        }
+        r += "  cards are optional: any file whose name contains sn-u110-NN.\n";
+        r += "  Names are matched exactly, so a file called u110.bin will not be found.\n";
+
+        r += "\nPlaces looked, in order:\n";
+        int nth = 0;
+        for (const RomDir &d : romSearchDirs())
+        {
+            std::snprintf(buf, sizeof(buf), "\n [%d] %s\n     (because %s)\n",
+                          ++ nth, d.path.c_str(), d.origin == "built in"
+                              ? "it is built in" : ("it is where " + d.origin
+                                                    + " points").c_str());
+            r += buf;
+
+            DIR *dir = ::opendir(d.path.c_str());
+            if (dir == nullptr)
+            {
+                r += "     -- there is no such directory\n";
+                continue;
+            }
+            unsigned shown = 0, total = 0;
+            while (const dirent *e = ::readdir(dir))
+            {
+                const std::string name = e->d_name;
+                if (name == "." || name == "..")
+                    continue;
+                total ++;
+                if (shown >= kDiagMaxEntries)
+                    continue;
+                const long n = fileSize(d.path + "/" + name);
+                if (n < 0)
+                    std::snprintf(buf, sizeof(buf), "     %-44s  (not a plain file)\n",
+                                  name.c_str());
+                else
+                    std::snprintf(buf, sizeof(buf), "     %-44s  %ld bytes\n",
+                                  name.c_str(), n);
+                r += buf;
+                shown ++;
+            }
+            ::closedir(dir);
+            if (total == 0)
+                r += "     -- the directory exists but is empty\n";
+            else if (total > shown)
+            {
+                std::snprintf(buf, sizeof(buf), "     ... and %u more\n", total - shown);
+                r += buf;
+            }
+        }
+
+        // The channel to the UI carries a fixed-size message, so a report longer than it
+        // would arrive silently cut in half.  Cut it HERE instead, and say so.
+        if (r.size() > kDiagMaxChars)
+        {
+            r.resize(kDiagMaxChars);
+            r += "\n... report truncated.\n";
+        }
+        return r;
     }
 
     voltaire::U110Core m_core;
@@ -1846,6 +2169,14 @@ private:
     float m_gain = 1.0f, m_gainTarget = 1.0f;
     bool m_hfCorrection = true;
     bool m_romsLoaded = false;
+
+    // ---- self-diagnosis.  See composeDiag(): the only channel to a user in a DAW that
+    // has no terminal attached is the plugin's own window.
+    const char *m_diagStatus = "not-loaded";
+    std::string m_diagNotes;
+    std::string m_diagOut;
+    std::atomic<bool> m_diagPending { false };
+    std::atomic<unsigned long long> m_runCount { 0 };
     bool m_buttons[voltaire::kButtonCount] = { false };
     bool m_autoButtons[voltaire::kButtonCount] = { false };
     unsigned m_lcdAccum = 0;

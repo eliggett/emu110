@@ -122,14 +122,26 @@ no host in the way. Build it first, not last.
 
 "CLAP for FL Studio" implies a **Windows build**, which is an unscoped target.
 
-- `[?]` Check the FL Studio version. CLAP support arrived in the 2024 releases;
-  older FL needs VST3 instead.
-- **Deferred until Linux works.** Two paths when it comes up: cross-compile from
-  Linux with mingw-w64, or build natively on a GitHub Actions Windows runner.
-  The runner is the better option if it is available — it tests on the target
-  platform instead of merely producing binaries for it, and it costs no local
-  toolchain. Either way, prove it with a hello-world plugin *before* the UI
-  exists.
+- `[x]` **Done, by cross-compiling.** `make win` in `plugin/` builds
+  `bin-win/Voltaire110.clap` with mingw-w64 — one apt package, no third-party
+  libraries, because DPF needs none on Windows. It loads in FL Studio and the
+  panel draws. See CLONING.md.
+- `[x]` FL Studio hosts CLAP on the target machine, so VST3 was not needed.
+- **The advice to prove it with a hello-world plugin first was right, and
+  ignoring it cost exactly what it was meant to save.** The port itself was
+  nearly free — the discipline below held, and the only platform-specific code in
+  the tree was three small things in one file. What was *not* free was the first
+  run: panel drew, LCD blank, patch menu stuck on *waiting for the machine*. It
+  read as "the Windows build cannot find its ROMs", and it was nothing of the
+  kind. DPF's CLAP backend implements `updateState()` as `{ return true; }` — it
+  accepts every DSP→UI push, drops it, and reports success. **Every CLAP host on
+  every platform had this, including the Linux CLAP that had been sitting in
+  `bin/` all along**, because nothing in the suite had ever opened a UI under
+  CLAP. Fixed by `plugin/patches/0003-clap-dsp-to-ui-state.patch`, and a real
+  CLAP host now runs in `make selftest` so it cannot come back quietly.
+- The lesson is not about Windows. A new *format* deserves the same
+  hello-world proof as a new *platform*, and "it builds and loads" is not that
+  proof — the thing to check is that the display moves.
 
 ### macOS
 
@@ -1371,7 +1383,8 @@ Extracted and headless should be a few percent — comfortable for many instance
     notes say +2.17 dB. Then re-measure and re-fit the HF correction — do not
     keep the current one on top of a corrected chain. *(The measurement itself is
     done: `analysis/hf_excess.pdf`, correction shipped and switchable.)*
-13. Windows cross-build; macOS when a volunteer appears.
+13. ~~Windows cross-build~~ **done** (`make win`, CLAP, mingw-w64); macOS when a
+    volunteer appears.
 
 **Tooling gap:** the CGRAM findings in §7 came from an ad-hoc decoder written
 against `error.log` — it tracks the address counter to separate DDRAM from CGRAM

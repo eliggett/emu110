@@ -149,21 +149,39 @@ outcomes are distinguishable on purpose:
 | `applied 0001-... to dpf` | first build after a clone, or after a submodule reset |
 | `WARNING: 0001-... does not apply to dpf` | the DPF pin moved out from under the patch — §6 |
 
-That warning is **not** fatal to the build. The build will succeed and the
-standalone's panel will simply stay blank, which is a much more confusing symptom
-than a failed compile — so if you see the warning, stop and fix it.
+That warning is **not** fatal to the build. The build will succeed and the panel
+will simply stay blank in whichever format lost its patch, which is a much more
+confusing symptom than a failed compile — so if you see the warning, stop and fix
+it.
 
-### The two patches
+### The three patches
 
-- **`0001-jack-dsp-to-ui-state.patch`** — the one that matters. DPF implements
-  `updateStateValue()`, the DSP→UI channel, for LV2, CLAP, AU and Carla, but not
-  for the JACK standalone: `PluginJack`'s constructor passes `nullptr` where the
-  callback belongs. Without this patch the standalone builds and runs and makes
-  sound, and its panel never updates. Since the standalone is the daily
-  development loop, that is not a small gap.
+Two of them are the same bug in two places. `updateStateValue()` is DPF's DSP→UI
+channel — how the emulated machine's display reaches the panel that draws it — and
+two of the four backends we build did not carry it.
+
+- **`0001-jack-dsp-to-ui-state.patch`** — `PluginJack`'s constructor passes
+  `nullptr` where the callback belongs. Without this the standalone builds, runs
+  and makes sound, and its panel never updates. The standalone is the daily
+  development loop, so that is not a small gap.
+- **`0003-clap-dsp-to-ui-state.patch`** — the same hole in CLAP, and a nastier one,
+  because it does not look like a hole. `PluginCLAP::updateState()` was
+  `{ return true; }`: it accepted every push, discarded it, and reported success.
+  The UI is handed one snapshot of state when its window opens and then nothing
+  ever again, so the plugin loads, the artwork draws, the buttons work — and the
+  LCD is blank and the patch menu says *waiting for the machine* forever. It was
+  found on the first Windows build, but it was never a Windows bug: every CLAP
+  host on every platform had it, including the Linux CLAP sitting in `bin/`.
+  Both patches add the same thing: a fixed 16-slot ring the audio thread writes
+  without allocating or blocking, drained by the UI thread in idle.
 - **`0002-silence-updateStateValueCallback-debug.patch`** — removes a
   `d_stdout()` left in `DistrhoPluginInternal.hpp`. Cosmetic; it fires on every
   state update, which is often.
+
+`make selftest` now ends by running a real CLAP host against the built plugin
+(`plugin/tools/clap_selftest.c`) and failing if the UI decodes no panel updates,
+so this particular silence cannot come back unnoticed. **VST3 still has no path**
+and its panel will not update; that target is documented as built-but-untested.
 
 ### Why `plugin/dpf` always shows as modified
 
@@ -304,10 +322,21 @@ wins, and the plugin logs which file it took.
 a plugin inherits the host's environment, so it has to be set system-wide and
 the host restarted — and `%PROGRAMDATA%` needs an administrator to write to.
 
-The program ROM is required; without it the plugin loads, stays silent, and says
-so on stderr. Card images are optional. Filenames are matched loosely: what
-matters for a card is that the name contains its slot number (`sn-u110-08.bin`,
-`SN_U110_08.BIN`, `roland sn u110 08.rom` all name card 8).
+The program ROM is required; without it the plugin loads and stays silent. Card
+images are optional. Filenames are matched loosely: what matters for a card is
+that the name contains its slot number (`sn-u110-08.bin`, `SN_U110_08.BIN`,
+`roland sn u110 08.rom` all name card 8).
+
+### If the panel comes up but nothing happens
+
+**Click the LCD.** There is no terminal behind a DAW on Windows, so the plugin
+reports on itself into its own window instead. Before the machine's first word the
+LCD shows `NO ROM FILE` (or `BAD ROM FILE`, `NO WAVE ROM`, `NO DSP ANSWER`) over
+`CLICK FOR INFO`, and clicking opens a page listing every directory searched and
+why, what is actually in each one with sizes, the exact filenames wanted, and how
+many audio blocks the host has actually processed — which is how you tell a ROM
+problem from a track that is muted or not routed anywhere. The wheel scrolls it;
+any click closes it.
 
 ---
 
