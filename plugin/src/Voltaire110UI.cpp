@@ -1075,26 +1075,23 @@ private:
         }
     }
 
-    /// A line of the report, and how many of them fit.  The wheel needs the second one
-    /// to know where the end is.
-    float diagRowH() const
-    {
-        const float h = float(getHeight()) / 34.0f;
-        return h < 9.0f ? 9.0f : (h > 18.0f ? 18.0f : h);
-    }
-
-    /// The row the About and RESET boxes are set on.
+    /// One line of any of the three overlays -- the self check, the About box, RESET.
     ///
-    /// Bigger than the self check's, and on purpose: that page is a LISTING, scanned for
-    /// the one line that names your problem, and it earns its density by fitting the whole
-    /// report on screen at once.  These two are PROSE, read a sentence at a time, which
-    /// the same row height made genuinely hard.  Three steps up on the body text, with the
-    /// row grown to match so nothing collides -- everything in both boxes is a multiple of
-    /// this, so the layout scales together and the wrap comes out the shape it always did.
+    /// Everything in all three is a multiple of this: box, margins, the lot.  So this is
+    /// the one place their size is decided, and raising it scales each layout together
+    /// rather than pushing text into its own margins.
+    ///
+    /// The window's own height sets the base, which is what keeps an overlay in
+    /// proportion to the panel it covers.  The four steps on top of it are not in
+    /// proportion to anything, and that is the point: at the base the body text came out
+    /// around 9 px, which is smaller than anything anyone reads on purpose.  Legibility
+    /// has a floor that does not scale with a window.
     float overlayRowH() const
     {
-        // Three steps of body text at 0.78 rows to the step, rounded to a whole pixel.
-        return diagRowH() + 4.0f;
+        const float h = float(getHeight()) / 34.0f;
+        const float base = h < 9.0f ? 9.0f : (h > 18.0f ? 18.0f : h);
+        // Four steps of body text, at 0.78 rows to the step, rounded to a whole pixel.
+        return base + 5.0f;
     }
 
     /// A triangle marking text that carries on past the edge of the box.
@@ -1114,9 +1111,10 @@ private:
         fill();
     }
 
+    /// How many lines of the report fit.  The wheel needs this to know where the end is.
     int diagRows() const
     {
-        const float rowH = diagRowH();
+        const float rowH = overlayRowH();
         const float pad = std::floor(float(getHeight()) * 0.04f) + 4.0f;
         const int n = int((float(getHeight()) - pad * 2.0f - rowH * 3.0f) / rowH);
         return n < 1 ? 1 : n;
@@ -1129,7 +1127,7 @@ private:
     /// something else did not, and it would block the host's UI thread while it was up.
     void drawDiagMenu()
     {
-        const float rowH = diagRowH();
+        const float rowH = overlayRowH();
         const float pad  = std::floor(float(getHeight()) * 0.04f) + 4.0f;
         const float x = pad, y = pad;
         const float w = float(getWidth()) - pad * 2.0f;
@@ -1170,7 +1168,9 @@ private:
         else
         {
             save();
-            scissor(x + rowH * 0.5f, bodyTop, w - rowH, float(rows) * rowH);
+            // The right-hand gutter is reserved whether or not there is anything to
+            // scroll, so a long path cannot run underneath a caret.
+            scissor(x + rowH * 0.5f, bodyTop, w - rowH * 2.0f, float(rows) * rowH);
             fontSize(rowH * 0.78f);
             for (int i = 0; i < rows; i ++)
             {
@@ -1191,6 +1191,17 @@ private:
                      nullptr);
             }
             restore();
+
+            // Which way there is more of it.  The report is 70-odd lines and never fits,
+            // and the line count in the footer says where you are without saying which
+            // way to go.
+            const int last = int(m_diagLines.size()) - rows;
+            const float caretX = x + w - rowH * 1.0f;
+            if (m_diagScroll > 0)
+                drawScrollCaret(caretX, bodyTop + rowH * 0.55f, rowH * 0.5f, false);
+            if (m_diagScroll < last)
+                drawScrollCaret(caretX, bodyTop + (float(rows) - 0.55f) * rowH,
+                                rowH * 0.5f, true);
         }
 
         char foot[160];

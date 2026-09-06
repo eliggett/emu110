@@ -897,22 +897,31 @@ and a line's leading spaces are repeated on every row it wraps onto, so an inden
 still reads as a list at any width. That last part is why the renderer does its own
 wrapping instead of calling NanoVG's `textBox()`, which strips leading whitespace.
 
-Both prose overlays -- this and RESET -- are set on `overlayRowH()`, which is three steps
-of body text above the self check's row. That page is a *listing*, scanned for the one line
-that names your problem, and it earns its density by fitting the whole report on screen at
-once; these two are read a sentence at a time, and the same row height made that genuinely
-hard. Everything in both boxes is a multiple of one row, so raising it scales the layout
-together and the wrap comes out the shape it always did.
+All three overlays -- this, RESET and the self check -- are set on `overlayRowH()`, and
+everything in them is a multiple of it: box, margins, the lot. So that is the one place
+their size is decided, and raising it scales each layout together rather than pushing text
+into its own margins.
 
-The bigger row means fewer lines fit, so the About box says which way there is more of it:
+The window's height sets the base, which is what keeps an overlay in proportion to the
+panel it covers. The **four steps on top of it are not in proportion to anything**, and
+that is the point: at the base alone the body text came out around 9 px, which is smaller
+than anything anyone reads on purpose. Legibility has a floor that does not scale with a
+window.
+
+The bigger row means fewer lines fit, so the boxes say which way there is more of it:
 a caret in the right-hand gutter at whichever end continues, and `line N of M` in the
 footer. A box one line short of showing everything looks exactly like a box showing
 everything -- and the credits end in the list of MAME sources, which is the part somebody
-scrolling is most likely after. The carets are drawn as paths rather than typed as
-`U+25BC`: the panel's font is chosen for the lettering on the artwork, and a missing glyph
-would come out blank in the one place whose whole job is to say "there is more". The gutter
-is reserved whether or not anything overflows, because the wrap width decides the row count
-and a width that changed once the text overflowed would be deciding its own input.
+scrolling is most likely after. The self check does the same, where it matters more still:
+that report is 70-odd lines and never fits, and a line count says where you are without
+saying which way to go.
+
+The carets are drawn as paths rather than typed as `U+25BC`: the panel's font is chosen for
+the lettering on the artwork, and a missing glyph would come out blank in the one place
+whose whole job is to say "there is more". Their gutter is reserved whether or not anything
+overflows -- in the About box because the wrap width decides the row count, so a width that
+changed once the text overflowed would be deciding its own input, and in the self check so
+that a long ROM path cannot run underneath a caret.
 
 The logo's hit box comes out of the artwork like every other one: `panel_export.py` exports
 the bounds of the element labelled `logo_text_as_path` as `kLogo`, so moving the logo in
