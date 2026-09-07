@@ -187,6 +187,11 @@ selftest: all
 		"https://github.com/eliggett/emu110/voltaire110" build/lv2_tone.wav 0 tone \
 		2>&1 | grep -E "^tone:"
 	@echo
+	@U110_DATA_DIR=$${U110_DATA_DIR:-$(CURDIR)/..} build/lv2_selftest \
+		bin/$(NAME).lv2/$(NAME)_dsp.so \
+		"https://github.com/eliggett/emu110/voltaire110" build/lv2_write.wav 0 write \
+		2>&1 | grep -E "^write:"
+	@echo
 	@$(MAKE) --no-print-directory clapcheck
 
 # The DSP -> UI channel under CLAP, checked with a real CLAP host (tools/clap_selftest.c).

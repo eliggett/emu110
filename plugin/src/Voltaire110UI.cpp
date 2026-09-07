@@ -431,8 +431,10 @@ protected:
         if (m_testMode)
             drawTestHint();
 
-        if (m_menu == Menu::Patch)
+        if (m_menu == Menu::Patch || m_menu == Menu::WritePick)
             drawPatchMenu();
+        else if (m_menu == Menu::WriteConfirm)
+            drawWriteConfirm();
         else if (m_menu == Menu::Tone)
             drawToneMenu();
         else if (m_menu == Menu::Value)
@@ -505,6 +507,44 @@ protected:
                 // screens belong to the service menu.
                 m_testMode = std::strcmp(kResetItems[hit].arg, "test") == 0;
                 setState("reboot", kResetItems[hit].arg);
+            }
+            repaint();
+            return true;
+        }
+
+        if (m_menu == Menu::WritePick)
+        {
+            if (!ev.press)
+                return true;
+            const int hit = patchHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            // Picking does NOT write.  A click that missed the grid closes the menu, the
+            // same as everywhere else here; a click that hit asks first.
+            m_menuHover = -1;
+            if (hit >= 0 && size_t(hit) < m_patchNames.size())
+            {
+                m_writeTarget = hit;
+                m_menu = Menu::WriteConfirm;
+            }
+            else
+                m_menu = Menu::None;
+            repaint();
+            return true;
+        }
+
+        if (m_menu == Menu::WriteConfirm)
+        {
+            if (!ev.press)
+                return true;
+            const int hit = confirmHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            const int target = m_writeTarget;
+            m_menu = Menu::None;
+            m_menuHover = -1;
+            m_writeTarget = -1;
+            if (hit == 0 && target >= 0)
+            {
+                char n[16];
+                std::snprintf(n, sizeof(n), "%d", target);
+                setState("patchwrite", n);
             }
             repaint();
             return true;
@@ -746,9 +786,16 @@ protected:
 
     bool onMotion(const MotionEvent &ev) override
     {
-        if (m_menu == Menu::Patch)
+        if (m_menu == Menu::Patch || m_menu == Menu::WritePick)
         {
             const int hit = patchHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            if (hit != m_menuHover)
+            { m_menuHover = hit; repaint(); }
+            return true;
+        }
+        if (m_menu == Menu::WriteConfirm)
+        {
+            const int hit = confirmHit(float(ev.pos.getX()), float(ev.pos.getY()));
             if (hit != m_menuHover)
             { m_menuHover = hit; repaint(); }
             return true;
@@ -1608,6 +1655,133 @@ private:
         textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
     }
 
+    // ---- confirming a WRITE -----------------------------------------------------------
+    //
+    // The machine asks too, in its own way: PATCH:WRT:WRITE shows "TMP ~ PATCH-nn?" and
+    // waits for ENTER.  This is that question, with the thing about to be lost named --
+    // which the hardware cannot do, having one line of sixteen characters to say it in.
+    //
+    // MEM PROTECT is not consulted.  It gates the firmware's own write path and this one
+    // goes around it, so the guard that exists is this box: a deliberate second click,
+    // rather than a bit set on a SETUP page nobody would think to look at.
+
+    static constexpr int   kConfirmCount    = 2;
+    static constexpr float kConfirmCellRows = 2.7f;
+    static constexpr float kConfirmHeadRows = 5.0f;
+    static constexpr float kConfirmBoxRows  =
+            kConfirmHeadRows + kConfirmCellRows * float(kConfirmCount) + 1.2f;
+
+    struct ConfirmLayout { float x, y, w, h, rowH, top, cell; };
+
+    ConfirmLayout confirmLayout() const
+    {
+        ConfirmLayout L;
+        const float pad = std::floor(float(getHeight()) * 0.04f) + 4.0f;
+        const float room = (float(getHeight()) - pad * 2.0f) / kConfirmBoxRows;
+        L.rowH = std::min(overlayRowH(), room);
+        L.cell = L.rowH * kConfirmCellRows;
+        L.w = float(getWidth()) - pad * 2.0f;
+        const float wmax = L.rowH * 46.0f;
+        if (L.w > wmax)
+            L.w = wmax;
+        L.h = L.rowH * kConfirmBoxRows;
+        L.x = std::floor((float(getWidth()) - L.w) * 0.5f);
+        L.y = std::floor((float(getHeight()) - L.h) * 0.5f);
+        if (L.y < pad)
+            L.y = pad;
+        L.top = L.y + L.rowH * kConfirmHeadRows;
+        return L;
+    }
+
+    int confirmHit(float px, float py) const
+    {
+        const ConfirmLayout L = confirmLayout();
+        if (px < L.x || px > L.x + L.w || py < L.top)
+            return -1;
+        const int i = int((py - L.top) / L.cell);
+        return i >= 0 && i < kConfirmCount ? i : -1;
+    }
+
+    /// What is in the slot now, for the box to name.  Blank rather than "?" when the
+    /// names have not arrived: a machine that has not booted has nothing to lose yet.
+    const char *targetName() const
+    {
+        if (m_writeTarget < 0 || size_t(m_writeTarget) >= m_patchNames.size())
+            return "";
+        return m_patchNames[size_t(m_writeTarget)].c_str();
+    }
+
+    void drawWriteConfirm()
+    {
+        const ConfirmLayout L = confirmLayout();
+
+        beginPath();
+        rect(0, 0, getWidth(), getHeight());
+        fillColor(Color(0, 0, 0, 0.72f));
+        fill();
+
+        beginPath();
+        roundedRect(L.x, L.y, L.w, L.h, L.rowH * 0.4f);
+        fillColor(Color(22, 24, 28));
+        fill();
+        strokeColor(Color(96, 102, 112));
+        strokeWidth(1.0f);
+        stroke();
+
+        fontFace(m_font);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        fontSize(L.rowH * 0.95f);
+        fillColor(Color(255, 180, 90));
+        text(L.x + L.rowH * 0.7f, L.y + L.rowH * 1.2f, "STORE THE PATCH", nullptr);
+
+        char line[128];
+        fontSize(L.rowH * 0.78f);
+        fillColor(Color(225, 228, 232));
+        std::snprintf(line, sizeof(line), "The patch being edited goes into P-%02d, over %s.",
+                      m_writeTarget + 1, targetName());
+        text(L.x + L.rowH * 0.7f, L.y + L.rowH * 2.5f, line, nullptr);
+
+        fontSize(L.rowH * 0.72f);
+        fillColor(Color(168, 174, 184));
+        text(L.x + L.rowH * 0.7f, L.y + L.rowH * 3.6f,
+             "The machine's own WRITE, without its menus. What is there now is gone,",
+             nullptr);
+        text(L.x + L.rowH * 0.7f, L.y + L.rowH * 4.4f,
+             "though reopening the saved project brings the whole bank back.", nullptr);
+
+        static const char *const kTitles[kConfirmCount] = { "Write it", "Cancel" };
+        static const char *const kNotes[kConfirmCount] = {
+            "P-%02d is selected afterwards, so you hear what was stored.",
+            "Leave every patch as it is.",
+        };
+
+        for (int i = 0; i < kConfirmCount; i ++)
+        {
+            const float top = L.top + float(i) * L.cell;
+            if (i == m_menuHover)
+            {
+                beginPath();
+                roundedRect(L.x + L.rowH * 0.4f, top, L.w - L.rowH * 0.8f,
+                            L.cell - L.rowH * 0.2f, L.rowH * 0.25f);
+                fillColor(Color(0, 163, 224, 0.30f));
+                fill();
+            }
+            fontSize(L.rowH * 0.9f);
+            fillColor(i == 0 ? Color(255, 150, 120) : Color(225, 228, 232));
+            text(L.x + L.rowH * 0.9f, top + L.rowH * 0.8f, kTitles[i], nullptr);
+
+            fontSize(L.rowH * 0.72f);
+            fillColor(Color(168, 174, 184));
+            std::snprintf(line, sizeof(line), kNotes[i], m_writeTarget + 1);
+            text(L.x + L.rowH * 1.3f, top + L.rowH * 1.85f, line, nullptr);
+        }
+
+        fontSize(L.rowH * 0.72f);
+        fillColor(Color(140, 146, 156));
+        text(L.x + L.rowH * 0.7f, L.y + L.h - L.rowH * 0.7f,
+             "Escape closes this and writes nothing", nullptr);
+    }
+
     void drawPatchMenu()
     {
         const MenuLayout m = patchLayout();
@@ -2447,10 +2621,14 @@ private:
                 writePartRaw(part, 0x00, action == kActPresetLeft ? 0 : 1);
             break;
         case kActWrite:
-            // Storing the temporary patch is the machine's own WRITE procedure, driven
-            // from the front panel; there is no SysEx for it.  Not built yet, and saying
-            // so beats appearing to have saved something.
-            d_stderr("DIVE: WRITE is not wired up yet");
+            // Where it goes is a choice, so it is asked before anything happens.  The
+            // list is the PATCH menu -- the same 64 names, read out of the same memory --
+            // because the question "which patch" already has an answer in this UI and
+            // inventing a second one would be two lists to keep in step.
+            m_menu = Menu::WritePick;
+            m_menuHover = -1;
+            m_writeTarget = -1;
+            repaint();
             break;
         default:
             break;
@@ -3379,8 +3557,12 @@ private:
     uint32_t m_cgramIn = 0;
     uint8_t m_leds = 0, m_cursorPos = 0, m_cursorFlags = 0;
 
-    enum class Menu { None, Patch, Tone, Value, Diag, About, Reset };
+    enum class Menu { None, Patch, Tone, Value, Diag, About, Reset,
+                  WritePick, WriteConfirm };
     Menu m_menu = Menu::None;
+
+    /// Which slot the WRITE about to be confirmed would overwrite, or -1.
+    int m_writeTarget = -1;
 
     // The About text as lines, split once at startup; m_aboutRows is those lines wrapped
     // to the window's current width, which only the renderer can know.

@@ -28,7 +28,17 @@ The patch title edit cursor does not blink.
 
 ## Write button: 
 
-We need a method to write the preset that the user has edited. Write Protect is also something we need to be able to turn on/off. 
+**Done.** The DIVE common page's WRITE opens the PATCH list to choose a destination, then
+asks before overwriting, naming the patch that would be lost. It stores the edit buffer at
+`0x2800` into the slot and re-selects it, which is exactly what the machine's own
+PATCH:WRT:WRITE does -- 116 bytes, not the 128-byte stride, and `make writecheck` runs both
+paths and compares what they leave behind. `analysis/SYSTEM-DESIGN.md` section 5.3.4.
+
+Write protect is deliberately NOT exposed. The machine has one -- `0x3C00` bit 0, on from
+the factory -- but it gates the *firmware's* write path, and the plugin writes memory
+directly, so honouring it would mean a lock whose key is on a SETUP page nobody would think
+to look for. The "are you sure?" box is the guard instead, and it can say what is about to
+be lost, which one line of sixteen characters cannot.
 
 ## User Presets: 
 

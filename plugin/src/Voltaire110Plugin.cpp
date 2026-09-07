@@ -286,6 +286,12 @@ std::vector<CardFile> scanForCards()
 /// some.
 constexpr uint16_t kPatchBase       = 0xE000;
 constexpr uint16_t kPatchStride     = 128;
+
+/// How much of that stride is the PATCH: 4 header + 10 name + 2 + six 16-byte parts.  The
+/// remaining 12 bytes are not part of the record -- the firmware's own WRITE copies 0x74
+/// bytes and leaves them alone, and they read the same constant in all 64 slots.  See
+/// analysis/SYSTEM-DESIGN.md section 5.3.4, which `make writecheck` keeps honest.
+constexpr uint16_t kPatchRecordBytes = 0x74;
 constexpr uint16_t kPatchNameOffset = 4;
 constexpr unsigned kPatchNameLen    = 10;
 constexpr unsigned kNumPatches      = 64;
@@ -347,6 +353,7 @@ enum States
     kStateSettings,
     kStatePatches,
     kStatePatchSel,
+    kStatePatchWrite,
     kStateTones,
     kStateToneSel,
     kStateDiveVals,
@@ -570,6 +577,15 @@ protected:
             state.defaultValue = "";
             break;
 
+        case kStatePatchWrite:
+            state.key = "patchwrite";
+            state.label = "Store the patch";
+            // The UI asking for the WRITE the machine's own PATCH:WRT page does.  Nothing
+            // to save: what it produces is inside the memory that already is.
+            state.hints = kStateIsOnlyForDSP;
+            state.defaultValue = "";
+            break;
+
         case kStateTones:
             state.key = "tones";
             state.label = "Tone names";
@@ -696,6 +712,18 @@ protected:
             const int n = std::atoi(value);
             if (n >= 0 && unsigned(n) < kNumPatches)
                 m_patchRequest.store(n, std::memory_order_relaxed);
+            return;
+        }
+
+        if (std::strcmp(key, "patchwrite") == 0)
+        {
+            // Same thread story as patchsel, and the same digit test: a restored session
+            // hands every key back, and an empty value would read as slot 0.
+            if (value[0] < '0' || value[0] > '9')
+                return;
+            const int n = std::atoi(value);
+            if (n >= 0 && unsigned(n) < kNumPatches)
+                m_writeRequest.store(n, std::memory_order_relaxed);
             return;
         }
 
@@ -870,6 +898,7 @@ protected:
         // to rather than at the start of the next one.  The reboot goes first because it
         // cancels the other three.
         tickReboot(coreFrames);
+        tickPatchWrite();
         tickPatchSelect(coreFrames);
         tickToneSelect(coreFrames);
         tickDive(coreFrames);
@@ -1637,6 +1666,52 @@ private:
     // press at a time, checking after each.  All of it is button edges in EMULATED time,
     // so this is a small state machine ticked from run() rather than anything that waits.
 
+    // ---- storing a patch ------------------------------------------------------------
+    //
+    // The machine's own WRITE is PATCH:WRT:WRITE on the front panel, and there is no SysEx
+    // for it.  It does not have to be driven through those menus: it copies the edit
+    // buffer into the slot and nothing else, so the same thing can be done with writeMem.
+    // Measured rather than assumed -- analysis/SYSTEM-DESIGN.md section 5.3.4, and
+    // `make writecheck` runs both paths and compares what they leave behind.
+    //
+    // 116 bytes, NOT the 128-byte stride.  The last 12 bytes of a slot are not part of the
+    // record and the firmware leaves them untouched; copying 128 would overwrite something
+    // the machine put there for its own reasons.
+    //
+    // MEM PROTECT (0x3C00 bit 0, on from the factory) gates the FIRMWARE's write path, and
+    // this one goes around it.  That is deliberate: the button is the plugin's, the
+    // confirmation is the plugin's, and quietly refusing here because of a bit the user
+    // has never seen would be a lock nobody could find the key to.
+    //
+    // The reselect afterwards is not decoration.  It is what takes the display out of
+    // TEMP: -- that flag lives in the CPU's internal RAM and cannot be written -- and it
+    // makes the firmware reload the buffer from the slot, so the machine ends up playing
+    // the record that was actually stored rather than the one we believe we stored.
+
+    void tickPatchWrite()
+    {
+        if (m_writeRequest.load(std::memory_order_relaxed) < 0)
+            return;
+
+        // Held, not dropped, until the machine is up.  Before then 0x2800 reads as zeros,
+        // which is a perfectly plausible patch and therefore the worst possible one to
+        // store over somebody's work.
+        if (!m_romsLoaded || !m_machineUp)
+            return;
+
+        const int n = m_writeRequest.exchange(-1, std::memory_order_relaxed);
+        if (n < 0 || unsigned(n) >= kNumPatches)
+            return;
+
+        const uint16_t dst = uint16_t(kPatchBase + unsigned(n) * kPatchStride);
+        for (uint16_t i = 0; i < kPatchRecordBytes; i ++)
+            m_core.writeMem(uint16_t(dst + i), m_core.readMem(uint16_t(kActivePatch + i)));
+
+        // And now the machine's own patch-load path, which is the one press tickPatchSelect
+        // already knows how to make.
+        m_patchRequest.store(n, std::memory_order_relaxed);
+    }
+
     /// A press has to be held long enough for the firmware's debouncer at 0x4118 to see
     /// it, and let go of long enough not to be taken for auto-repeat.  Measured on the
     /// emulation: 20 ms already registers, and 1.2 s held runs the patch number away by
@@ -2363,6 +2438,7 @@ private:
     std::atomic<int> m_rebootRequest { kRebootNone };
     uint32_t m_rebootHold = 0;
     std::atomic<int> m_patchRequest { -1 };
+    std::atomic<int> m_writeRequest { -1 };
     PatchStep m_patchStep = PatchStep::Idle;
     uint32_t m_patchWait = 0;
     unsigned m_patchTarget = 0, m_patchExits = 0;

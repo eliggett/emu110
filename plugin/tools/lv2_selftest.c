@@ -360,6 +360,7 @@ int main(int argc, char **argv)
     const int want_state_test = (argc > 5) && strcmp(argv[5], "state") == 0;
     const int want_patch_test = (argc > 5) && strcmp(argv[5], "patch") == 0;
     const int want_tone_test  = (argc > 5) && strcmp(argv[5], "tone") == 0;
+    const int want_write_test = (argc > 5) && strcmp(argv[5], "write") == 0;
     int patch_checks = 0, patch_pass = 0;
 
 
@@ -408,7 +409,7 @@ int main(int argc, char **argv)
         /* Press EDIT/EXIT at 7 s and release at 8 s: the buttons are what drive the
          * machine's own menus, and this proves the whole loop from a host control port
          * through to the LCD. */
-        btn[1] = (!want_fx && !want_patch_test && !want_tone_test
+        btn[1] = (!want_fx && !want_patch_test && !want_tone_test && !want_write_test
                   && done >= (long)(7.0 * RATE) && done < (long)(8.0 * RATE)) ? 1.0f : 0.0f;
 
         if (want_fx) {
@@ -487,6 +488,38 @@ int main(int argc, char **argv)
                 patch_pass += (g_panel[PANEL_PART_MEDIA] == 0 && g_panel[PANEL_PART_TONE] == 40);
                 printf("tone: part 1 still on media %u tone %u\n",
                        g_panel[PANEL_PART_MEDIA], g_panel[PANEL_PART_TONE]);
+            }
+        }
+
+        if (want_write_test)
+        {
+            /* The WRITE button, through the same key the UI sends.
+             *
+             * What makes this checkable without reading patchram is the NAME.  The edit
+             * buffer starts as P-01 "Ac.Piano"; storing it into P-06 must therefore rename
+             * slot 6, which shows up in the patch list AND on the LCD -- and it can only
+             * happen if the record really was copied and the machine really did reload it.
+             * See analysis/SYSTEM-DESIGN.md section 5.3.4. */
+            const double t = (double)done / RATE;
+            const double dt = (double)BLOCK / RATE;
+            char lcd[33];
+            panel_lcd(lcd);
+
+            if (t <= 9.0 && 9.0 < t + dt)
+                put_keyvalue(seq, urid_kv, "divewrite", "p0 07 51");   /* part 1 level */
+            else if (t <= 11.0 && 11.0 < t + dt) {
+                patch_checks++;
+                patch_pass += (strncmp(lcd, "TEMP:", 5) == 0);
+                printf("write: after an edit the machine shows [%.16s]\n", lcd);
+            }
+            else if (t <= 12.0 && 12.0 < t + dt)
+                put_keyvalue(seq, urid_kv, "patchwrite", "5");         /* -> P-06 */
+            else if (t <= 16.0 && 16.0 < t + dt) {
+                patch_checks++;
+                patch_pass += (g_panel[99] == 5
+                               && strncmp(lcd, "P-06:Ac.Piano", 13) == 0);
+                printf("write: after the write it shows [%.16s] patch byte %u\n",
+                       lcd, g_panel[99]);
             }
         }
 
@@ -838,6 +871,29 @@ int main(int argc, char **argv)
         patch_checks++;
         patch_pass += (groups >= 2 && internal == 99);
         printf("tone: %d of %d checks passed%s\n", patch_pass, patch_checks,
+               patch_pass == patch_checks ? "" : "   <-- FAILED");
+    }
+
+    if (want_write_test)
+    {
+        /* Slot 6 must now be named after what was stored into it, and slot 1 must not
+         * have moved -- a write that hit every slot, or the wrong one, would pass a
+         * check that only looked at the destination. */
+        char name6[32] = { 0 }, name1[32] = { 0 };
+        int line = 0;
+        for (const char *p = g_patches; *p; ) {
+            const char *nl = strchr(p, '\n');
+            const size_t n = nl ? (size_t)(nl - p) : strlen(p);
+            if (line == 0 && n < sizeof(name1)) memcpy(name1, p, n);
+            if (line == 5 && n < sizeof(name6)) memcpy(name6, p, n);
+            line++;
+            if (!nl) break;
+            p = nl + 1;
+        }
+        printf("write: P-01 is \"%s\", P-06 is now \"%s\"\n", name1, name6);
+        patch_checks++;
+        patch_pass += (strcmp(name6, "Ac.Piano") == 0 && strcmp(name1, "Ac.Piano") == 0);
+        printf("write: %d of %d checks passed%s\n", patch_pass, patch_checks,
                patch_pass == patch_checks ? "" : "   <-- FAILED");
     }
 

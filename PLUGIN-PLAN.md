@@ -1195,6 +1195,15 @@ the same shape and size as the panel blob already going the other way, arriving
 on the worker thread like `patchsel` and `tonesel` do. No file I/O anywhere near
 the audio thread, and `rtaudit` is unaffected.
 
+**`[x]` The WRITE button is built, and it is the store half of this.** The DIVE common
+page picks a destination from the PATCH list, confirms with the patch it would overwrite
+named, and sends a `patchwrite` key of the slot number; the DSP copies 116 bytes from
+`0x2800` into the slot and hands the number to the same one-press reselect §10.4 already
+uses. `make selftest`'s `write` pass drives it through the real LV2 state interface and
+checks the destination is renamed after what was stored while its neighbour is not.
+Loading a library preset is the same primitive pointed the other way: write the record,
+then trigger the select.
+
 **`0x2800` is the single source of truth for the current patch.** Read it back
 with `readMem` to capture a patch for saving. That is what stops panel edits and
 DIVE edits from diverging: both land in the edit buffer, and the plugin reads
