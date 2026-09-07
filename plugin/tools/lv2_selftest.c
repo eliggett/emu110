@@ -54,6 +54,7 @@ static const struct { int len; unsigned char b[16]; } kFxSetup[] = {
 #define PANEL_PART_TONE  106
 static unsigned char g_panel[PANEL_BYTES];
 static char g_patches[8192];              /* the patch names, one per line */
+static char g_patchdump[512];             /* the active patch, as hex */
 static char g_tones[16384];               /* the tone list, "G media label" / "T name" */
 
 static int hexbyte(const char *p)
@@ -121,6 +122,8 @@ static void absorb_events_out(void *ev_out, uint32_t urid_midi,
             strcpy(g_patches, val);
         else if (strcmp(key, "tones") == 0 && strlen(val) < sizeof(g_tones))
             strcpy(g_tones, val);
+        else if (strcmp(key, "patchdump") == 0 && strlen(val) < sizeof(g_patchdump))
+            strcpy(g_patchdump, val);
     }
 }
 
@@ -361,6 +364,7 @@ int main(int argc, char **argv)
     const int want_patch_test = (argc > 5) && strcmp(argv[5], "patch") == 0;
     const int want_tone_test  = (argc > 5) && strcmp(argv[5], "tone") == 0;
     const int want_write_test = (argc > 5) && strcmp(argv[5], "write") == 0;
+    const int want_load_test  = (argc > 5) && strcmp(argv[5], "load") == 0;
     int patch_checks = 0, patch_pass = 0;
 
 
@@ -410,6 +414,7 @@ int main(int argc, char **argv)
          * machine's own menus, and this proves the whole loop from a host control port
          * through to the LCD. */
         btn[1] = (!want_fx && !want_patch_test && !want_tone_test && !want_write_test
+                  && !want_load_test
                   && done >= (long)(7.0 * RATE) && done < (long)(8.0 * RATE)) ? 1.0f : 0.0f;
 
         if (want_fx) {
@@ -488,6 +493,48 @@ int main(int argc, char **argv)
                 patch_pass += (g_panel[PANEL_PART_MEDIA] == 0 && g_panel[PANEL_PART_TONE] == 40);
                 printf("tone: part 1 still on media %u tone %u\n",
                        g_panel[PANEL_PART_MEDIA], g_panel[PANEL_PART_TONE]);
+            }
+        }
+
+        if (want_load_test)
+        {
+            /* A patch coming back OUT of the library: the DSP is handed 116 bytes and a
+             * slot, and must store them and have the firmware load them.  The bytes here
+             * stand in for a file the UI read -- the plugin's own patchdump, with the
+             * ten-byte name changed, so the result is checkable by reading the name back
+             * off the LCD and out of the patch list. */
+            const double t = (double)done / RATE;
+            const double dt = (double)BLOCK / RATE;
+            char lcd[33];
+            panel_lcd(lcd);
+
+            if (t <= 10.0 && 10.0 < t + dt) {
+                patch_checks++;
+                patch_pass += (strlen(g_patchdump) == 116 * 2);
+                printf("load: the machine published %zu hex characters of patch\n",
+                       strlen(g_patchdump));
+            }
+            else if (t <= 11.0 && 11.0 < t + dt) {
+                /* "Library Pt" over the name at +0x04, ten bytes. */
+                static const char *const kName = "Library Pt";
+                char msg[16 + 116 * 2 + 8];
+                char rec[116 * 2 + 1];
+                int i;
+                strcpy(rec, g_patchdump);
+                for (i = 0; i < 10; i++) {
+                    static const char *const hexd = "0123456789abcdef";
+                    rec[(4 + i) * 2]     = hexd[(unsigned char)kName[i] >> 4];
+                    rec[(4 + i) * 2 + 1] = hexd[(unsigned char)kName[i] & 15];
+                }
+                snprintf(msg, sizeof(msg), "63 %s", rec);
+                put_keyvalue(seq, urid_kv, "patchload", msg);
+            }
+            else if (t <= 15.0 && 15.0 < t + dt) {
+                patch_checks++;
+                patch_pass += (g_panel[99] == 63
+                               && strncmp(lcd, "P-64:Library Pt", 15) == 0);
+                printf("load: the audition slot now shows [%.16s] patch byte %u\n",
+                       lcd, g_panel[99]);
             }
         }
 
@@ -871,6 +918,28 @@ int main(int argc, char **argv)
         patch_checks++;
         patch_pass += (groups >= 2 && internal == 99);
         printf("tone: %d of %d checks passed%s\n", patch_pass, patch_checks,
+               patch_pass == patch_checks ? "" : "   <-- FAILED");
+    }
+
+    if (want_load_test)
+    {
+        /* Slot 64 renamed, slot 1 not: a load that went to the wrong place, or to all of
+         * them, would pass a check that only looked at the destination. */
+        char name64[32] = { 0 }, name1[32] = { 0 };
+        int line = 0;
+        for (const char *p = g_patches; *p; ) {
+            const char *nl = strchr(p, '\n');
+            const size_t n = nl ? (size_t)(nl - p) : strlen(p);
+            if (line == 0  && n < sizeof(name1))  memcpy(name1, p, n);
+            if (line == 63 && n < sizeof(name64)) memcpy(name64, p, n);
+            line++;
+            if (!nl) break;
+            p = nl + 1;
+        }
+        printf("load: P-01 is \"%s\", P-64 is now \"%s\"\n", name1, name64);
+        patch_checks++;
+        patch_pass += (strcmp(name64, "Library Pt") == 0 && strcmp(name1, "Ac.Piano") == 0);
+        printf("load: %d of %d checks passed%s\n", patch_pass, patch_checks,
                patch_pass == patch_checks ? "" : "   <-- FAILED");
     }
 

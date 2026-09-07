@@ -27,6 +27,7 @@
 #include "u110_cgrom.h"
 #include "about_text.h"
 #include "DiveParams.h"
+#include "PresetLibrary.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -185,6 +186,15 @@ protected:
             if (std::getenv("VOLTAIRE_DIVE") != nullptr)
                 d_stdout("divevals [%s]", value);
             applyDiveValues(value);
+            return;
+        }
+
+        // The patch the machine is playing, as hex.  Kept so that saving to the library
+        // is a copy of what is actually in the machine rather than of anything this UI
+        // believes about it.
+        if (std::strcmp(key, "patchdump") == 0)
+        {
+            m_patchDump = value;
             return;
         }
 
@@ -431,7 +441,9 @@ protected:
         if (m_testMode)
             drawTestHint();
 
-        if (m_menu == Menu::Patch || m_menu == Menu::WritePick)
+        if (m_menu == Menu::Patch && m_libraryTab)
+            drawLibraryMenu();
+        else if (m_menu == Menu::Patch || m_menu == Menu::WritePick)
             drawPatchMenu();
         else if (m_menu == Menu::WriteConfirm)
             drawWriteConfirm();
@@ -554,7 +566,49 @@ protected:
         {
             if (!ev.press)
                 return true;
+
+            // The tabs first, and they do NOT close the menu: switching between the
+            // machine's bank and the library is looking around, not choosing.
+            const int tab = patchTabHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            if (tab >= 0)
+            {
+                if ((tab == 1) != m_libraryTab)
+                {
+                    m_libraryTab = tab == 1;
+                    m_menuHover = -1;
+                    m_libraryNote.clear();
+                    if (m_libraryTab)
+                        libraryRescan();
+                }
+                repaint();
+                return true;
+            }
+
             const int hit = patchHit(float(ev.pos.getX()), float(ev.pos.getY()));
+
+            if (m_libraryTab)
+            {
+                // Cell 0 is Save, and it stays put while the rest scrolls, so the thing
+                // somebody opened this for is always in the same corner.
+                if (hit == 0)
+                {
+                    librarySave();
+                    repaint();
+                    return true;
+                }
+                const int idx = m_libScroll + hit - 1;
+                if (hit > 0 && size_t(idx) < m_library.entries().size())
+                {
+                    libraryLoad(m_library.entries()[size_t(idx)]);
+                    m_menu = Menu::None;
+                    m_menuHover = -1;
+                }
+                else if (hit < 0)
+                    m_menu = Menu::None;                 // a click in the dark closes it
+                repaint();
+                return true;
+            }
+
             m_menu = Menu::None;
             m_menuHover = -1;
             if (hit >= 0 && size_t(hit) < m_patchNames.size())
@@ -705,6 +759,12 @@ protected:
                         m_menu = i == voltaire::panel::BUT_TONE ? Menu::Tone : Menu::Patch;
                         m_menuHover = -1;
                         m_toneHover = ToneHit();
+                        // Rescanned on open rather than watched: instances share the
+                        // library by the filesystem and nothing else, so this is how one
+                        // instance's save turns up in another's list.  The index only
+                        // re-reads files whose size or modification time moved.
+                        if (m_menu == Menu::Patch && m_libraryTab)
+                        { m_libraryNote.clear(); libraryRescan(); }
                         repaint();
                         return true;
                     }
@@ -852,6 +912,17 @@ protected:
 
     bool onScroll(const ScrollEvent &ev) override
     {
+        if (m_menu == Menu::Patch && m_libraryTab)
+        {
+            // By whole columns: the grid reads downwards, so scrolling it a row at a time
+            // would move every name into the column beside it.
+            m_libScroll -= int(ev.delta.getY()) * kMenuRows;
+            const int last = int(m_library.entries().size()) - (kLibCells - 1);
+            if (m_libScroll > last) m_libScroll = last;
+            if (m_libScroll < 0)    m_libScroll = 0;
+            repaint();
+            return true;
+        }
         if (m_menu == Menu::Diag)
         {
             m_diagScroll -= int(ev.delta.getY() * 3.0f);
@@ -1782,6 +1853,260 @@ private:
              "Escape closes this and writes nothing", nullptr);
     }
 
+    // ---- the user's own library -------------------------------------------------------
+    //
+    // The machine's 64 slots are what the FIRMWARE has; this is what the user has, and it
+    // is unbounded because a computer is not a 1989 rompler.  PLUGIN-PLAN.md section 10.5.
+    //
+    // A preset is played from a slot because it MUST be: only the firmware can load a
+    // patch, and it loads out of patchram.  So one slot is the audition slot -- P-64 -- and
+    // every library load goes through it, leaving the other 63 as the machine's own bank,
+    // editable from the panel exactly as on hardware.  That also makes a session
+    // self-contained for free: patchram is saved whole into the `nvram` key, so the patch
+    // comes back with the project even if the library file has since moved or gone.
+
+    /// How many presets fit on screen at once, with the first cell spent on Save.
+    static constexpr int kLibCells = kMenuCols * kMenuRows;
+
+    void libraryRescan()
+    {
+        if (m_libraryDir.empty())
+            m_libraryDir = voltaire::preset::libraryDir();
+        if (m_libraryDir.empty())
+        {
+            m_libraryNote = "nowhere to keep presets: no HOME or XDG_DATA_HOME";
+            return;
+        }
+        m_library.rescan(m_libraryDir);
+        if (m_libScroll > int(m_library.entries().size()))
+            m_libScroll = 0;
+    }
+
+    /// Save what the machine is playing.
+    ///
+    /// Named after the patch itself, because the machine already has a name for it and
+    /// asking for a second one before anything can be saved is a text field in the way of
+    /// the feature.  Renaming is what the patch name editor on the DIVE common page is
+    /// for, and it is worth doing BEFORE saving rather than after.
+    void librarySave()
+    {
+        using namespace voltaire::preset;
+
+        if (m_patchDump.size() != size_t(kRecordBytes) * 2)
+        { m_libraryNote = "the machine has not said what it is playing yet"; return; }
+
+        libraryRescan();
+        if (m_libraryDir.empty())
+            return;
+
+        Preset p;
+        p.record.resize(kRecordBytes);
+        for (unsigned i = 0; i < kRecordBytes; i ++)
+        {
+            const int hi = hexNibble(m_patchDump[i * 2]);
+            const int lo = hexNibble(m_patchDump[i * 2 + 1]);
+            if (hi < 0 || lo < 0)
+            { m_libraryNote = "the machine sent something that is not a patch"; return; }
+            p.record[i] = uint8_t((hi << 4) | lo);
+        }
+
+        p.name = lcdName(p.record);
+        if (p.name.empty())
+            p.name = "Untitled";
+        // The plugin's own settings travel with the patch and come back with it.  They are
+        // not SysEx and no other U-110 will ever read them, which is exactly why they are
+        // separate lines the reader may ignore rather than anything inside the record.
+        p.volumeDb = m_volume;
+        p.hf = m_hf;
+        char when[32];
+        const std::time_t t = std::time(nullptr);
+        std::tm tm {};
+       #ifdef _WIN32
+        if (const std::tm *lt = std::localtime(&t)) tm = *lt;
+       #else
+        ::localtime_r(&t, &tm);
+       #endif
+        std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M", &tm);
+        p.created = when;
+
+        // Never overwrite a preset that is already there: two patches may perfectly
+        // reasonably be called the same thing, and losing the first one to save the
+        // second is not what anybody pressing Save is asking for.
+        const std::string stem = m_libraryDir + "/" + fileNameFor(p.name);
+        std::string path = stem + kSuffix;
+        for (int n = 2; n < 1000; n ++)
+        {
+            struct stat st;
+            if (::stat(path.c_str(), &st) != 0)
+                break;
+            char suffix[16];
+            std::snprintf(suffix, sizeof(suffix), " %d", n);
+            path = stem + suffix + kSuffix;
+        }
+
+        std::string err;
+        // Qualified: this class has a save() of its own, NanoVG's.
+        if (!voltaire::preset::save(path, p, err))
+        { m_libraryNote = err; return; }
+
+        libraryRescan();
+        m_libraryNote = "saved \"" + p.name + "\"";
+    }
+
+    /// Play one.  The record goes into the audition slot and the firmware loads it, which
+    /// is the only route that produces sound: the derived state a patch needs is built by
+    /// the tone loader and by nothing else.
+    void libraryLoad(const voltaire::preset::Entry &e)
+    {
+        using namespace voltaire::preset;
+
+        Preset p;
+        std::string err;
+        if (!voltaire::preset::load(e.path, p, err))
+        { m_libraryNote = err; return; }
+
+        std::string msg;
+        msg.reserve(16 + kRecordBytes * 2);
+        char slot[16];
+        std::snprintf(slot, sizeof(slot), "%u ", kAuditionSlot);
+        msg = slot;
+        msg += toHex(p.record);
+        setState("patchload", msg.c_str());
+
+        // The user asked for this preset, so they get all of it.  A DAW that is
+        // automating the volume will move it again on the next block, which is what
+        // automation is for and not something to design around.
+        if (p.hasSettings)
+        {
+            m_volume = p.volumeDb;
+            setParam(kParamVolume, m_volume);
+            m_hf = p.hf;
+            setParam(kParamHfCorrection, m_hf ? 1.0f : 0.0f);
+        }
+
+        // Warn rather than hide.  A part names a card by CATALOGUE ID, so this is
+        // computable from the record and worth saying: the patch will still load, and the
+        // parts on a missing card will read "Illegal CARD" on the machine's own display.
+        std::string missing;
+        for (const unsigned c : cardsNeeded(p.record))
+        {
+            bool mounted = false;
+            for (const ToneGroup &g : m_toneGroups)
+                if (g.media == c)
+                    mounted = true;
+            if (!mounted)
+            {
+                char n[8];
+                std::snprintf(n, sizeof(n), "%02u", c);
+                missing += missing.empty() ? "" : ", ";
+                missing += n;
+            }
+        }
+        m_libraryNote = missing.empty()
+                ? ("loaded \"" + p.name + "\" into P-64")
+                : ("loaded \"" + p.name + "\" -- needs card " + missing + ", not mounted");
+    }
+
+    /// The two halves of the PATCH menu, as tabs in its header.  0 is the machine's own
+    /// 64, 1 is the library; -1 is anywhere else.
+    int patchTabHit(float px, float py) const
+    {
+        const MenuLayout m = patchLayout();
+        if (py < m.y || py >= m.y + m.headerH)
+            return -1;
+        const float x0 = m.x + m.rowH * 0.5f;
+        const float tabW = m.fontSize * 9.0f;
+        if (px < x0 || px >= x0 + tabW * 2.0f)
+            return -1;
+        return int((px - x0) / tabW);
+    }
+
+    void drawPatchTabs(const MenuLayout &m)
+    {
+        static const char *const kTabs[2] = { "INTERNAL 64", "LIBRARY" };
+        const float x0 = m.x + m.rowH * 0.5f;
+        const float tabW = m.fontSize * 9.0f;
+        for (int i = 0; i < 2; i ++)
+        {
+            const bool on = (i == 1) == m_libraryTab;
+            beginPath();
+            roundedRect(x0 + float(i) * tabW, m.y + m.headerH * 0.18f,
+                        tabW - 4.0f, m.headerH * 0.64f, 3.0f);
+            fillColor(on ? Color(56, 60, 68) : Color(32, 34, 38));
+            fill();
+            fillColor(on ? Color(235, 235, 235) : Color(140, 146, 156));
+            text(x0 + float(i) * tabW + m.fontSize * 0.5f, m.y + m.headerH * 0.5f,
+                 kTabs[i], nullptr);
+        }
+    }
+
+    void drawLibraryMenu()
+    {
+        const MenuLayout m = patchLayout();
+
+        beginPath();
+        rect(0, 0, getWidth(), getHeight());
+        fillColor(Color(0, 0, 0, 0.55f));
+        fill();
+
+        beginPath();
+        roundedRect(m.x, m.y, m.w, m.h, m.rowH * 0.35f);
+        fillColor(Color(26, 28, 32));
+        fill();
+        strokeColor(Color(96, 102, 112));
+        strokeWidth(1.0f);
+        stroke();
+
+        fontFace(m_font);
+        fontSize(m.fontSize * 1.05f);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        drawPatchTabs(m);
+
+        const std::vector<voltaire::preset::Entry> &all = m_library.entries();
+        char right[160];
+        if (!m_libraryNote.empty())
+            std::snprintf(right, sizeof(right), "%s", m_libraryNote.c_str());
+        else if (all.empty())
+            std::snprintf(right, sizeof(right), "no presets saved yet");
+        else
+            std::snprintf(right, sizeof(right), "%d presets", int(all.size()));
+
+        fontSize(m.fontSize * 0.8f);
+        textAlign(ALIGN_RIGHT | ALIGN_MIDDLE);
+        fillColor(Color(150, 155, 165));
+        text(m.x + m.w - m.rowH * 0.5f, m.y + m.headerH * 0.5f, right, nullptr);
+
+        fontSize(m.fontSize);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        char label[64];
+        for (int i = 0; i < kLibCells; i ++)
+        {
+            const int idx = m_libScroll + i - 1;            // cell 0 is Save
+            if (i > 0 && size_t(idx) >= all.size())
+                break;
+
+            const float x = m.x + m.rowH * 0.5f + float(i / kMenuRows) * m.colW;
+            const float y = m.y + m.headerH + float(i % kMenuRows) * m.rowH;
+
+            if (i == m_menuHover)
+            {
+                beginPath();
+                roundedRect(x, y + 1.0f, m.colW - 2.0f, m.rowH - 2.0f, 2.0f);
+                fillColor(Color(56, 60, 68));
+                fill();
+            }
+            if (i == 0)
+            {
+                fillColor(Color(190, 255, 190));
+                text(x + m.fontSize * 0.4f, y + m.rowH * 0.5f, "+ Save this patch", nullptr);
+                continue;
+            }
+            std::snprintf(label, sizeof(label), "%s", all[size_t(idx)].name.c_str());
+            fillColor(Color(214, 216, 220));
+            text(x + m.fontSize * 0.4f, y + m.rowH * 0.5f, label, nullptr);
+        }
+    }
+
     void drawPatchMenu()
     {
         const MenuLayout m = patchLayout();
@@ -1804,17 +2129,14 @@ private:
         fontFace(m_font);
         fontSize(m.fontSize * 1.05f);
         textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
-        fillColor(Color(235, 235, 235));
-        text(m.x + m.rowH * 0.5f, m.y + m.headerH * 0.5f, "PATCH", nullptr);
+        drawPatchTabs(m);
 
         fontSize(m.fontSize * 0.8f);
         textAlign(ALIGN_RIGHT | ALIGN_MIDDLE);
         fillColor(Color(150, 155, 165));
-        // The machine's own 64.  A bank of the user's own is the other half of this menu
-        // and is not written yet; saying which list this is now means the second one can
-        // arrive without the first changing meaning.
         text(m.x + m.w - m.rowH * 0.5f, m.y + m.headerH * 0.5f,
-             m_patchNames.empty() ? "waiting for the machine" : "internal patches", nullptr);
+             m_patchNames.empty() ? "waiting for the machine"
+                                  : "the machine's own bank", nullptr);
 
         if (m_patchNames.empty())
             return;
@@ -3563,6 +3885,17 @@ private:
 
     /// Which slot the WRITE about to be confirmed would overwrite, or -1.
     int m_writeTarget = -1;
+
+    // ---- the user's own library.
+    //
+    // The UI owns every file operation.  The DSP is handed one 116-byte record and told
+    // which slot to put it in, and that is the whole of what crosses over.
+    voltaire::preset::Index m_library;
+    std::string m_libraryDir;
+    std::string m_patchDump;      ///< the machine's current patch, 232 hex characters
+    std::string m_libraryNote;    ///< what just happened, shown in the menu's header
+    bool m_libraryTab = false;    ///< which half of the PATCH menu is showing
+    int  m_libScroll = 0;         ///< first preset shown, for libraries bigger than a page
 
     // The About text as lines, split once at startup; m_aboutRows is those lines wrapped
     // to the window's current width, which only the renderer can know.

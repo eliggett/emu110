@@ -192,6 +192,13 @@ selftest: all
 		"https://github.com/eliggett/emu110/voltaire110" build/lv2_write.wav 0 write \
 		2>&1 | grep -E "^write:"
 	@echo
+	@U110_DATA_DIR=$${U110_DATA_DIR:-$(CURDIR)/..} build/lv2_selftest \
+		bin/$(NAME).lv2/$(NAME)_dsp.so \
+		"https://github.com/eliggett/emu110/voltaire110" build/lv2_load.wav 0 load \
+		2>&1 | grep -E "^load:"
+	@echo
+	@$(MAKE) --no-print-directory presetcheck
+	@echo
 	@$(MAKE) --no-print-directory clapcheck
 
 # The DSP -> UI channel under CLAP, checked with a real CLAP host (tools/clap_selftest.c).
@@ -201,6 +208,16 @@ clapcheck:
 	@tools/clap_check.sh bin/$(NAME).clap
 
 .PHONY: clapcheck
+
+# The preset file format, on its own: that a patch survives the round trip, and that
+# nothing which is not a patch is ever believed.  These files are hand-editable by design
+# and what comes out of one is handed to the machine's patch loader, so the refusals matter
+# more than the happy path.  Needs no ROMs, no DPF and no display.
+presetcheck:
+	@g++ -O2 -std=c++20 -Isrc -Wall -o build/preset_check tools/preset_check.cpp
+	@build/preset_check $(CURDIR)/build/preset_check_dir
+
+.PHONY: presetcheck
 
 # What the firmware's own menus do, which can only be found out by pressing the buttons in
 # emulated time and reading memory between presses.  tools/write_check.txt replays every

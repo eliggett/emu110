@@ -42,5 +42,23 @@ be lost, which one line of sixteen characters cannot.
 
 ## User Presets: 
 
+**Done, for one preset per file.** The PATCH menu has an INTERNAL 64 tab and a LIBRARY
+tab. Presets live in `~/.local/share/Voltaire110/patches` (beside `roms`, and
+`U110_DATA_DIR` overrides it as everywhere else), one `.u110pat` file each, written
+temp-then-rename so a reader sees the old file or the new one and never half of either.
+Instances share the library by the filesystem and nothing else: the browser rescans when
+it opens, re-reading only files whose size or modification time moved.
+
+A preset carries the 116-byte patch record, a display name, the volume and the HF
+correction, and the cards it needs. Loading one puts it in **P-64**, the audition slot --
+a patch can only be played by the firmware out of patchram, so auditioning has to spend a
+slot -- and the browser says so when a patch wants a card that is not mounted.
+
+Still to do: banks (`.u110bank`) for import and export, `.syx` interop, tags and search,
+deleting and renaming from the browser, and making the audition slot a setting rather
+than a constant.
+
+Original note follows.
+
 Related to the above, we need an atomic read/write system to a plugin settings file which contains a database of user patches. The databasde of user patches can be enormous since we have a computer available to us. The patch button shall allow selection. You can repurpose OEM preset 64 as a "loader preset" with which to load the user-selected preset. A preset is a standard U-110 preset, entirely defined by sysex commands. Other attributes, such as filter and volume setting, are not sysex... if possible we can keep these as additional bits in the user preset. 
 

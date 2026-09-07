@@ -1,0 +1,175 @@
+// Copyright (c) 2026 Elliott H. Liggett
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// The preset file format: that a patch survives the round trip, and that nothing which is
+// not a patch is ever believed.  The second half is the important one -- these files are
+// hand-editable by design, and what comes out of one is handed to the machine's own patch
+// loader.
+//
+//   preset_check [DIR]        DIR defaults to a temporary directory
+
+#include "PresetLibrary.hpp"
+
+#include <cstdio>
+#include <cstring>
+#include <string>
+
+namespace {
+
+int g_checks = 0, g_pass = 0;
+
+void check(bool ok, const char *what)
+{
+    g_checks ++;
+    g_pass += ok ? 1 : 0;
+    std::printf("  %-5s %s\n", ok ? "ok" : "FAIL", what);
+}
+
+/// A patch record that is not all one value, so a copy that loses part of it shows up.
+std::vector<uint8_t> madeUpRecord()
+{
+    std::vector<uint8_t> r(voltaire::preset::kRecordBytes);
+    for (size_t i = 0; i < r.size(); i ++)
+        r[i] = uint8_t(i * 7 + 3);
+    const char *name = "Test Patch";
+    for (unsigned i = 0; i < voltaire::preset::kNameLen; i ++)
+        r[voltaire::preset::kNameOffset + i] = uint8_t(name[i]);
+    // Parts 1 and 4 on cards 8 and 9, the rest internal.
+    for (unsigned p = 0; p < voltaire::preset::kNumParts; p ++)
+        r[voltaire::preset::kPartBase + p * voltaire::preset::kPartStride] = 0;
+    r[voltaire::preset::kPartBase + 0 * voltaire::preset::kPartStride] = 8;
+    r[voltaire::preset::kPartBase + 3 * voltaire::preset::kPartStride] = 9;
+    r[voltaire::preset::kPartBase + 5 * voltaire::preset::kPartStride] = 8;
+    return r;
+}
+
+void writeRaw(const std::string &path, const char *text)
+{
+    FILE *f = std::fopen(path.c_str(), "wb");
+    if (f == nullptr) return;
+    std::fputs(text, f);
+    std::fclose(f);
+}
+
+} // namespace
+
+int main(int argc, char **argv)
+{
+    using namespace voltaire::preset;
+
+    std::string dir = argc > 1 ? argv[1] : "/tmp/voltaire110_preset_check";
+    makeDir(dir);
+    std::printf("preset: working in %s\n", dir.c_str());
+
+    // ---- the round trip --------------------------------------------------------------
+    Preset out;
+    out.name     = "A Name With Spaces";
+    out.record   = madeUpRecord();
+    out.volumeDb = -3.5f;
+    out.hf       = false;
+    out.created  = "2026-09-07";
+
+    const std::string path = dir + "/roundtrip" + kSuffix;
+    std::string err;
+    check(save(path, out, err), "a preset saves");
+
+    Preset back;
+    check(load(path, back, err), "and loads again");
+    check(back.record == out.record, "the 116 bytes are identical");
+    check(back.name == out.name, "the display name survives");
+    check(back.volumeDb < -3.49f && back.volumeDb > -3.51f, "the volume survives");
+    check(back.hf == false, "the HF correction setting survives");
+    check(back.hasSettings, "and it says it carried settings");
+
+    // ---- what the record itself says --------------------------------------------------
+    check(lcdName(out.record) == "Test Patch", "the machine's own ten-byte name is read");
+    const std::vector<unsigned> cards = cardsNeeded(out.record);
+    check(cards.size() == 2 && cards[0] == 8 && cards[1] == 9,
+          "the cards a patch needs are computed from its parts, deduplicated");
+
+    // ---- nothing that is not a patch is believed --------------------------------------
+    struct Bad { const char *name; const char *text; };
+    static const Bad kBad[] = {
+        { "empty",        "" },
+        { "wrong magic",  "Some Other Thing 1\nrecord 00\n" },
+        { "from the future", "Voltaire110 patch 99\nrecord 00\n" },
+        { "no record",    "Voltaire110 patch 1\nname Lonely\n" },
+        { "short record", "Voltaire110 patch 1\nrecord 0011223344\n" },
+    };
+    // Exactly the right LENGTH but not hexadecimal, so the length test cannot be what
+    // catches it -- built rather than typed, because a literal of 232 z's is a literal
+    // nobody can count.
+    const std::string notHex = "Voltaire110 patch 1\nrecord "
+                             + std::string(kRecordBytes * 2, 'z') + "\n";
+    for (const Bad &b : kBad)
+    {
+        const std::string p = dir + "/bad" + kSuffix;
+        writeRaw(p, b.text);
+        Preset junk;
+        std::string why;
+        char what[128];
+        std::snprintf(what, sizeof(what), "refused: %s (%s)", b.name,
+                      load(p, junk, why) ? "IT LOADED" : why.c_str());
+        check(!load(p, junk, why), what);
+        std::remove(p.c_str());
+    }
+    {
+        const std::string p = dir + "/bad" + kSuffix;
+        writeRaw(p, notHex.c_str());
+        Preset junk;
+        std::string why;
+        const bool loaded = load(p, junk, why);
+        char what[128];
+        std::snprintf(what, sizeof(what), "refused: right length, not hex (%s)",
+                      loaded ? "IT LOADED" : why.c_str());
+        check(!loaded && why.find("hexadecimal") != std::string::npos, what);
+        std::remove(p.c_str());
+    }
+
+    // ---- an unknown key is skipped, not fatal: this is how the format grows ------------
+    {
+        const std::string p = dir + "/future" + kSuffix;
+        std::string text = "Voltaire110 patch 1\nname From Later\n"
+                           "somethingnew whatever it says\nrecord ";
+        text += toHex(out.record);
+        text += "\n";
+        writeRaw(p, text.c_str());
+        Preset f;
+        std::string why;
+        const bool ok = load(p, f, why);
+        check(ok && f.name == "From Later" && f.record == out.record,
+              "a key this version has never heard of is skipped");
+        std::remove(p.c_str());
+    }
+
+    // ---- a name is always a file name, and never a path -------------------------------
+    check(fileNameFor("../../etc/passwd").find('/') == std::string::npos,
+          "a display name cannot become a path");
+    check(fileNameFor("") == "patch", "an empty name still makes a file name");
+    check(fileNameFor("Rhodes / EP #2").find('/') == std::string::npos,
+          "and nor can one with a slash in the middle");
+
+    // ---- the index sees what is on disk ------------------------------------------------
+    {
+        Index idx;
+        idx.rescan(dir);
+        bool found = false;
+        for (const Entry &e : idx.entries())
+            if (e.name == out.name)
+                found = true;
+        check(found, "the browser's index finds it by name");
+
+        // A second rescan must agree with the first, since it comes from the cache.
+        idx.rescan(dir);
+        bool again = false;
+        for (const Entry &e : idx.entries())
+            if (e.name == out.name)
+                again = true;
+        check(again, "and a rescan off the cache says the same");
+    }
+
+    std::remove(path.c_str());
+    std::printf("preset: %d of %d checks passed%s\n", g_pass, g_checks,
+                g_pass == g_checks ? "" : "   <-- FAILED");
+    return g_pass == g_checks ? 0 : 1;
+}

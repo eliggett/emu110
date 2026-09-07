@@ -1213,6 +1213,35 @@ Order matters when injecting — write the record, *then* trigger the select. Th
 firmware reads a patch record only during a load, so the sequence makes a torn
 read impossible.
 
+#### `[x]` Built, and where it differs from the plan above
+
+The library works: the PATCH menu has two tabs, **INTERNAL 64** and **LIBRARY**, and the
+library one lists every preset on disk with *+ Save this patch* in the first cell.
+Saving writes what the machine is playing; clicking a preset loads it into P-64 and
+selects it. `make presetcheck` covers the format, `make selftest`'s `load` pass covers
+the machine end.
+
+Three decisions came out differently from the sketch below, each for a reason:
+
+- **The file is TEXT, not a binary TLV container.** The stated reason for chunking was
+  that fields will be added as the record is decoded further, and lines of `key value`
+  do that better: an unknown key is skipped by construction, there is no length field to
+  disagree with the payload, and a preset that will not load can be read in any editor.
+  It is the same argument that made the `settings` session key text. A patch is 116
+  bytes, so hex costs nothing worth counting.
+- **One file per preset is the storage unit; a bank is for interchange.** A bank file as
+  the storage unit makes every save rewrite the whole bank -- O(bank) per edit, and a
+  much wider window for two instances to collide. `.u110bank` is still the right shape
+  for export and import, and is not written yet.
+- **Plugin settings are carried and applied.** Volume and HF correction go in the file as
+  their own lines, and a load applies them. The earlier worry about fighting a DAW's
+  automation is not a real one: a host that is automating a parameter will move it again
+  on the next block, which is what automation is for.
+
+Not done yet: `.u110bank` import and export, `.syx`, tags and search, the wave-ROM hashes
+a preset was authored against, deleting or renaming from the browser, and the audition
+slot is the constant `kAuditionSlot` rather than a setting.
+
 #### Format: one chunked container
 
 | File | Contents |

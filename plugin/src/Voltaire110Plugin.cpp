@@ -354,6 +354,8 @@ enum States
     kStatePatches,
     kStatePatchSel,
     kStatePatchWrite,
+    kStatePatchDump,
+    kStatePatchLoad,
     kStateTones,
     kStateToneSel,
     kStateDiveVals,
@@ -586,6 +588,24 @@ protected:
             state.defaultValue = "";
             break;
 
+        case kStatePatchDump:
+            state.key = "patchdump";
+            state.label = "The patch being edited";
+            // The active patch buffer as hex, so the UI can save it to the library without
+            // the DSP ever opening a file.  Not saved into a session: it is a copy of
+            // something already inside the memory that is.
+            state.hints = kStateIsOnlyForUI;
+            state.defaultValue = "";
+            break;
+
+        case kStatePatchLoad:
+            state.key = "patchload";
+            state.label = "Load a patch from the library";
+            // "<slot> <232 hex characters>".  The other direction: the UI read the file.
+            state.hints = kStateIsOnlyForDSP;
+            state.defaultValue = "";
+            break;
+
         case kStateTones:
             state.key = "tones";
             state.label = "Tone names";
@@ -663,6 +683,8 @@ protected:
             return getSettingsState();
         if (std::strcmp(key, "patches") == 0)
             return String(m_patchesText);
+        if (std::strcmp(key, "patchdump") == 0)
+            return String(m_patchDumpHex);
         if (std::strcmp(key, "tones") == 0)
             return String(m_tonesText);
         // Answered here as well as pushed, because a UI opening into a host that is not
@@ -724,6 +746,33 @@ protected:
             const int n = std::atoi(value);
             if (n >= 0 && unsigned(n) < kNumPatches)
                 m_writeRequest.store(n, std::memory_order_relaxed);
+            return;
+        }
+
+        if (std::strcmp(key, "patchload") == 0)
+        {
+            // "<slot> <hex>".  Everything is checked HERE, on the UI's thread, so that
+            // run() is handed either a whole valid record or nothing at all: these bytes
+            // came out of a file that anybody may have written.
+            char *end = nullptr;
+            const long slot = std::strtol(value, &end, 10);
+            if (end == value || slot < 0 || slot >= long(kNumPatches))
+                return;
+            while (*end == ' ')
+                end ++;
+            if (std::strlen(end) != size_t(kPatchRecordBytes) * 2)
+                return;
+            PatchLoad job;
+            job.slot = uint8_t(slot);
+            for (unsigned i = 0; i < kPatchRecordBytes; i ++)
+            {
+                const int hi = hexNibble(end[i * 2]), lo = hexNibble(end[i * 2 + 1]);
+                if (hi < 0 || lo < 0)
+                    return;
+                job.rec[i] = uint8_t((hi << 4) | lo);
+            }
+            m_loadJob = job;
+            m_loadReady.store(true, std::memory_order_release);
             return;
         }
 
@@ -1058,7 +1107,28 @@ private:
         }
 
         refreshPatchNames();
+        refreshPatchDump();
         refreshToneNames();
+    }
+
+    /// The patch the machine is playing, as 116 bytes of hex, for the UI to save.
+    ///
+    /// Pushed only when it changes, like the panel and the names.  0x2800 is the single
+    /// source of truth for the current patch -- panel edits and DIVE edits both land
+    /// there -- so reading it back is what stops the library from saving a patch the
+    /// machine is not actually playing.
+    void refreshPatchDump()
+    {
+        uint8_t rec[kPatchRecordBytes];
+        for (unsigned i = 0; i < kPatchRecordBytes; i ++)
+            rec[i] = m_core.readMem(uint16_t(kActivePatch + i));
+
+        char hex[sizeof(m_patchDumpHex)];
+        encodeHex(rec, sizeof(rec), hex);
+        if (std::memcmp(hex, m_patchDumpHex, sizeof(hex)) == 0)
+            return;
+        std::memcpy(m_patchDumpHex, hex, sizeof(hex));
+        updateStateValue("patchdump", m_patchDumpHex);
     }
 
     /// The 64 patch names, as the machine has them, for the UI's menu.
@@ -1690,26 +1760,51 @@ private:
 
     void tickPatchWrite()
     {
-        if (m_writeRequest.load(std::memory_order_relaxed) < 0)
+        const bool wantWrite = m_writeRequest.load(std::memory_order_relaxed) >= 0;
+        const bool wantLoad  = m_loadReady.load(std::memory_order_acquire);
+        if (!wantWrite && !wantLoad)
             return;
 
         // Held, not dropped, until the machine is up.  Before then 0x2800 reads as zeros,
         // which is a perfectly plausible patch and therefore the worst possible one to
-        // store over somebody's work.
+        // store over somebody's work -- and a load before the firmware has finished
+        // initialising patchram would be overwritten by it a moment later.
         if (!m_romsLoaded || !m_machineUp)
             return;
 
-        const int n = m_writeRequest.exchange(-1, std::memory_order_relaxed);
-        if (n < 0 || unsigned(n) >= kNumPatches)
-            return;
+        // The WRITE button: the patch being edited, into a slot the user chose.
+        if (wantWrite)
+        {
+            const int n = m_writeRequest.exchange(-1, std::memory_order_relaxed);
+            if (n >= 0 && unsigned(n) < kNumPatches)
+                storeRecordFrom(unsigned(n), kActivePatch);
+        }
 
-        const uint16_t dst = uint16_t(kPatchBase + unsigned(n) * kPatchStride);
-        for (uint16_t i = 0; i < kPatchRecordBytes; i ++)
-            m_core.writeMem(uint16_t(dst + i), m_core.readMem(uint16_t(kActivePatch + i)));
+        // The library: a patch that came out of a file, into the audition slot.
+        if (wantLoad && m_loadReady.exchange(false, std::memory_order_acquire))
+        {
+            const unsigned n = m_loadJob.slot;
+            if (n < kNumPatches)
+            {
+                const uint16_t dst = uint16_t(kPatchBase + n * kPatchStride);
+                for (unsigned i = 0; i < kPatchRecordBytes; i ++)
+                    m_core.writeMem(uint16_t(dst + i), m_loadJob.rec[i]);
+                m_patchRequest.store(int(n), std::memory_order_relaxed);
+            }
+        }
+    }
 
-        // And now the machine's own patch-load path, which is the one press tickPatchSelect
-        // already knows how to make.
-        m_patchRequest.store(n, std::memory_order_relaxed);
+    /// Copy one 116-byte record into a slot and then have the firmware load it.
+    ///
+    /// Order matters: the record is written FIRST and the select triggered after, because
+    /// the firmware reads a patch record only during a load -- which makes a torn read
+    /// impossible without anything having to be locked.
+    void storeRecordFrom(unsigned slot, uint16_t src)
+    {
+        const uint16_t dst = uint16_t(kPatchBase + slot * kPatchStride);
+        for (unsigned i = 0; i < kPatchRecordBytes; i ++)
+            m_core.writeMem(uint16_t(dst + i), m_core.readMem(uint16_t(src + i)));
+        m_patchRequest.store(int(slot), std::memory_order_relaxed);
     }
 
     /// A press has to be held long enough for the firmware's debouncer at 0x4118 to see
@@ -2439,6 +2534,14 @@ private:
     uint32_t m_rebootHold = 0;
     std::atomic<int> m_patchRequest { -1 };
     std::atomic<int> m_writeRequest { -1 };
+
+    /// One patch handed down from the library, whole.  Filled on the UI's thread and read
+    /// by run(), like the DIVE job above it.
+    struct PatchLoad { uint8_t slot = 0; uint8_t rec[kPatchRecordBytes] = { 0 }; };
+    PatchLoad m_loadJob;
+    std::atomic<bool> m_loadReady { false };
+
+    char m_patchDumpHex[kPatchRecordBytes * 2 + 1] = { 0 };
     PatchStep m_patchStep = PatchStep::Idle;
     uint32_t m_patchWait = 0;
     unsigned m_patchTarget = 0, m_patchExits = 0;
