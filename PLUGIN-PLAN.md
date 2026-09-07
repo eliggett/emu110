@@ -1246,11 +1246,17 @@ no index. A bank comes into existence when the first patch claims it and stops e
 when the last one leaves; the browser derives the list from the presets on every rescan.
 Nothing can go stale, nothing needs migrating, and refiling a patch rewrites one file.
 
-The LIBRARY tab carries a row of bank tabs -- **All**, each bank in use, then **Unfiled**
-if anything is -- which filter the list. Saving files the patch into whichever bank is
-being browsed. Right-clicking a preset offers the banks, Unfiled, and a line to type a new
-name on: a bank needs no creating before it can be used, so there is no dialogue about
-making one.
+The LIBRARY tab carries a row of bank tabs -- **All**, each bank in use, **Unfiled** if
+anything is, and **+ New bank** pinned to the right so a long row cannot push it off the
+edge. They filter the list. **Save is a button in the header** and names the bank it will
+save into. Each preset shows its bank beside its name, in two wide columns rather than
+four narrow ones: clicking the name plays it, clicking the bank moves it. Showing the bank
+is what makes filing discoverable -- it is on screen, so clicking it to change it needs no
+explaining.
+
+A bank needs no creating before it is used, so **+ New bank** is one field and not a
+dialogue: name it, and it is the bank being browsed and the one Save will write into. It
+exists nowhere until a patch lands in it, and evaporates if none ever does.
 
 This replaces the `.u110bank` idea for *organising*. A bank file is still the right shape
 for **exchanging** a set of patches with somebody, and that is what it is now for.

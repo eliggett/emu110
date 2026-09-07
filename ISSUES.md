@@ -57,9 +57,10 @@ slot -- and the browser says so when a patch wants a card that is not mounted.
 **Banks are done, as categories.** A bank is a name a patch claims -- one line in the
 preset file -- so "Strings" and "Abstract" cost nothing to make and nothing to clean up:
 a bank exists while a patch is in it and stops existing when the last one leaves. The
-LIBRARY tab has a row of bank tabs (All, each bank, Unfiled) that filter the list; saving
-files into whichever bank is showing; right-clicking a preset offers the banks, Unfiled,
-and a field to type a new one.
+LIBRARY tab has a row of bank tabs (All, each bank, Unfiled, and **+ New bank**) that
+filter the list. **Save is a button in the header**, and it says which bank it will save
+into. Each preset shows its bank beside its name: clicking the name plays it, clicking
+the bank moves it. Right-clicking a preset does the same as clicking its bank.
 
 Still to do: **renaming and deleting presets from the browser** (asked for, not built
 yet), `.u110bank` files for exchanging a set with somebody, `.syx` interop, free-text

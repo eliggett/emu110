@@ -592,6 +592,7 @@ protected:
                 {
                     m_libraryTab = tab == 1;
                     m_menuHover = -1;
+                    m_libScroll = 0;
                     m_libraryNote.clear();
                     if (m_libraryTab)
                         libraryRescan();
@@ -600,31 +601,86 @@ protected:
                 return true;
             }
 
-            const int hit = patchHit(float(ev.pos.getX()), float(ev.pos.getY()));
-
             if (m_libraryTab)
             {
-                // Cell 0 is Save, and it stays put while the rest scrolls, so the thing
-                // somebody opened this for is always in the same corner.
-                if (hit == 0)
+                if (saveButtonHit(float(ev.pos.getX()), float(ev.pos.getY())))
                 {
                     librarySave();
                     repaint();
                     return true;
                 }
-                const int idx = m_libScroll + hit - 1;
-                if (hit > 0 && size_t(idx) < m_library.entries().size())
+
+                // The bank row: looking around, so it does not close the menu.
+                const int chip = bankChipHit(float(ev.pos.getX()), float(ev.pos.getY()));
+                if (chip >= 0)
                 {
-                    libraryLoad(m_library.entries()[size_t(idx)]);
+                    const std::vector<Chip> chips = bankChips(libraryLayout());
+                    if (size_t(chip) < chips.size())
+                    {
+                        const Chip &c = chips[size_t(chip)];
+                        if (c.kind == 3)
+                        {
+                            // Naming a bank is all it takes to have one; the first patch
+                            // saved into it is what puts it on disk.
+                            m_bankTargetPath.clear();
+                            m_bankTargetName.clear();
+                            m_bankBuf[0] = '\0';
+                            m_bankCaret = 0;
+                            m_bankEdit = true;
+                            m_menu = Menu::BankPick;
+                            m_menuHover = -1;
+                            showCaret();
+                        }
+                        else
+                        {
+                            m_bankMode = c.kind == 0 ? BankFilter::All
+                                       : c.kind == 2 ? BankFilter::Unfiled
+                                                     : BankFilter::Named;
+                            m_bankName = c.name;
+                            m_bankPending = false;
+                            m_libScroll = 0;
+                            m_libraryNote.clear();
+                        }
+                    }
+                    repaint();
+                    return true;
+                }
+
+                const LibHit lh = libraryHit(float(ev.pos.getX()), float(ev.pos.getY()));
+                const std::vector<const voltaire::preset::Entry *> view = libraryView();
+                const int idx = m_libScroll + lh.cell;
+
+                if (lh.cell < 0 || size_t(idx) >= view.size())
+                {
+                    m_menu = Menu::None;                 // a click in the dark closes it
+                    m_menuHover = -1;
+                    repaint();
+                    return true;
+                }
+
+                // The bank half of a row, and the right button anywhere on it, both open
+                // the picker.  The name half plays it, which is what the list is for.
+                if (lh.bankZone || ev.button == kMouseButtonRight)
+                {
+                    m_bankTargetPath = view[size_t(idx)]->path;
+                    m_bankTargetName = view[size_t(idx)]->name;
+                    m_bankEdit = false;
+                    m_bankBuf[0] = '\0';
+                    m_bankCaret = 0;
+                    m_menu = Menu::BankPick;
+                    m_menuHover = -1;
+                }
+                else
+                {
+                    libraryLoad(*view[size_t(idx)]);
                     m_menu = Menu::None;
                     m_menuHover = -1;
                 }
-                else if (hit < 0)
-                    m_menu = Menu::None;                 // a click in the dark closes it
                 repaint();
                 return true;
             }
 
+            const int hit = patchHit(float(ev.pos.getX()), float(ev.pos.getY()));
             m_menu = Menu::None;
             m_menuHover = -1;
             if (hit >= 0 && size_t(hit) < m_patchNames.size())
@@ -864,11 +920,24 @@ protected:
     {
         if (m_menu == Menu::Patch || m_menu == Menu::WritePick)
         {
-            const int hit = (m_menu == Menu::Patch && m_libraryTab)
-                    ? libraryHit(float(ev.pos.getX()), float(ev.pos.getY()))
-                    : patchHit(float(ev.pos.getX()), float(ev.pos.getY()));
-            if (hit != m_menuHover)
-            { m_menuHover = hit; repaint(); }
+            int hit;
+            bool zone = false;
+            if (m_menu == Menu::Patch && m_libraryTab)
+            {
+                if (saveButtonHit(float(ev.pos.getX()), float(ev.pos.getY())))
+                    hit = kHoverSave;
+                else
+                {
+                    const LibHit lh = libraryHit(float(ev.pos.getX()),
+                                                 float(ev.pos.getY()));
+                    hit = lh.cell;
+                    zone = lh.bankZone;
+                }
+            }
+            else
+                hit = patchHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            if (hit != m_menuHover || zone != m_hoverBankZone)
+            { m_menuHover = hit; m_hoverBankZone = zone; repaint(); }
             return true;
         }
         if (m_menu == Menu::BankPick)
@@ -942,7 +1011,7 @@ protected:
             // By whole columns: the grid reads downwards, so scrolling it a row at a time
             // would move every name into the column beside it.
             m_libScroll -= int(ev.delta.getY()) * kLibRows;
-            const int last = int(libraryView().size()) - (kLibCells - 1);
+            const int last = int(libraryView().size()) - kLibCells;
             if (m_libScroll > last) m_libScroll = last;
             if (m_libScroll < 0)    m_libScroll = 0;
             repaint();
@@ -1927,14 +1996,19 @@ private:
     // comes back with the project even if the library file has since moved or gone.
 
     /// The library grid is a row shorter than the machine's, because its header carries
-    /// the bank chips as well as the two tabs.
+    /// the bank chips as well as the two tabs -- and TWO columns rather than four, because
+    /// each row shows a preset's bank beside its name.  Showing it is what makes filing
+    /// discoverable: the bank is on screen, so clicking it to change it needs no
+    /// explaining, and 30 presets to a page is plenty with the wheel to hand.
+    static constexpr int kLibCols  = 2;
     static constexpr int kLibRows  = kMenuRows - 1;
-    static constexpr int kLibCells = kMenuCols * kLibRows;
+    static constexpr int kLibCells = kLibCols * kLibRows;
 
     MenuLayout libraryLayout() const
     {
         MenuLayout m = patchLayout();
         m.headerH = m.rowH * 2.9f;          // the tabs, then the banks
+        m.colW = (m.w - m.rowH) / float(kLibCols);
         m.h = m.headerH + float(kLibRows) * m.rowH + m.rowH * 0.5f;
         m.y = std::floor((float(getHeight()) - m.h) * 0.5f);
         if (m.y < 4.0f)
@@ -1942,19 +2016,66 @@ private:
         return m;
     }
 
-    /// Which cell of the library grid is under the pointer, or -1.
-    int libraryHit(float px, float py) const
+    /// Where in the grid the pointer is: which preset, and whether it is over the bank
+    /// shown at the right-hand end of the row rather than over the name.
+    struct LibHit { int cell = -1; bool bankZone = false; };
+
+    /// The fraction of a row given over to the bank, measured from the right.
+    static constexpr float kBankZone = 0.38f;
+
+    /// Where cell `i` is drawn.  THE ONE PLACE that decides, because the drawing and the
+    /// hit test disagreeing is exactly the bug that made clicking the first preset save a
+    /// duplicate instead: the list was drawn under a header of one height and clicked
+    /// under a header of another.  Both go through here now, so they cannot drift apart.
+    void libraryCellRect(const MenuLayout &m, int i, float &x, float &y) const
+    {
+        x = m.x + m.rowH * 0.5f + float(i / kLibRows) * m.colW;
+        y = m.y + m.headerH + float(i % kLibRows) * m.rowH;
+    }
+
+    LibHit libraryHit(float px, float py) const
     {
         const MenuLayout m = libraryLayout();
-        const float gx = px - (m.x + m.rowH * 0.5f);
-        const float gy = py - (m.y + m.headerH);
-        if (gx < 0.0f || gy < 0.0f)
-            return -1;
-        const int col = int(gx / m.colW);
-        const int row = int(gy / m.rowH);
-        if (col >= kMenuCols || row >= kLibRows)
-            return -1;
-        return col * kLibRows + row;
+        LibHit h;
+        for (int i = 0; i < kLibCells; i ++)
+        {
+            float x, y;
+            libraryCellRect(m, i, x, y);
+            if (px < x || px >= x + m.colW || py < y || py >= y + m.rowH)
+                continue;
+            h.cell = i;
+            h.bankZone = (px - x) > m.colW * (1.0f - kBankZone);
+            break;
+        }
+        return h;
+    }
+
+    /// The Save button, which is a BUTTON in the header and not a cell in the list.  It
+    /// was a cell, sharing the grid with the presets, and that was the bug: a click meant
+    /// for the first preset landed on it and quietly saved a duplicate instead.
+    struct HeaderRect { float x, y, w, h; };
+
+    std::string saveButtonLabel() const
+    {
+        return m_bankMode == BankFilter::Named ? ("Save into " + m_bankName)
+                                               : std::string("Save this patch");
+    }
+
+    HeaderRect saveButtonRect(const MenuLayout &m) const
+    {
+        HeaderRect r;
+        r.h = m.rowH * 1.1f;
+        r.y = m.y + m.rowH * 0.15f;
+        r.w = m.fontSize * (0.58f * float(saveButtonLabel().size()) + 2.0f);
+        r.x = m.x + m.w - m.rowH * 0.5f - r.w;
+        return r;
+    }
+
+    bool saveButtonHit(float px, float py) const
+    {
+        const MenuLayout m = libraryLayout();
+        const HeaderRect r = saveButtonRect(m);
+        return px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
     }
 
     /// One tab along the bank row.  `kind` is 0 for All, 1 for a named bank, 2 for
@@ -1977,10 +2098,30 @@ private:
             return;
         };
         add("All", 0, std::string());
-        for (const std::string &b : m_library.banks())
+        std::vector<std::string> banks = m_library.banks();
+        // A bank just named but not yet used has no patches claiming it, so it is not in
+        // the derived list -- but it has to be on screen, or there would be nowhere to
+        // save the first patch into it.  It evaporates if nothing ever does.
+        if (m_bankMode == BankFilter::Named && !m_bankName.empty()
+                && std::find(banks.begin(), banks.end(), m_bankName) == banks.end())
+        {
+            banks.push_back(m_bankName);
+            std::sort(banks.begin(), banks.end());
+        }
+        for (const std::string &b : banks)
             add(b, 1, b);
         if (m_library.anyUnfiled())
             add(voltaire::preset::kUnfiled, 2, std::string());
+
+        add("+ New bank", 3, std::string());
+        Chip &mk = out.back();
+        mk.x = (m.w - m.rowH) - mk.w;
+        // Anything that would run into it is dropped rather than drawn underneath.  Only a
+        // library with a lot of banks in a narrow window ever loses one, and the picker
+        // reached from a preset's bank still lists them all.
+        for (size_t i = 0; i + 1 < out.size(); i ++)
+            if (out[i].x + out[i].w > mk.x - m.fontSize * 0.6f)
+                out[i].w = 0.0f;
         return out;
     }
 
@@ -2026,7 +2167,7 @@ private:
         // under us -- another instance refiled its last patch, or somebody deleted the
         // file.  Showing an empty list with no tab lit is a browser nobody can leave
         // except by guessing, so fall back to All.
-        if (m_bankMode == BankFilter::Named)
+        if (m_bankMode == BankFilter::Named && !m_bankPending)
         {
             const std::vector<std::string> banks = m_library.banks();
             if (std::find(banks.begin(), banks.end(), m_bankName) == banks.end())
@@ -2106,7 +2247,9 @@ private:
         { m_libraryNote = err; return; }
 
         libraryRescan();
-        m_libraryNote = "saved \"" + p.name + "\"";
+        m_bankPending = false;
+        m_libraryNote = p.bank.empty() ? ("saved \"" + p.name + "\"")
+                                       : ("saved \"" + p.name + "\" into " + p.bank);
     }
 
     /// Play one.  The record goes into the audition slot and the firmware loads it, which
@@ -2184,7 +2327,7 @@ private:
         libraryRescan();
         // If the bank being shown has just lost its last patch it no longer exists, so
         // showing it would be showing an empty list nobody can leave except by guessing.
-        if (m_bankMode == BankFilter::Named)
+        if (m_bankMode == BankFilter::Named && !m_bankPending)
         {
             const std::vector<std::string> banks = m_library.banks();
             if (std::find(banks.begin(), banks.end(), m_bankName) == banks.end())
@@ -2229,7 +2372,8 @@ private:
         const std::vector<Chip> chips = bankChips(m);
         const float x0 = m.x + m.rowH * 0.5f;
         for (size_t i = 0; i < chips.size(); i ++)
-            if (px >= x0 + chips[i].x && px < x0 + chips[i].x + chips[i].w)
+            if (chips[i].w > 0.0f
+                    && px >= x0 + chips[i].x && px < x0 + chips[i].x + chips[i].w)
                 return int(i);
         return -1;
     }
@@ -2276,20 +2420,37 @@ private:
         drawPatchTabs(m);
 
         const std::vector<const voltaire::preset::Entry *> view = libraryView();
-        char right[160];
+
+        // ---- the Save button.
+        const HeaderRect sb = saveButtonRect(m);
+        beginPath();
+        roundedRect(sb.x, sb.y, sb.w, sb.h, sb.h * 0.28f);
+        fillColor(m_menuHover == kHoverSave ? Color(52, 116, 60) : Color(40, 96, 46));
+        fill();
+        strokeColor(Color(120, 200, 130));
+        strokeWidth(1.0f);
+        stroke();
+        fontSize(m.fontSize * 0.85f);
+        textAlign(ALIGN_CENTER | ALIGN_MIDDLE);
+        fillColor(Color(225, 255, 225));
+        text(sb.x + sb.w * 0.5f, sb.y + sb.h * 0.5f, saveButtonLabel().c_str(), nullptr);
+
+        // ---- what just happened, under the Save button and out of the tabs' way.
+        char right[192];
         if (!m_libraryNote.empty())
             std::snprintf(right, sizeof(right), "%s", m_libraryNote.c_str());
         else if (m_library.entries().empty())
-            std::snprintf(right, sizeof(right), "no presets saved yet");
+            std::snprintf(right, sizeof(right),
+                          "nothing saved yet -- Save this patch puts one here");
         else
-            std::snprintf(right, sizeof(right), "%d of %d presets   |   "
-                          "right-click to file one", int(view.size()),
-                          int(m_library.entries().size()));
-
-        fontSize(m.fontSize * 0.8f);
+            std::snprintf(right, sizeof(right),
+                          "%d of %d presets   |   click a name to play it, "
+                          "click its bank to move it",
+                          int(view.size()), int(m_library.entries().size()));
+        fontSize(m.fontSize * 0.72f);
         textAlign(ALIGN_RIGHT | ALIGN_MIDDLE);
         fillColor(Color(150, 155, 165));
-        text(m.x + m.w - m.rowH * 0.5f, m.y + m.rowH * 0.8f, right, nullptr);
+        text(sb.x - m.fontSize * 0.8f, m.y + m.rowH * 0.7f, right, nullptr);
 
         // ---- the bank row.
         const std::vector<Chip> chips = bankChips(m);
@@ -2299,8 +2460,8 @@ private:
         textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
         for (const Chip &c : chips)
         {
-            if (chipX + c.x + c.w > m.x + m.w - m.rowH * 0.5f)
-                break;                      // the rest do not fit; the wheel reaches them
+            if (c.w <= 0.0f)
+                continue;                   // dropped: it would have run into "+ New bank"
             const bool on = chipSelected(c);
             beginPath();
             roundedRect(chipX + c.x, chipY, c.w, m.rowH * 0.95f, m.rowH * 0.3f);
@@ -2314,17 +2475,16 @@ private:
                  c.label.c_str(), nullptr);
         }
 
-        // ---- the presets.
-        fontSize(m.fontSize);
-        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        // ---- the presets: every cell is one, and each shows the bank it is filed in.
         for (int i = 0; i < kLibCells; i ++)
         {
-            const int idx = m_libScroll + i - 1;            // cell 0 is Save
-            if (i > 0 && size_t(idx) >= view.size())
+            const int idx = m_libScroll + i;
+            if (size_t(idx) >= view.size())
                 break;
 
-            const float x = m.x + m.rowH * 0.5f + float(i / kLibRows) * m.colW;
-            const float y = m.y + m.headerH + float(i % kLibRows) * m.rowH;
+            float x, y;
+            libraryCellRect(m, i, x, y);
+            const float bankX = x + m.colW * (1.0f - kBankZone);
 
             if (i == m_menuHover)
             {
@@ -2332,19 +2492,31 @@ private:
                 roundedRect(x, y + 1.0f, m.colW - 2.0f, m.rowH - 2.0f, 2.0f);
                 fillColor(Color(56, 60, 68));
                 fill();
+                // The two halves do different things, so the pointer is told which one it
+                // is over rather than being left to find out by clicking.
+                beginPath();
+                roundedRect(m_hoverBankZone ? bankX : x, y + 1.0f,
+                            m_hoverBankZone ? (x + m.colW - 2.0f - bankX)
+                                            : (bankX - x),
+                            m.rowH - 2.0f, 2.0f);
+                fillColor(Color(80, 86, 96));
+                fill();
             }
-            if (i == 0)
-            {
-                fillColor(Color(190, 255, 190));
-                text(x + m.fontSize * 0.4f, y + m.rowH * 0.5f,
-                     m_bankMode == BankFilter::Named ? "+ Save into this bank"
-                                                     : "+ Save this patch", nullptr);
-                continue;
-            }
+
+            fontSize(m.fontSize);
+            textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
             fillColor(Color(214, 216, 220));
             text(x + m.fontSize * 0.4f, y + m.rowH * 0.5f,
                  view[size_t(idx)]->name.c_str(), nullptr);
+
+            fontSize(m.fontSize * 0.78f);
+            textAlign(ALIGN_RIGHT | ALIGN_MIDDLE);
+            const bool filed = !view[size_t(idx)]->bank.empty();
+            fillColor(filed ? Color(150, 175, 195) : Color(96, 100, 108));
+            text(x + m.colW - m.fontSize * 0.5f, y + m.rowH * 0.5f,
+                 filed ? view[size_t(idx)]->bank.c_str() : "--", nullptr);
         }
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
     }
 
     // ---- filing a preset into a bank ---------------------------------------------------
@@ -2390,6 +2562,23 @@ private:
     }
 
     /// What row `i` means: a bank name, "" for Unfiled, or the new-name field.
+    /// The box does two jobs, told apart by whether a preset was named when it opened.
+    /// With one, choosing a bank FILES it; without one -- the "+ New bank" chip -- choosing
+    /// a bank just selects it to browse and to save into.
+    bool bankPickIsFiling() const { return !m_bankTargetPath.empty(); }
+
+    void bankSelect(const std::string &name)
+    {
+        m_bankMode = name.empty() ? BankFilter::Unfiled : BankFilter::Named;
+        m_bankName = name;
+        // A bank nothing has claimed yet must stay on screen, or there would be nowhere to
+        // save the first patch into it.
+        const std::vector<std::string> banks = m_library.banks();
+        m_bankPending = !name.empty()
+                && std::find(banks.begin(), banks.end(), name) == banks.end();
+        m_libScroll = 0;
+    }
+
     void bankPickChoose(int i)
     {
         const std::vector<std::string> banks = m_library.banks();
@@ -2397,18 +2586,24 @@ private:
             return;
         if (size_t(i) < banks.size())
         {
-            libraryFile(m_bankTargetPath, banks[size_t(i)]);
+            if (bankPickIsFiling())
+                libraryFile(m_bankTargetPath, banks[size_t(i)]);
+            else
+                bankSelect(banks[size_t(i)]);
             m_menu = Menu::None;
         }
         else if (size_t(i) == banks.size())
         {
-            libraryFile(m_bankTargetPath, std::string());
+            if (bankPickIsFiling())
+                libraryFile(m_bankTargetPath, std::string());
+            else
+                bankSelect(std::string());
             m_menu = Menu::None;
         }
         else
         {
-            // The last row is the field itself: clicking it starts typing, and Enter
-            // files the preset under whatever has been typed.
+            // The last row is the field itself: clicking it starts typing, and Enter does
+            // whichever of the two jobs this box was opened for.
             m_bankEdit = true;
             showCaret();
         }
@@ -2419,12 +2614,17 @@ private:
         const std::string name = voltaire::preset::cleanBankName(m_bankBuf);
         m_bankEdit = false;
         if (name.empty())
-            return;
-        libraryFile(m_bankTargetPath, name);
-        // Show what was just filed, since that is almost certainly what is wanted next.
-        m_bankMode = BankFilter::Named;
-        m_bankName = name;
-        m_libScroll = 0;
+        { m_menu = Menu::None; return; }
+
+        if (bankPickIsFiling())
+            libraryFile(m_bankTargetPath, name);
+        // Either way the new bank becomes the one being browsed, since that is almost
+        // certainly what is wanted next -- and when nothing was filed into it, being
+        // browsed is the only thing keeping it alive until a patch is saved there.
+        bankSelect(name);
+        m_libraryNote = bankPickIsFiling()
+                ? m_libraryNote
+                : ("bank \"" + name + "\" -- Save this patch puts one in it");
         m_menu = Menu::None;
     }
 
@@ -2450,8 +2650,12 @@ private:
         textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
         fontSize(L.rowH * 0.9f);
         fillColor(Color(255, 180, 90));
-        char head[128];
-        std::snprintf(head, sizeof(head), "FILE \"%s\" UNDER", m_bankTargetName.c_str());
+        char head[160];
+        if (bankPickIsFiling())
+            std::snprintf(head, sizeof(head), "FILE \"%s\" UNDER",
+                          m_bankTargetName.c_str());
+        else
+            std::snprintf(head, sizeof(head), "CHOOSE A BANK");
         text(L.x + L.rowH * 0.7f, L.y + L.rowH * 1.1f, head, nullptr);
 
         for (int i = 0; i < L.rows; i ++)
@@ -2477,7 +2681,8 @@ private:
             {
                 fillColor(Color(168, 174, 184));
                 text(L.x + L.rowH * 0.9f, y + L.rowH * 0.6f,
-                     "Unfiled -- in no bank at all", nullptr);
+                     bankPickIsFiling() ? "Unfiled -- in no bank at all"
+                                        : "Unfiled -- the ones in no bank", nullptr);
             }
             else
             {
@@ -4300,8 +4505,13 @@ private:
 
     /// The preset the bank picker is about to file, by path: an index would be stale the
     /// moment another instance saved something.
-    std::string m_bankTargetPath;
+    std::string m_bankTargetPath;   ///< empty means "choose which bank to browse"
     std::string m_bankTargetName;
+    bool m_bankPending = false;     ///< a bank named but not yet claimed by any patch
+    bool m_hoverBankZone = false;   ///< the pointer is over a row's bank, not its name
+
+    /// A hover value that is not a grid cell.
+    static constexpr int kHoverSave = -2;
     bool m_bankEdit = false;          ///< typing a new bank name
     char m_bankBuf[32] = { 0 };
     int  m_bankCaret = 0;
