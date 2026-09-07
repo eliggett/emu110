@@ -32,7 +32,7 @@ STAMP="$OUT/artwork.stamp"
 # Everything the exported artwork depends on.  The exporters are in here too: a change
 # to how a header is written has to re-export just as surely as a change to a shape.
 INPUTS="$GFX/overall_panel_inkscape.svg
-$(ls $GFX/dive_*.svg 2>/dev/null | grep -v dive_panel_inkscape.svg)
+$(ls $GFX/dive_*.svg 2>/dev/null | grep -v dive_panel_inkscape.svg | LC_ALL=C sort)
 tools/panel_export.py
 ../tools/make_lcd_cgrom.py"
 
@@ -51,6 +51,18 @@ stamp_now() {
     done
 }
 
+# [!] The stamp is compared as a SET of hashes, not as a text file.
+#
+# The ORDER of its lines is not a property of the artwork -- it is `ls` obeying
+# LC_COLLATE.  In a UTF-8 locale dive_LFO.svg files between dive_level and dive_pitch; in
+# the C locale, which is what a CI runner is likely to be in, uppercase sorts before
+# lowercase and it comes first instead.  The nine hashes are identical either way, but a
+# text comparison of the two files is not, so the same tree that says "artwork is
+# current" on a desktop said "the Inkscape files changed" on the runner and stopped for a
+# font it had no reason to need.  Sorting both sides settles it, and it validates a stamp
+# written on any machine, including the ones already committed.
+stamp_key() { LC_ALL=C sort; }
+
 missing=""
 for f in $OUTPUTS; do
     [ -e "$f" ] || missing="$missing $(basename "$f")"
@@ -59,7 +71,7 @@ done
 now="$(stamp_now)"
 
 if [ "$force" = 0 ] && [ -z "$missing" ] && [ -e "$STAMP" ] \
-        && [ "$now" = "$(cat "$STAMP")" ]; then
+        && [ "$(printf '%s\n' "$now" | stamp_key)" = "$(stamp_key < "$STAMP")" ]; then
     echo "  artwork is current -- using the checked-in export (no fonts needed)"
     exit 0
 fi
