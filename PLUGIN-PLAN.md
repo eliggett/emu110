@@ -1238,7 +1238,24 @@ Three decisions came out differently from the sketch below, each for a reason:
   automation is not a real one: a host that is automating a parameter will move it again
   on the next block, which is what automation is for.
 
-Not done yet: `.u110bank` import and export, `.syx`, tags and search, the wave-ROM hashes
+#### `[x]` Banks, and what they turned out to be
+
+A bank is a **category a patch claims**, not a container -- "Strings", "Abstract" -- so it
+is one `bank <name>` line in the preset file and nothing else. No directory, no bank file,
+no index. A bank comes into existence when the first patch claims it and stops existing
+when the last one leaves; the browser derives the list from the presets on every rescan.
+Nothing can go stale, nothing needs migrating, and refiling a patch rewrites one file.
+
+The LIBRARY tab carries a row of bank tabs -- **All**, each bank in use, then **Unfiled**
+if anything is -- which filter the list. Saving files the patch into whichever bank is
+being browsed. Right-clicking a preset offers the banks, Unfiled, and a line to type a new
+name on: a bank needs no creating before it can be used, so there is no dialogue about
+making one.
+
+This replaces the `.u110bank` idea for *organising*. A bank file is still the right shape
+for **exchanging** a set of patches with somebody, and that is what it is now for.
+
+Not done yet: `.u110bank` import and export, `.syx`, free-text search, the wave-ROM hashes
 a preset was authored against, deleting or renaming from the browser, and the audition
 slot is the constant `kAuditionSlot` rather than a setting.
 

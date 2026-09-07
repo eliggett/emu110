@@ -64,6 +64,7 @@ int main(int argc, char **argv)
     // ---- the round trip --------------------------------------------------------------
     Preset out;
     out.name     = "A Name With Spaces";
+    out.bank     = "Strings";
     out.record   = madeUpRecord();
     out.volumeDb = -3.5f;
     out.hf       = false;
@@ -80,6 +81,19 @@ int main(int argc, char **argv)
     check(back.volumeDb < -3.49f && back.volumeDb > -3.51f, "the volume survives");
     check(back.hf == false, "the HF correction setting survives");
     check(back.hasSettings, "and it says it carried settings");
+    check(back.bank == "Strings", "the bank survives");
+
+    // A preset with no bank is unfiled, and writes no bank line at all.
+    {
+        Preset u = out;
+        u.bank.clear();
+        u.name = "Unfiled One";
+        const std::string up = dir + "/unfiled" + kSuffix;
+        std::string e2;
+        check(save(up, u, e2), "a preset with no bank saves");
+        Preset ub;
+        check(load(up, ub, e2) && ub.bank.empty(), "and comes back unfiled");
+    }
 
     // ---- what the record itself says --------------------------------------------------
     check(lcdName(out.record) == "Test Patch", "the machine's own ten-byte name is read");
@@ -149,6 +163,39 @@ int main(int argc, char **argv)
     check(fileNameFor("Rhodes / EP #2").find('/') == std::string::npos,
           "and nor can one with a slash in the middle");
 
+    // ---- filing an existing preset: read, change one line, write ----------------------
+    //
+    // This is exactly what the browser's right-click does, and the thing worth checking is
+    // that changing the bank changes NOTHING ELSE -- the patch, the name and the settings
+    // all survive a trip through the parser and back out again.
+    {
+        Preset before;
+        std::string e2;
+        (void)load(path, before, e2);
+
+        Preset filed = before;
+        filed.bank = "Abstract";
+        check(save(path, filed, e2), "a preset is refiled by rewriting it");
+
+        Preset after;
+        check(load(path, after, e2), "and reads back");
+        check(after.bank == "Abstract", "in its new bank");
+        check(after.record == before.record, "with the patch untouched");
+        check(after.name == before.name && after.created == before.created,
+              "and the name and date untouched");
+        check(after.volumeDb == before.volumeDb && after.hf == before.hf,
+              "and the settings untouched");
+
+        filed.bank = "Strings";
+        (void)save(path, filed, e2);
+    }
+
+    // ---- bank names cannot break a line, or a tab -------------------------------------
+    check(cleanBankName("  Strings  ") == "Strings", "a bank name is trimmed");
+    check(cleanBankName("Two\nLines").find('\n') == std::string::npos,
+          "and can never contain a newline, which would forge a second key");
+    check(cleanBankName(std::string(200, 'x')).size() <= 24, "and cannot be enormous");
+
     // ---- the index sees what is on disk ------------------------------------------------
     {
         Index idx;
@@ -163,10 +210,26 @@ int main(int argc, char **argv)
         idx.rescan(dir);
         bool again = false;
         for (const Entry &e : idx.entries())
-            if (e.name == out.name)
+            if (e.name == out.name && e.bank == "Strings")
                 again = true;
-        check(again, "and a rescan off the cache says the same");
+        check(again, "and a rescan off the cache says the same, bank included");
+
+        const std::vector<std::string> b = idx.banks();
+        check(b.size() == 1 && b[0] == "Strings",
+              "the bank list is derived from the presets, without repeats");
+        check(idx.anyUnfiled(), "and it knows something is unfiled");
+
+        // A bank exists only while a patch claims it: unfile the one preset that had one
+        // and the bank stops being offered, with nothing to clean up anywhere.
+        Preset moved;
+        std::string e3;
+        (void)load(path, moved, e3);
+        moved.bank.clear();
+        (void)save(path, moved, e3);
+        idx.rescan(dir);
+        check(idx.banks().empty(), "a bank disappears when its last patch leaves it");
     }
+    std::remove((dir + "/unfiled" + kSuffix).c_str());
 
     std::remove(path.c_str());
     std::printf("preset: %d of %d checks passed%s\n", g_pass, g_checks,

@@ -61,9 +61,20 @@ inline constexpr const char *kMagic   = "Voltaire110 patch";
 inline constexpr int         kVersion = 1;
 inline constexpr const char *kSuffix  = ".u110pat";
 
+/// The bank a preset with no bank line is in.  Not written to any file: it is the absence
+/// of a bank, named so that the browser has something to put in a tab.
+inline constexpr const char *kUnfiled = "Unfiled";
+
 struct Preset
 {
     std::string          name;                   ///< what a human calls it, UTF-8
+    /// Which group of patches this one belongs to -- "Strings", "Abstract" -- or empty.
+    ///
+    /// A BANK IS A NAME AND NOTHING ELSE.  It is not a directory, not a container file and
+    /// not an index: it is one line in the preset, so a bank comes into existence when the
+    /// first patch claims it and disappears when the last one stops.  Nothing can go stale,
+    /// nothing has to be migrated, and moving a preset between banks rewrites one file.
+    std::string          bank;
     std::vector<uint8_t> record;                 ///< kRecordBytes of patch
     float                volumeDb    = 0.0f;
     bool                 hf          = true;
@@ -229,6 +240,8 @@ inline bool save(const std::string &path, const Preset &p, std::string &err)
 
     std::fprintf(f, "%s %d\n", kMagic, kVersion);
     std::fprintf(f, "name %s\n", p.name.c_str());
+    if (!p.bank.empty())
+        std::fprintf(f, "bank %s\n", p.bank.c_str());
     if (!p.created.empty())
         std::fprintf(f, "created %s\n", p.created.c_str());
     std::fprintf(f, "volume %.4f\n", double(p.volumeDb));
@@ -315,6 +328,8 @@ inline bool load(const std::string &path, Preset &p, std::string &err)
 
         if (std::strcmp(key, "name") == 0)
             p.name = val;
+        else if (std::strcmp(key, "bank") == 0)
+            p.bank = val;
         else if (std::strcmp(key, "created") == 0)
             p.created = val;
         else if (std::strcmp(key, "volume") == 0)
@@ -354,9 +369,26 @@ struct Entry
 {
     std::string path;
     std::string name;          ///< the display name, read out of the file
+    std::string bank;          ///< empty for unfiled
     long long   mtime = 0;
     long long   size  = 0;
 };
+
+/// A bank name that is safe to write on a line of its own and to show in a tab.
+inline std::string cleanBankName(const std::string &in)
+{
+    std::string s;
+    for (const char c : in)
+        if (c >= 0x20 && c != 0x7f)
+            s += c;
+    while (!s.empty() && s.back() == ' ')
+        s.pop_back();
+    while (!s.empty() && s.front() == ' ')
+        s.erase(s.begin());
+    if (s.size() > 24)
+        s.resize(24);
+    return s;
+}
 
 /// The library as a list, kept across rescans so that opening the browser does not mean
 /// reading every file again.
@@ -398,7 +430,10 @@ public:
             const auto cached = m_cache.find(path);
             if (cached != m_cache.end() && cached->second.mtime == en.mtime
                     && cached->second.size == en.size)
+            {
                 en.name = cached->second.name;
+                en.bank = cached->second.bank;
+            }
             else
             {
                 Preset p;
@@ -406,8 +441,10 @@ public:
                 // A file that will not parse is still SHOWN, named after itself, rather
                 // than silently missing.  Somebody who put it there should be able to see
                 // that it is there and that something is wrong with it.
-                en.name = load(path, p, err) ? p.name
-                                             : fn.substr(0, fn.size() - suffixLen) + "  (?)";
+                if (load(path, p, err))
+                { en.name = p.name; en.bank = p.bank; }
+                else
+                    en.name = fn.substr(0, fn.size() - suffixLen) + "  (?)";
                 m_cache[path] = en;
             }
             m_entries.push_back(en);
@@ -426,6 +463,36 @@ public:
     }
 
     const std::vector<Entry> &entries() const { return m_entries; }
+
+    /// Every bank in use, sorted, without repeats.  Derived from the presets on each
+    /// rescan rather than kept anywhere, which is what stops a bank list from outliving
+    /// the patches that justified it.
+    std::vector<std::string> banks() const
+    {
+        std::vector<std::string> out;
+        for (const Entry &e : m_entries)
+            if (!e.bank.empty()
+                    && std::find(out.begin(), out.end(), e.bank) == out.end())
+                out.push_back(e.bank);
+        std::sort(out.begin(), out.end(),
+                  [](const std::string &a, const std::string &b)
+                  {
+                      std::string x = a, y = b;
+                      for (char &c : x) if (c >= 'A' && c <= 'Z') c = char(c + 32);
+                      for (char &c : y) if (c >= 'A' && c <= 'Z') c = char(c + 32);
+                      return x < y;
+                  });
+        return out;
+    }
+
+    /// Whether anything is unfiled, so the browser knows whether that tab is worth a place.
+    bool anyUnfiled() const
+    {
+        for (const Entry &e : m_entries)
+            if (e.bank.empty())
+                return true;
+        return false;
+    }
 
 private:
     std::vector<Entry> m_entries;

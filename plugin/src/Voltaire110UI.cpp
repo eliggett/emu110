@@ -345,7 +345,7 @@ protected:
 
     void uiIdle() override
     {
-        if (m_nameEdit)
+        if (m_nameEdit || m_bankEdit)
         {
             struct timespec ts;
             clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -447,6 +447,8 @@ protected:
             drawPatchMenu();
         else if (m_menu == Menu::WriteConfirm)
             drawWriteConfirm();
+        else if (m_menu == Menu::BankPick)
+            drawBankPick();
         else if (m_menu == Menu::Tone)
             drawToneMenu();
         else if (m_menu == Menu::Value)
@@ -539,6 +541,20 @@ protected:
             }
             else
                 m_menu = Menu::None;
+            repaint();
+            return true;
+        }
+
+        if (m_menu == Menu::BankPick)
+        {
+            if (!ev.press)
+                return true;
+            const int hit = bankPickHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            if (hit < 0)
+            { m_menu = Menu::None; m_bankEdit = false; }
+            else
+                bankPickChoose(hit);
+            m_menuHover = -1;
             repaint();
             return true;
         }
@@ -848,7 +864,16 @@ protected:
     {
         if (m_menu == Menu::Patch || m_menu == Menu::WritePick)
         {
-            const int hit = patchHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            const int hit = (m_menu == Menu::Patch && m_libraryTab)
+                    ? libraryHit(float(ev.pos.getX()), float(ev.pos.getY()))
+                    : patchHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            if (hit != m_menuHover)
+            { m_menuHover = hit; repaint(); }
+            return true;
+        }
+        if (m_menu == Menu::BankPick)
+        {
+            const int hit = bankPickHit(float(ev.pos.getX()), float(ev.pos.getY()));
             if (hit != m_menuHover)
             { m_menuHover = hit; repaint(); }
             return true;
@@ -916,8 +941,8 @@ protected:
         {
             // By whole columns: the grid reads downwards, so scrolling it a row at a time
             // would move every name into the column beside it.
-            m_libScroll -= int(ev.delta.getY()) * kMenuRows;
-            const int last = int(m_library.entries().size()) - (kLibCells - 1);
+            m_libScroll -= int(ev.delta.getY()) * kLibRows;
+            const int last = int(libraryView().size()) - (kLibCells - 1);
             if (m_libScroll > last) m_libScroll = last;
             if (m_libScroll < 0)    m_libScroll = 0;
             repaint();
@@ -984,6 +1009,27 @@ protected:
 
     bool onKeyboard(const KeyboardEvent &ev) override
     {
+        if (m_bankEdit && ev.press)
+        {
+            if (ev.key == kKeyEscape)
+            { m_bankEdit = false; repaint(); return true; }
+            if (ev.key == kKeyBackspace)
+            {
+                if (m_bankCaret > 0)
+                    m_bankBuf[-- m_bankCaret] = '\0';
+                showCaret();
+                repaint();
+                return true;
+            }
+            if (ev.key == kKeyEnter)
+            {
+                commitNewBank();
+                repaint();
+                return true;
+            }
+            return true;                 // nothing else reaches the panel while typing
+        }
+
         if (m_nameEdit && ev.press)
         {
             if (ev.key == kKeyEscape)
@@ -1019,6 +1065,21 @@ protected:
     /// nothing.
     bool onCharacterInput(const CharacterInputEvent &ev) override
     {
+        if (m_bankEdit)
+        {
+            // A bank name is shown in a tab and written on a line of its own, so it takes
+            // printable characters and nothing else -- a newline here would forge a second
+            // key in the preset file.
+            const unsigned c = ev.character;
+            if (c >= 0x20 && c < 0x7f && m_bankCaret < int(sizeof(m_bankBuf)) - 1)
+            {
+                m_bankBuf[m_bankCaret ++] = char(c);
+                m_bankBuf[m_bankCaret] = '\0';
+            }
+            showCaret();
+            repaint();
+            return true;
+        }
         if (!m_nameEdit)
             return false;
         const uint c = ev.character;
@@ -1865,8 +1926,88 @@ private:
     // self-contained for free: patchram is saved whole into the `nvram` key, so the patch
     // comes back with the project even if the library file has since moved or gone.
 
-    /// How many presets fit on screen at once, with the first cell spent on Save.
-    static constexpr int kLibCells = kMenuCols * kMenuRows;
+    /// The library grid is a row shorter than the machine's, because its header carries
+    /// the bank chips as well as the two tabs.
+    static constexpr int kLibRows  = kMenuRows - 1;
+    static constexpr int kLibCells = kMenuCols * kLibRows;
+
+    MenuLayout libraryLayout() const
+    {
+        MenuLayout m = patchLayout();
+        m.headerH = m.rowH * 2.9f;          // the tabs, then the banks
+        m.h = m.headerH + float(kLibRows) * m.rowH + m.rowH * 0.5f;
+        m.y = std::floor((float(getHeight()) - m.h) * 0.5f);
+        if (m.y < 4.0f)
+            m.y = 4.0f;
+        return m;
+    }
+
+    /// Which cell of the library grid is under the pointer, or -1.
+    int libraryHit(float px, float py) const
+    {
+        const MenuLayout m = libraryLayout();
+        const float gx = px - (m.x + m.rowH * 0.5f);
+        const float gy = py - (m.y + m.headerH);
+        if (gx < 0.0f || gy < 0.0f)
+            return -1;
+        const int col = int(gx / m.colW);
+        const int row = int(gy / m.rowH);
+        if (col >= kMenuCols || row >= kLibRows)
+            return -1;
+        return col * kLibRows + row;
+    }
+
+    /// One tab along the bank row.  `kind` is 0 for All, 1 for a named bank, 2 for
+    /// Unfiled; `label` is what it says.
+    struct Chip { float x, w; std::string label; int kind; std::string name; };
+
+    std::vector<Chip> bankChips(const MenuLayout &m) const
+    {
+        std::vector<Chip> out;
+        const auto add = [&](const std::string &label, int kind, const std::string &name)
+        {
+            Chip c;
+            c.label = label;
+            c.kind  = kind;
+            c.name  = name;
+            // Estimated from the font size, as every other measurement in these menus is.
+            c.w = m.fontSize * (0.58f * float(label.size()) + 1.2f);
+            c.x = out.empty() ? 0.0f : out.back().x + out.back().w + 4.0f;
+            out.push_back(c);
+            return;
+        };
+        add("All", 0, std::string());
+        for (const std::string &b : m_library.banks())
+            add(b, 1, b);
+        if (m_library.anyUnfiled())
+            add(voltaire::preset::kUnfiled, 2, std::string());
+        return out;
+    }
+
+    bool chipSelected(const Chip &c) const
+    {
+        if (c.kind == 0) return m_bankMode == BankFilter::All;
+        if (c.kind == 2) return m_bankMode == BankFilter::Unfiled;
+        return m_bankMode == BankFilter::Named && m_bankName == c.name;
+    }
+
+    /// The presets the browser is showing, in order.  Rebuilt rather than cached: it is a
+    /// vector of pointers over a list that is already in memory, and a cache here would be
+    /// one more thing that can disagree with the files.
+    std::vector<const voltaire::preset::Entry *> libraryView() const
+    {
+        std::vector<const voltaire::preset::Entry *> out;
+        for (const voltaire::preset::Entry &e : m_library.entries())
+        {
+            const bool keep =
+                    m_bankMode == BankFilter::All ? true
+                  : m_bankMode == BankFilter::Unfiled ? e.bank.empty()
+                  : e.bank == m_bankName;
+            if (keep)
+                out.push_back(&e);
+        }
+        return out;
+    }
 
     void libraryRescan()
     {
@@ -1880,6 +2021,17 @@ private:
         m_library.rescan(m_libraryDir);
         if (m_libScroll > int(m_library.entries().size()))
             m_libScroll = 0;
+
+        // A bank exists only while a patch claims it, so the one being browsed can vanish
+        // under us -- another instance refiled its last patch, or somebody deleted the
+        // file.  Showing an empty list with no tab lit is a browser nobody can leave
+        // except by guessing, so fall back to All.
+        if (m_bankMode == BankFilter::Named)
+        {
+            const std::vector<std::string> banks = m_library.banks();
+            if (std::find(banks.begin(), banks.end(), m_bankName) == banks.end())
+            { m_bankMode = BankFilter::All; m_bankName.clear(); }
+        }
     }
 
     /// Save what the machine is playing.
@@ -1918,6 +2070,10 @@ private:
         // separate lines the reader may ignore rather than anything inside the record.
         p.volumeDb = m_volume;
         p.hf = m_hf;
+        // Saved into the bank being browsed, which is the one thing on screen that says
+        // where a new patch belongs.  "All" and "Unfiled" both mean no bank.
+        if (m_bankMode == BankFilter::Named)
+            p.bank = m_bankName;
         char when[32];
         const std::time_t t = std::time(nullptr);
         std::tm tm {};
@@ -2007,18 +2163,75 @@ private:
                 : ("loaded \"" + p.name + "\" -- needs card " + missing + ", not mounted");
     }
 
+    /// Move one preset into a bank, or out of every bank when `bank` is empty.
+    ///
+    /// Read, change one line, write.  The whole of what a bank is, is that line -- so this
+    /// is the whole of what filing a patch costs, and there is no index anywhere that could
+    /// disagree with it afterwards.
+    void libraryFile(const std::string &path, const std::string &bank)
+    {
+        using namespace voltaire::preset;
+
+        Preset p;
+        std::string err;
+        if (!voltaire::preset::load(path, p, err))
+        { m_libraryNote = err; return; }
+
+        p.bank = cleanBankName(bank);
+        if (!voltaire::preset::save(path, p, err))
+        { m_libraryNote = err; return; }
+
+        libraryRescan();
+        // If the bank being shown has just lost its last patch it no longer exists, so
+        // showing it would be showing an empty list nobody can leave except by guessing.
+        if (m_bankMode == BankFilter::Named)
+        {
+            const std::vector<std::string> banks = m_library.banks();
+            if (std::find(banks.begin(), banks.end(), m_bankName) == banks.end())
+                m_bankMode = BankFilter::All;
+        }
+        m_libScroll = 0;
+        m_libraryNote = p.bank.empty()
+                ? ("\"" + p.name + "\" is unfiled")
+                : ("\"" + p.name + "\" filed under " + p.bank);
+    }
+
     /// The two halves of the PATCH menu, as tabs in its header.  0 is the machine's own
     /// 64, 1 is the library; -1 is anywhere else.
+    /// Whichever of the two lists is showing, since the library's header is taller.
+    MenuLayout currentPatchLayout() const
+    {
+        return m_libraryTab ? libraryLayout() : patchLayout();
+    }
+
     int patchTabHit(float px, float py) const
     {
-        const MenuLayout m = patchLayout();
-        if (py < m.y || py >= m.y + m.headerH)
+        const MenuLayout m = currentPatchLayout();
+        // Measured from the top of the box rather than as a fraction of the header, which
+        // is 1.6 rows on one list and 2.9 on the other.
+        if (py < m.y + m.rowH * 0.15f || py >= m.y + m.rowH * 1.25f)
             return -1;
         const float x0 = m.x + m.rowH * 0.5f;
         const float tabW = m.fontSize * 9.0f;
         if (px < x0 || px >= x0 + tabW * 2.0f)
             return -1;
         return int((px - x0) / tabW);
+    }
+
+    /// Which bank chip is under the pointer, as an index into bankChips(), or -1.
+    int bankChipHit(float px, float py) const
+    {
+        if (!m_libraryTab)
+            return -1;
+        const MenuLayout m = libraryLayout();
+        if (py < m.y + m.rowH * 1.7f || py >= m.y + m.rowH * 2.65f)
+            return -1;
+        const std::vector<Chip> chips = bankChips(m);
+        const float x0 = m.x + m.rowH * 0.5f;
+        for (size_t i = 0; i < chips.size(); i ++)
+            if (px >= x0 + chips[i].x && px < x0 + chips[i].x + chips[i].w)
+                return int(i);
+        return -1;
     }
 
     void drawPatchTabs(const MenuLayout &m)
@@ -2030,19 +2243,19 @@ private:
         {
             const bool on = (i == 1) == m_libraryTab;
             beginPath();
-            roundedRect(x0 + float(i) * tabW, m.y + m.headerH * 0.18f,
-                        tabW - 4.0f, m.headerH * 0.64f, 3.0f);
+            roundedRect(x0 + float(i) * tabW, m.y + m.rowH * 0.2f,
+                        tabW - 4.0f, m.rowH, 3.0f);
             fillColor(on ? Color(56, 60, 68) : Color(32, 34, 38));
             fill();
             fillColor(on ? Color(235, 235, 235) : Color(140, 146, 156));
-            text(x0 + float(i) * tabW + m.fontSize * 0.5f, m.y + m.headerH * 0.5f,
+            text(x0 + float(i) * tabW + m.fontSize * 0.5f, m.y + m.rowH * 0.7f,
                  kTabs[i], nullptr);
         }
     }
 
     void drawLibraryMenu()
     {
-        const MenuLayout m = patchLayout();
+        const MenuLayout m = libraryLayout();
 
         beginPath();
         rect(0, 0, getWidth(), getHeight());
@@ -2062,31 +2275,56 @@ private:
         textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
         drawPatchTabs(m);
 
-        const std::vector<voltaire::preset::Entry> &all = m_library.entries();
+        const std::vector<const voltaire::preset::Entry *> view = libraryView();
         char right[160];
         if (!m_libraryNote.empty())
             std::snprintf(right, sizeof(right), "%s", m_libraryNote.c_str());
-        else if (all.empty())
+        else if (m_library.entries().empty())
             std::snprintf(right, sizeof(right), "no presets saved yet");
         else
-            std::snprintf(right, sizeof(right), "%d presets", int(all.size()));
+            std::snprintf(right, sizeof(right), "%d of %d presets   |   "
+                          "right-click to file one", int(view.size()),
+                          int(m_library.entries().size()));
 
         fontSize(m.fontSize * 0.8f);
         textAlign(ALIGN_RIGHT | ALIGN_MIDDLE);
         fillColor(Color(150, 155, 165));
-        text(m.x + m.w - m.rowH * 0.5f, m.y + m.headerH * 0.5f, right, nullptr);
+        text(m.x + m.w - m.rowH * 0.5f, m.y + m.rowH * 0.8f, right, nullptr);
 
+        // ---- the bank row.
+        const std::vector<Chip> chips = bankChips(m);
+        const float chipY = m.y + m.rowH * 1.7f;
+        const float chipX = m.x + m.rowH * 0.5f;
+        fontSize(m.fontSize * 0.85f);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        for (const Chip &c : chips)
+        {
+            if (chipX + c.x + c.w > m.x + m.w - m.rowH * 0.5f)
+                break;                      // the rest do not fit; the wheel reaches them
+            const bool on = chipSelected(c);
+            beginPath();
+            roundedRect(chipX + c.x, chipY, c.w, m.rowH * 0.95f, m.rowH * 0.3f);
+            fillColor(on ? Color(0, 163, 224, 0.45f) : Color(34, 36, 42));
+            fill();
+            strokeColor(on ? Color(120, 190, 230) : Color(70, 74, 82));
+            strokeWidth(1.0f);
+            stroke();
+            fillColor(on ? Color(235, 240, 245) : Color(165, 170, 180));
+            text(chipX + c.x + m.fontSize * 0.6f, chipY + m.rowH * 0.48f,
+                 c.label.c_str(), nullptr);
+        }
+
+        // ---- the presets.
         fontSize(m.fontSize);
         textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
-        char label[64];
         for (int i = 0; i < kLibCells; i ++)
         {
             const int idx = m_libScroll + i - 1;            // cell 0 is Save
-            if (i > 0 && size_t(idx) >= all.size())
+            if (i > 0 && size_t(idx) >= view.size())
                 break;
 
-            const float x = m.x + m.rowH * 0.5f + float(i / kMenuRows) * m.colW;
-            const float y = m.y + m.headerH + float(i % kMenuRows) * m.rowH;
+            const float x = m.x + m.rowH * 0.5f + float(i / kLibRows) * m.colW;
+            const float y = m.y + m.headerH + float(i % kLibRows) * m.rowH;
 
             if (i == m_menuHover)
             {
@@ -2098,13 +2336,168 @@ private:
             if (i == 0)
             {
                 fillColor(Color(190, 255, 190));
-                text(x + m.fontSize * 0.4f, y + m.rowH * 0.5f, "+ Save this patch", nullptr);
+                text(x + m.fontSize * 0.4f, y + m.rowH * 0.5f,
+                     m_bankMode == BankFilter::Named ? "+ Save into this bank"
+                                                     : "+ Save this patch", nullptr);
                 continue;
             }
-            std::snprintf(label, sizeof(label), "%s", all[size_t(idx)].name.c_str());
             fillColor(Color(214, 216, 220));
-            text(x + m.fontSize * 0.4f, y + m.rowH * 0.5f, label, nullptr);
+            text(x + m.fontSize * 0.4f, y + m.rowH * 0.5f,
+                 view[size_t(idx)]->name.c_str(), nullptr);
         }
+    }
+
+    // ---- filing a preset into a bank ---------------------------------------------------
+    //
+    // The rows are: every bank in use, then Unfiled, then a line to type a new name on.
+    // Nothing has to be created before it can be used -- a bank exists because a patch
+    // claims it -- so "new bank" is one field and not a dialogue about making one.
+
+    struct BankPickLayout { float x, y, w, h, rowH, top; int rows; };
+
+    BankPickLayout bankPickLayout() const
+    {
+        BankPickLayout L;
+        L.rowH = overlayRowH();
+        const std::vector<std::string> banks = m_library.banks();
+        L.rows = int(banks.size()) + 2;              // + Unfiled + New bank
+        L.w = L.rowH * 22.0f;
+        const float maxW = float(getWidth()) - 16.0f;
+        if (L.w > maxW)
+            L.w = maxW;
+        L.h = L.rowH * (2.2f + float(L.rows) * 1.25f + 0.8f);
+        const float room = float(getHeight()) - 16.0f;
+        if (L.h > room && L.rows > 0)
+        {
+            L.rowH *= room / L.h;
+            L.h = room;
+        }
+        L.x = std::floor((float(getWidth()) - L.w) * 0.5f);
+        L.y = std::floor((float(getHeight()) - L.h) * 0.5f);
+        if (L.y < 8.0f)
+            L.y = 8.0f;
+        L.top = L.y + L.rowH * 2.2f;
+        return L;
+    }
+
+    int bankPickHit(float px, float py) const
+    {
+        const BankPickLayout L = bankPickLayout();
+        if (px < L.x || px > L.x + L.w || py < L.top)
+            return -1;
+        const int i = int((py - L.top) / (L.rowH * 1.25f));
+        return i >= 0 && i < L.rows ? i : -1;
+    }
+
+    /// What row `i` means: a bank name, "" for Unfiled, or the new-name field.
+    void bankPickChoose(int i)
+    {
+        const std::vector<std::string> banks = m_library.banks();
+        if (i < 0)
+            return;
+        if (size_t(i) < banks.size())
+        {
+            libraryFile(m_bankTargetPath, banks[size_t(i)]);
+            m_menu = Menu::None;
+        }
+        else if (size_t(i) == banks.size())
+        {
+            libraryFile(m_bankTargetPath, std::string());
+            m_menu = Menu::None;
+        }
+        else
+        {
+            // The last row is the field itself: clicking it starts typing, and Enter
+            // files the preset under whatever has been typed.
+            m_bankEdit = true;
+            showCaret();
+        }
+    }
+
+    void commitNewBank()
+    {
+        const std::string name = voltaire::preset::cleanBankName(m_bankBuf);
+        m_bankEdit = false;
+        if (name.empty())
+            return;
+        libraryFile(m_bankTargetPath, name);
+        // Show what was just filed, since that is almost certainly what is wanted next.
+        m_bankMode = BankFilter::Named;
+        m_bankName = name;
+        m_libScroll = 0;
+        m_menu = Menu::None;
+    }
+
+    void drawBankPick()
+    {
+        const BankPickLayout L = bankPickLayout();
+        const std::vector<std::string> banks = m_library.banks();
+
+        beginPath();
+        rect(0, 0, getWidth(), getHeight());
+        fillColor(Color(0, 0, 0, 0.72f));
+        fill();
+
+        beginPath();
+        roundedRect(L.x, L.y, L.w, L.h, L.rowH * 0.4f);
+        fillColor(Color(22, 24, 28));
+        fill();
+        strokeColor(Color(96, 102, 112));
+        strokeWidth(1.0f);
+        stroke();
+
+        fontFace(m_font);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        fontSize(L.rowH * 0.9f);
+        fillColor(Color(255, 180, 90));
+        char head[128];
+        std::snprintf(head, sizeof(head), "FILE \"%s\" UNDER", m_bankTargetName.c_str());
+        text(L.x + L.rowH * 0.7f, L.y + L.rowH * 1.1f, head, nullptr);
+
+        for (int i = 0; i < L.rows; i ++)
+        {
+            const float y = L.top + float(i) * L.rowH * 1.25f;
+            if (i == m_menuHover)
+            {
+                beginPath();
+                roundedRect(L.x + L.rowH * 0.4f, y, L.w - L.rowH * 0.8f,
+                            L.rowH * 1.15f, L.rowH * 0.25f);
+                fillColor(Color(0, 163, 224, 0.30f));
+                fill();
+            }
+            fontSize(L.rowH * 0.85f);
+
+            if (size_t(i) < banks.size())
+            {
+                fillColor(Color(225, 228, 232));
+                text(L.x + L.rowH * 0.9f, y + L.rowH * 0.6f, banks[size_t(i)].c_str(),
+                     nullptr);
+            }
+            else if (size_t(i) == banks.size())
+            {
+                fillColor(Color(168, 174, 184));
+                text(L.x + L.rowH * 0.9f, y + L.rowH * 0.6f,
+                     "Unfiled -- in no bank at all", nullptr);
+            }
+            else
+            {
+                char line[64];
+                if (m_bankEdit)
+                    std::snprintf(line, sizeof(line), "New bank:  %s%s", m_bankBuf,
+                                  m_caretOn ? "_" : " ");
+                else
+                    std::snprintf(line, sizeof(line), "New bank...");
+                fillColor(m_bankEdit ? Color(190, 255, 190) : Color(168, 174, 184));
+                text(L.x + L.rowH * 0.9f, y + L.rowH * 0.6f, line, nullptr);
+            }
+        }
+
+        fontSize(L.rowH * 0.7f);
+        fillColor(Color(140, 146, 156));
+        text(L.x + L.rowH * 0.7f, L.y + L.h - L.rowH * 0.6f,
+             m_bankEdit ? "Enter files it   |   Escape cancels"
+                        : "a bank is just a name a patch claims   |   Escape closes this",
+             nullptr);
     }
 
     void drawPatchMenu()
@@ -2134,7 +2527,7 @@ private:
         fontSize(m.fontSize * 0.8f);
         textAlign(ALIGN_RIGHT | ALIGN_MIDDLE);
         fillColor(Color(150, 155, 165));
-        text(m.x + m.w - m.rowH * 0.5f, m.y + m.headerH * 0.5f,
+        text(m.x + m.w - m.rowH * 0.5f, m.y + m.rowH * 0.8f,
              m_patchNames.empty() ? "waiting for the machine"
                                   : "the machine's own bank", nullptr);
 
@@ -3880,7 +4273,7 @@ private:
     uint8_t m_leds = 0, m_cursorPos = 0, m_cursorFlags = 0;
 
     enum class Menu { None, Patch, Tone, Value, Diag, About, Reset,
-                  WritePick, WriteConfirm };
+                      WritePick, WriteConfirm, BankPick };
     Menu m_menu = Menu::None;
 
     /// Which slot the WRITE about to be confirmed would overwrite, or -1.
@@ -3896,6 +4289,22 @@ private:
     std::string m_libraryNote;    ///< what just happened, shown in the menu's header
     bool m_libraryTab = false;    ///< which half of the PATCH menu is showing
     int  m_libScroll = 0;         ///< first preset shown, for libraries bigger than a page
+
+    /// Which bank the browser is showing.  A bank is a NAME a preset claims and nothing
+    /// else -- no directory, no container, no index -- so this filter is the whole of what
+    /// a bank does to the browser.
+    enum class BankFilter { All, Named, Unfiled };
+    BankFilter  m_bankMode = BankFilter::All;
+    std::string m_bankName;
+    int         m_bankScroll = 0;     ///< first chip shown, when there are more than fit
+
+    /// The preset the bank picker is about to file, by path: an index would be stale the
+    /// moment another instance saved something.
+    std::string m_bankTargetPath;
+    std::string m_bankTargetName;
+    bool m_bankEdit = false;          ///< typing a new bank name
+    char m_bankBuf[32] = { 0 };
+    int  m_bankCaret = 0;
 
     // The About text as lines, split once at startup; m_aboutRows is those lines wrapped
     // to the window's current width, which only the renderer can know.

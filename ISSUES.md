@@ -54,9 +54,16 @@ correction, and the cards it needs. Loading one puts it in **P-64**, the auditio
 a patch can only be played by the firmware out of patchram, so auditioning has to spend a
 slot -- and the browser says so when a patch wants a card that is not mounted.
 
-Still to do: banks (`.u110bank`) for import and export, `.syx` interop, tags and search,
-deleting and renaming from the browser, and making the audition slot a setting rather
-than a constant.
+**Banks are done, as categories.** A bank is a name a patch claims -- one line in the
+preset file -- so "Strings" and "Abstract" cost nothing to make and nothing to clean up:
+a bank exists while a patch is in it and stops existing when the last one leaves. The
+LIBRARY tab has a row of bank tabs (All, each bank, Unfiled) that filter the list; saving
+files into whichever bank is showing; right-clicking a preset offers the banks, Unfiled,
+and a field to type a new one.
+
+Still to do: **renaming and deleting presets from the browser** (asked for, not built
+yet), `.u110bank` files for exchanging a set with somebody, `.syx` interop, free-text
+search, and making the audition slot a setting rather than a constant.
 
 Original note follows.
 
