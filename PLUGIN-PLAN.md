@@ -1122,7 +1122,12 @@ something that will not sound.
 
 `patchram` is `0xE000`–`0xFFFF`, 8 KB, 64 patches → 128 bytes each, and the
 patch record layout is `analysis/SYSTEM-DESIGN.md` §5.4 and ROM-ANALYSIS §6.7.
-`[?]` Confirm no bank header eats into that.
+`[x]` **Confirmed, and it is 116 bytes rather than 128.** No bank header, but each
+slot's last 12 bytes are not part of the record: the firmware's own WRITE copies
+`0x74` bytes and leaves the rest alone, and that tail reads the same constant
+`FE 0F 00 00 00 00 00 00 08 05 12 0A` in all 64 slots. So a patch is 116 bytes to
+store and to exchange, and the tail is something to preserve rather than to carry.
+`analysis/SYSTEM-DESIGN.md` §5.3.4, checked by `make writecheck`.
 
 The 64 slots are what the *firmware* has. What the *user* wants is an unbounded
 library, shared between instances, with a full editor behind **DIVE**. Those are
@@ -1277,9 +1282,19 @@ import, which has to resolve the same packing.
 - `[?]` Do DT1 **writes** to `02 nn 00` work at all, and must a panel
   `Bulk Rceiv.` mode be armed first? Needed only for `.syx` import. A short
   experiment.
-- `[?]` Is `0x2800` a straight 128-byte copy of the record, or does the firmware
-  write derived bytes back into it? Decides whether a captured patch can be
-  written to a slot unmodified.
+- `[x]` **Is `0x2800` a straight copy of the record?** Yes, for all 116 bytes the
+  record occupies. The firmware's WRITE stores the edit buffer verbatim — no
+  checksum, no name fix-up, no derived bytes — so a captured patch **can** be
+  written to a slot unmodified. Writing patchram directly and then re-selecting the
+  slot leaves patchram, the edit buffer and `0x274A` byte-identical to what the
+  machine's own WRITE produces, which is what makes the **WRITE** button a memory
+  copy plus §10.4's one-press reselect rather than a menu automaton. The reselect is
+  also what clears `TEMP:`: that flag is *not* in battery-backed RAM and cannot be
+  poked. §5.3.4.
+- **MEM PROTECT is real and is ON from the factory** — `0x3C00` bit 0. It gates the
+  *firmware's* write path only, so a direct write bypasses it completely. The
+  plugin's own write must therefore check it itself, or the UI would show a lock
+  that does not lock.
 - Detect panel `WRITE` edits by CRCing the 8 KB at a low rate — once a second
   from `run()`, or on menu open — so the library can offer to capture what the
   user just stored.

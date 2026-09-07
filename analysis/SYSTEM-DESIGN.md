@@ -689,10 +689,11 @@ parts and stops there — so the editor reaches them through memory. `0x3C00`-`0
 the block, and it reads `7F 0F 00 01 03 00 00 0C 0C 0D 12 0A 00 00 00 00` on a freshly
 initialised machine.
 
-Three addresses are now pinned, each by changing it and watching something else move:
+Four addresses are now pinned, each by changing it and watching something else move:
 
 | Address | What | How it was shown |
 |---|---|---|
+| `0x3C00` bit 0 | **MEM PROTECT**, set = protected | toggling SETUP's `PATCH:WRT:MEM.P` moves it, and nothing else in `0x2100`-`0x3FFF`; with it set a patch WRITE is refused with `Memory Protected` and patchram is untouched — see §5.3.4 |
 | `0x3C00` bit 5 | **EXCLUSIVE** | clearing it makes every RQ1 go unanswered; setting it restores service |
 | `0x3C01` low nibble | **Control Channel**, zero-based | see below |
 | `0x3C02` | **Master Tune** | moves when a master-tune RPN is received |
@@ -705,7 +706,9 @@ control channel and the device ID -- which is why RQ1 with device `0x0F` has alw
 worked here, and why a session that changes the control channel changes the device ID
 with it.
 
-`[?]` **The other five receive switches are NOT in `0x3C00` bits 0-4.** That was the
+`[?]` **The other five receive switches are NOT in `0x3C00` bits 0-4.** Bit 0 is now
+accounted for and is not a receive switch at all — it is MEM PROTECT (above), found by
+exactly the panel-and-diff method this paragraph goes on to recommend. That was the
 obvious reading -- six switches, exclusive is bit 5, and the manual lists EXCLUSIVE
 sixth -- and it is wrong. With `0x3C00` set to `0x20`, so that every bit but EXCLUSIVE is
 clear, a program change on the control channel still changed the part's tone; the same
@@ -719,6 +722,71 @@ SETUP:MIDI, toggle one, and diff RAM. Until then those five are drawn but inert.
 `0x3C03` reads `01` and is the right shape for MAP EDIT (1-6, default 1), but nothing has
 been done to confirm it, and the encoding of master tune (-99..+99 in one byte) is
 inferred rather than measured.
+
+### 5.3.4 Storing a patch: what WRITE actually does `[C]`
+
+Driven on the emulation with `plugin/tools/u110_panel.cpp`, which presses the front panel in
+emulated time and reads memory between presses. **`make writecheck` replays every claim in
+this section and fails if the machine disagrees** — 26 assertions, including running both
+write paths and comparing what they leave behind.
+
+**The menu path.** From the play screen: `[EDIT]` → *Select Mode* (`SETUP PATCH UTIL`),
+`[▶]` → PATCH, `[ENTER]`, `[▶]` `[▶]` → WRT, `[ENTER]` → `PATCH:WRT` (`MEM.P WRITE EXCH`).
+The selected item is shown by **blinking**, so a single LCD snapshot catches it only half the
+time; sample across a blink period before deciding where you are. On the `WRITE` page
+(`TMP  ~ PATCH-01?`) **`[◀]`/`[▶]` change the destination and `[ENTER]` commits** — not
+`[DEC]`/`[INC]` as the rest of the firmware would suggest, because `[INC]` *is* `[ENTER]`.
+The destination **defaults to the current patch** every time the page is opened, and is not
+a field that remembers where it was left. Menu positions elsewhere *are* remembered, in
+battery-backed RAM around `0x274B`, and a reset does not clear them — so a script that
+walks in from *Select Mode* twice does not arrive in the same place twice.
+
+**MEM PROTECT is `0x3C00` bit 0, and it is ON from the factory.** Set means protected. With
+it set the write is refused with `Memory Protected` on the LCD and **patchram is left
+byte-identical** — checked over all 128 bytes of the destination. This is the same byte that
+carries EXCLUSIVE at bit 5 (§5.3.3).
+
+**WRITE copies exactly `0x74` = 116 bytes, and nothing else.** That is the whole patch record:
+4 header + 10 name + 2 + six part records of 16. The remaining 12 bytes of the 128-byte slot
+stride are **not touched**. Shown by poisoning the destination tail with
+`DE AD BE EF 11 22 33 44 55 66 77 88` before the write and reading it back unchanged
+afterwards — every byte survived. On a factory machine that tail reads
+`FE 0F 00 00 00 00 00 00 08 05 12 0A` in **all 64 slots**, identical, so it carries no patch
+information at all.
+
+**The stored record is a byte-for-byte copy of the edit buffer.** All 116 bytes of
+`0xE000 + 128n` matched `0x2800` after the write, with the buffer first edited by SysEx so it
+differed from every stored patch. There is no checksum, no name fix-up, no flag byte and no
+post-processing of any kind.
+
+**WRITE also sets `0x274A`** to the destination, so the machine leaves `TEMP:` and reads
+`P-05:` afterwards. It does *not* reload — it has no reason to, the buffer already equals
+what was stored.
+
+**Consequence for the plugin: a direct write is exactly equivalent, and needs no menus.**
+
+```
+for i in 0..0x73:  writeMem(0xE000 + 128*n + i, readMem(0x2800 + i))
+writeMem(0x274A, n - 1);  press [INC]          // §5.3's one-press reselect
+```
+
+Run against the firmware's own WRITE from the same starting state, both paths leave
+patchram, the edit buffer and `0x274A` **identical**. The reselect is what clears `TEMP:`
+and redraws; it also reloads the buffer from the slot, which is why it doubles as a check
+that the write landed.
+
+This does not contradict *"you cannot hand-write the patch that is playing"* (§10.5 of
+`PLUGIN-PLAN.md`, and ROM-ANALYSIS §6.6). That finding is about **loading** — the derived
+state at `0x2A60` and `0x3760` is built only by the tone loader at `0x80D3`. **Storing** is
+the other direction: the destination is inert until something loads it, so a plain copy is
+safe there in a way it is not the other way round.
+
+`[?]` **The `TEMP:` flag is not in battery-backed RAM.** Editing a parameter by SysEx flips
+the display from `P-01:` to `TEMP:` while changing nothing in `0x2100`-`0x3FFF` except the
+edit buffer and the SysEx receive buffers at `0x2100`/`0x2300`. It presumably lives in the
+CPU's internal RAM, which is consistent with a restored session having to reboot rather than
+resume. Nothing depends on it: the reselect above clears the display through the firmware's
+own patch-load path.
 
 ### 5.4 Output assignment — **solved from the Owner's Manual** `[C]` `[S]`
 

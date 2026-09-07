@@ -197,6 +197,22 @@ clapcheck:
 
 .PHONY: clapcheck
 
+# What the firmware's own menus do, which can only be found out by pressing the buttons in
+# emulated time and reading memory between presses.  tools/write_check.txt replays every
+# claim section 5.3.4 of analysis/SYSTEM-DESIGN.md makes about the WRITE procedure -- that
+# it copies 116 bytes and not 128, that it sets 0x274A, that MEM PROTECT is 0x3C00 bit 0
+# and refuses cleanly -- and fails if the machine ever disagrees.
+#
+# Builds the core directly rather than depending on `all`: none of this needs DPF, the
+# artwork or a display, so the check stays runnable when those are in the way.
+writecheck:
+	@tools/build_core.sh
+	@g++ -O2 -std=c++20 -Icore -o build/u110_panel tools/u110_panel.cpp $(CORE_LIB)
+	@build/u110_panel --roms $${U110_DATA_DIR:-$(CURDIR)/..}/roms \
+		--script tools/write_check.txt
+
+.PHONY: writecheck
+
 # Real-time safety.  The audio callback has a hard deadline and what matters is the worst
 # case, so anything that can block -- malloc, free, locks, getenv -- must not be reachable
 # from run().  Reading the code cannot settle that, because most of the calls are several

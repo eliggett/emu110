@@ -1,0 +1,146 @@
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# What the machine's own WRITE does, and that writing patchram directly is the same
+# thing.  The findings are analysis/SYSTEM-DESIGN.md section 5.3.4.
+#
+#   u110_panel --roms DIR --script write_check.txt
+#
+# ONE linear pass through the menus, on purpose.  The firmware keeps its menu position in
+# battery-backed RAM and a reset does not clear it, so a script that walks in twice from
+# "Select Mode" lands somewhere else the second time.  Everything is asserted on the way.
+
+boot
+requiretext 0 P-01:
+
+echo == edit the temp patch, so it differs from every stored patch ==
+dt1 00 10 07 33
+dt1 00 11 07 44
+dt1 00 01 19 0A
+dt1 00 12 00 03
+run 300
+requiretext 0 TEMP:
+mark temp 0x2800 116
+
+echo == the plugin's way first: it needs no menus, so no menu state is disturbed ==
+echo -- 116 bytes into P-05, then section 5.3's one-press reselect
+copy 0xE200 0x2800 116
+poke 0x274A 3
+press inc
+run 500
+requiretext 0 P-05:
+echo -- the record is a verbatim copy of the edit buffer
+require temp 0xE200 116
+echo -- and the firmware reloaded the buffer from the slot, which proves the write took
+mark plugin_record 0xE200 116
+require plugin_record 0x2800 116
+requirebyte 0x274A 0x04
+
+echo == poison P-06's tail, to see whether the firmware's WRITE touches it ==
+poke 0xE2F4 0xDE
+poke 0xE2F5 0xAD
+poke 0xE2F6 0xBE
+poke 0xE2F7 0xEF
+poke 0xE2F8 0x11
+poke 0xE2F9 0x22
+poke 0xE2FA 0x33
+poke 0xE2FB 0x44
+poke 0xE2FC 0x55
+poke 0xE2FD 0x66
+poke 0xE2FE 0x77
+poke 0xE2FF 0x88
+mark tail 0xE2F4 12
+mark slot6 0xE280 128
+
+echo == into the menus: EDIT, PATCH, WRT ==
+press exit
+run 300
+requiretext 0 Select Mode
+press right
+run 300
+press inc
+run 400
+requiretext 0 PATCH
+# The selection clamps at both ends rather than wrapping, so three LEFTs put us on
+# COMMON from wherever the firmware left it, and two RIGHTs then reach WRT.
+press left
+run 200
+press left
+run 200
+press left
+run 200
+press right
+run 200
+press right
+run 300
+press inc
+run 500
+requiretext 0 PATCH:WRT
+
+echo == MEM PROTECT is 0x3C00 bit 0 and it is ON from the factory ==
+requirebyte 0x3C00 0x7F
+
+echo == a protected WRITE is refused and changes nothing ==
+press right
+run 400
+press inc
+run 600
+requiretext 0 PATCH:WRT:WRITE
+# The destination DEFAULTS TO THE CURRENT PATCH, which the reselect above made P-05, and
+# each [>] steps it on by one.  It is not a field that remembers where it was left.
+requiretext 1 PATCH-05?
+press right
+run 400
+requiretext 1 PATCH-06?
+press inc
+requiretext 1 Memory Protected
+require slot6 0xE280 128
+
+echo == turn protect off through the panel, and watch the bit move ==
+press exit
+run 400
+press left
+run 400
+press inc
+run 500
+requiretext 0 PATCH:WRT:PROTEC
+requiretext 1 MEM. PROTECT= ON
+press dec
+run 400
+requiretext 1 MEM. PROTECT=OFF
+requirebyte 0x3C00 0x7E
+
+echo == the machine's own WRITE, TMP -> PATCH-06 ==
+press exit
+run 400
+press right
+run 400
+press inc
+run 600
+requiretext 0 PATCH:WRT:WRITE
+# Back to the current patch again, so it needs stepping on a second time.
+requiretext 1 PATCH-05?
+press right
+run 400
+requiretext 1 PATCH-06?
+press inc
+requiretext 1 Write Complete
+run 900
+
+echo -- the firmware produced the same 116 bytes we did
+require plugin_record 0xE280 116
+echo -- and left the 12-byte tail alone: it writes 0x74 bytes, not 128
+require tail 0xE2F4 12
+echo -- WRITE also sets 0x274A to the destination, which is what clears TEMP
+requirebyte 0x274A 0x05
+
+echo == leaving the menus, the machine is on P-06 ==
+press exit
+run 400
+press exit
+run 400
+press exit
+run 400
+press exit
+run 600
+requiretext 0 P-06:
