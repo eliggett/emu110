@@ -807,9 +807,9 @@ not `~/.config`.
 
 | Platform | Base |
 |---|---|
-| Linux | `$XDG_DATA_HOME/u110` (default `~/.local/share/u110`) |
-| macOS | `~/Library/Application Support/u110` |
-| Windows | `%LOCALAPPDATA%\u110` |
+| Linux | `$XDG_DATA_HOME/Voltaire110` (default `~/.local/share/Voltaire110`) |
+| macOS | `~/Library/Application Support/Voltaire110` |
+| Windows | `%LOCALAPPDATA%\Voltaire110` |
 
 ```
 <base>/
@@ -822,7 +822,7 @@ not `~/.config`.
 ```
 
 - **Search order**: `$U110_DATA_DIR` (override) → user base → system-wide
-  (`/usr/share/u110`, `%PROGRAMDATA%`) → the directory beside the plugin binary.
+  (`/usr/share/Voltaire110`, `%PROGRAMDATA%`) → the directory beside the plugin binary.
   First hit wins; log which was used.
 - **The identity of an image is its name + SHA-256, never its path.** Project
   state records the absolute path too, but only as a first guess and only for

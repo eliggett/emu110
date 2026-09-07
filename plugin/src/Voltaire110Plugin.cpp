@@ -37,14 +37,25 @@ namespace {
 /// One place the plugin looks, and what put it on the list.
 ///
 /// The origin is carried only so the report the UI can show says WHY a directory is being
-/// searched.  "It looked in C:/Users/me/AppData/Local/u110/roms" is a fact; "it looked
-/// there because that is what %LOCALAPPDATA% expands to" is the half that tells you what
-/// to fix when the answer is not the directory you filled.
+/// searched.  "It looked in C:/Users/me/AppData/Local/Voltaire110/roms" is a fact; "it
+/// looked there because that is what %LOCALAPPDATA% expands to" is the half that tells you
+/// what to fix when the answer is not the directory you filled.
 struct RomDir
 {
     std::string path;
     std::string origin;
+    bool legacy = false;    ///< the old u110/ name: still read, no longer advertised
 };
+
+/// The directory the plugin keeps its data in, under whichever per-user or system-wide
+/// data root the platform offers.  It is the plugin's name because that is what someone
+/// scrolling through AppData or ~/.local/share will be looking for.
+constexpr const char *kDataDirName = "Voltaire110";
+
+/// What that directory used to be called.  Anyone who filled it before the rename should
+/// not have to move anything, so every location is looked at under the old name too --
+/// after all the new ones, and only documented in the report that lists what was searched.
+constexpr const char *kLegacyDirName = "u110";
 
 /// Where ROM images are looked for, in order (PLUGIN-PLAN.md section 9).  ROMs are DATA,
 /// not configuration, so they do not live in ~/.config.  Nothing is bundled with the
@@ -52,27 +63,37 @@ struct RomDir
 std::vector<RomDir> romSearchDirs()
 {
     std::vector<RomDir> bases;
-    const auto fromEnv = [&bases](const char *var, const char *tail)
+    const auto fromEnv = [&bases](const char *var, const std::string &tail,
+                                  bool legacy = false)
     {
         const char *const v = std::getenv(var);
         if (v == nullptr || v[0] == '\0')
             return;
-        bases.push_back(RomDir { std::string(v) + tail, std::string(var) });
+        bases.push_back(RomDir { std::string(v) + tail, std::string(var), legacy });
     };
 
     // The override is the same everywhere, so a note telling someone where to put their
     // dumps does not have to ask which OS they are on first.
     fromEnv("U110_DATA_DIR", "/roms");
-   #ifdef _WIN32
-    // Forward slashes are fine: the Win32 file APIs accept them, and keeping one separator
-    // in this file means the paths a log line prints look the same on every platform.
-    fromEnv("LOCALAPPDATA", "/u110/roms");
-    fromEnv("PROGRAMDATA", "/u110/roms");
-   #else
-    fromEnv("XDG_DATA_HOME", "/u110/roms");
-    fromEnv("HOME", "/.local/share/u110/roms");
-    bases.push_back(RomDir { "/usr/share/u110/roms", "built in" });
-   #endif
+
+    // The new name in every location before the old name in any of them, so a machine
+    // carrying both reads the one the documentation talks about.
+    for (int pass = 0; pass < 2; pass ++)
+    {
+        const bool legacy = pass == 1;
+        const std::string dir = std::string("/") + (legacy ? kLegacyDirName : kDataDirName);
+       #ifdef _WIN32
+        // Forward slashes are fine: the Win32 file APIs accept them, and keeping one
+        // separator in this file means the paths a log line prints look the same on every
+        // platform.
+        fromEnv("LOCALAPPDATA", dir + "/roms", legacy);
+        fromEnv("PROGRAMDATA", dir + "/roms", legacy);
+       #else
+        fromEnv("XDG_DATA_HOME", dir + "/roms", legacy);
+        fromEnv("HOME", "/.local/share" + dir + "/roms", legacy);
+        bases.push_back(RomDir { "/usr/share" + dir + "/roms", "built in", legacy });
+       #endif
+    }
     // Development convenience: the project's own roms/ directory.
     fromEnv("U110_SOURCE_ROMS", "");
 
@@ -82,7 +103,7 @@ std::vector<RomDir> romSearchDirs()
     for (const RomDir &b : bases)
     {
         out.push_back(b);
-        out.push_back(RomDir { b.path + "/cards", b.origin });
+        out.push_back(RomDir { b.path + "/cards", b.origin, b.legacy });
     }
     return out;
 }
@@ -2065,9 +2086,9 @@ private:
         {
             d_stderr2("Voltaire 110: no U-110 program ROM found. Put your own dumps in "
                      #ifdef _WIN32
-                      "%LOCALAPPDATA%\\u110\\roms"
+                      "%LOCALAPPDATA%\\Voltaire110\\roms"
                      #else
-                      "$XDG_DATA_HOME/u110/roms"
+                      "$XDG_DATA_HOME/Voltaire110/roms"
                      #endif
                       " (or set U110_DATA_DIR). The plugin will stay silent until then.");
             return;
@@ -2221,10 +2242,13 @@ private:
         int nth = 0;
         for (const RomDir &d : romSearchDirs())
         {
+            const std::string why = (d.origin == "built in"
+                                     ? std::string("it is built in")
+                                     : "it is where " + d.origin + " points")
+                                  + (d.legacy ? ", under the name this plugin used to go by"
+                                              : "");
             std::snprintf(buf, sizeof(buf), "\n [%d] %s\n     (because %s)\n",
-                          ++ nth, d.path.c_str(), d.origin == "built in"
-                              ? "it is built in" : ("it is where " + d.origin
-                                                    + " points").c_str());
+                          ++ nth, d.path.c_str(), why.c_str());
             r += buf;
 
             DIR *dir = ::opendir(d.path.c_str());

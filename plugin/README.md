@@ -539,7 +539,8 @@ null-tested with no DPF present at all.
 (PLUGIN-PLAN.md §9):
 
 ```
-$U110_DATA_DIR/roms   $XDG_DATA_HOME/u110/roms   ~/.local/share/u110/roms   /usr/share/u110/roms
+$U110_DATA_DIR/roms   $XDG_DATA_HOME/Voltaire110/roms
+~/.local/share/Voltaire110/roms   /usr/share/Voltaire110/roms
 ```
 
 With none found it loads, stays silent, and says why on stderr.
@@ -1049,8 +1050,8 @@ session file when a project comes back wrong:
 volume 6.5000
 hfcorrection 0
 pgm b9e60aaf... roland_u110_pgm_(15179960).bin
-card 0 8 fe8eb62e... /home/you/.local/share/u110/roms/sn-u110-08.bin
-card 1 9 c964b871... /home/you/.local/share/u110/roms/sn-u110-09.bin
+card 0 8 fe8eb62e... /home/you/.local/share/Voltaire110/roms/sn-u110-08.bin
+card 1 9 c964b871... /home/you/.local/share/Voltaire110/roms/sn-u110-09.bin
 ```
 
 Volume and HF correction are also ordinary automatable parameters, and in LV2 the host's

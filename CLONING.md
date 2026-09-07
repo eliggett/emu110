@@ -160,8 +160,8 @@ commit other than the one this repository records.
 
 The wave ROMs and program ROMs are tracked in this repository, under `roms/`.
 There is no separate download step. The plugin finds them by searching
-`$U110_DATA_DIR/roms`, then `$XDG_DATA_HOME/u110/roms`, then
-`~/.local/share/u110/roms`, then `/usr/share/u110/roms` — so for a development
+`$U110_DATA_DIR/roms`, then `$XDG_DATA_HOME/Voltaire110/roms`, then
+`~/.local/share/Voltaire110/roms`, then `/usr/share/Voltaire110/roms` — so for a development
 build, `U110_DATA_DIR` pointing at the repository root is all it takes, and the
 Makefile's test targets set that for you.
 
@@ -369,8 +369,9 @@ nothing is bundled — but the search path is the platform's, from
 `romSearchPath()` in `plugin/src/Voltaire110Plugin.cpp` and PLUGIN-PLAN.md §9:
 
 1. `%U110_DATA_DIR%\roms` — the override, if that environment variable is set
-2. `%LOCALAPPDATA%\u110\roms` — normally `C:\Users\<you>\AppData\Local\u110\roms`
-3. `%PROGRAMDATA%\u110\roms` — normally `C:\ProgramData\u110\roms`
+2. `%LOCALAPPDATA%\Voltaire110\roms` — normally
+   `C:\Users\<you>\AppData\Local\Voltaire110\roms`
+3. `%PROGRAMDATA%\Voltaire110\roms` — normally `C:\ProgramData\Voltaire110\roms`
 
 and `...\roms\cards\` is searched after each of those, so card images may sit
 either in `roms\` with everything else or in a `cards\` subdirectory. First hit
