@@ -1,0 +1,393 @@
+# Copyright (c) 2026 Elliott H. Liggett
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Build Voltaire 110 for Linux and Windows, and -- for a v* tag only -- publish a release.
+#
+# ONE runner builds both platforms.  The Windows CLAP is cross-compiled from Linux with
+# mingw-w64, which is how it is built by hand here too (CLONING.md, the Windows section),
+# so the workflow is not exercising a path nobody uses.  A second, Windows-hosted job
+# would be a second environment to keep working for no gain.
+#
+# What triggers what:
+#
+#   push to main      build, run the self-test, keep the zips as workflow artifacts
+#   tag  preview-*    the same -- builds and is downloadable, but publishes NO release
+#   tag  v*           the same, and then publishes a GitHub release with the zips on it
+#   manual run        the same as a push to main
+#
+# So `git tag preview-2026-09-06 && git push origin preview-2026-09-06` is the dry run:
+# it proves the tag builds and gives you the exact zips to try, without anything appearing
+# on the Releases page.  Tag it v1.0.0 when you are happy.
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+      - 'preview-*'
+  workflow_dispatch:
+
+# The default token is read-only here; only the release job asks for more.
+permissions:
+  contents: read
+
+# A second push to main supersedes the first.  Tags are never grouped together and never
+# cancelled -- one of them may be half way through publishing a release.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  # ccache is the only build cache that pays for itself (see the cache step's comment).
+  CCACHE_DIR: /home/runner/.ccache
+  CCACHE_MAXSIZE: 500M
+
+jobs:
+  build:
+    name: Linux + Windows (cross-compiled)
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      channel: ${{ steps.version.outputs.channel }}
+
+    steps:
+      # fetch-depth: 0 because the build number comes from `git describe`, and a shallow
+      # clone has no tags in it to describe against.  The superproject's history is ~60 MB;
+      # the submodules are the expensive part and they are fetched shallow below.
+      - name: Check out emu110 (full history, for the tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Work out the version and the channel
+        id: version
+        run: |
+          set -euo pipefail
+          ref="${GITHUB_REF#refs/tags/}"
+          case "$GITHUB_REF" in
+            refs/tags/v*)
+              version="${ref#v}";        channel="release" ;;
+            refs/tags/preview-*)
+              version="${ref#preview-}"; channel="preview" ;;
+            *)
+              # Not a tag.  Describe against the most recent RELEASE tag, so a main
+              # build is identifiable -- "1.0.0-4-gdeadbee" is four commits past v1.0.0.
+              # --match keeps preview-* tags out of it: those mark a trial build, not a
+              # version anything should be numbered from.  Before the first v* tag exists
+              # there is nothing to describe against, so fall back to a commit count,
+              # which at least increases.
+              if version="$(git describe --tags --match 'v*' 2>/dev/null)"; then
+                version="${version#v}"
+              else
+                version="0.0.0-$(git rev-list --count HEAD)-g$(git rev-parse --short HEAD)"
+              fi
+              channel="ci" ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Version::$version  (channel: $channel, ref: $GITHUB_REF)"
+          {
+            echo "### Voltaire 110 \`$version\`"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| channel | \`$channel\` |"
+            echo "| ref | \`$GITHUB_REF\` |"
+            echo "| commit | \`$GITHUB_SHA\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # --- the environment -----------------------------------------------------------
+      #
+      # The package list is CLONING.md's, minus inkscape/rsvg/PIL/fonttools: the exported
+      # artwork is checked in precisely so a machine without the panel font can build the
+      # panel we ship, and a CI runner is exactly that machine.  If tools/artwork.sh ever
+      # decides it needs to re-export here, the build FAILS with a clear message -- which
+      # is the right outcome, because it means an SVG was committed without its export.
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          echo "::group::apt-get"
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential git python3 pkg-config ccache zip \
+            lv2-dev libjack-jackd2-dev \
+            libgl1-mesa-dev libgl1-mesa-dri libx11-dev libxext-dev libxcursor-dev \
+            libcairo2-dev libdbus-1-dev \
+            g++-mingw-w64-x86-64 \
+            xvfb
+          echo "::endgroup::"
+          echo "::group::versions"
+          g++ --version | head -1
+          python3 --version
+          ccache --version | head -1
+          echo "::endgroup::"
+
+      # Debian ships two mingw toolchains -- win32 threads and posix threads -- and picks
+      # between them with update-alternatives.  They are NOT link-compatible: mix objects
+      # from the two and libstdc++ disagrees with itself about std::mutex.  The developer's
+      # machine is on win32, the built DLL there needs no runtime DLL beside it, and that
+      # is the artifact people have actually run.  Pin CI to the same one rather than
+      # inheriting whatever the runner image happens to default to this month.
+      - name: Pin the mingw toolchain to the win32 thread model
+        run: |
+          set -euo pipefail
+          for t in gcc g++; do
+            sudo update-alternatives --set "x86_64-w64-mingw32-$t" \
+              "/usr/bin/x86_64-w64-mingw32-$t-win32"
+          done
+          echo "::group::mingw thread model"
+          x86_64-w64-mingw32-g++ -v 2>&1 | tail -3
+          echo "::endgroup::"
+
+      # Shallow, because mame is a ~2 GB checkout with ~220 MB of history and we compile
+      # eleven files out of it.  --recommend-shallow honours the submodule's own setting;
+      # the fallback is there because a shallow fetch can only reach the branch TIP, so if
+      # the superproject ever points at an older mame commit, depth 1 will not contain it
+      # and the full fetch has to happen.  Better a slow build than a red one.
+      - name: Fetch the submodules (mame, DPF, pugl)
+        run: |
+          set -euo pipefail
+          echo "::group::shallow attempt"
+          if git submodule update --init --recursive --depth 1 --recommend-shallow; then
+            echo "shallow submodule fetch succeeded"
+          else
+            echo "::warning title=Submodules::shallow fetch failed -- falling back to a full fetch"
+            git submodule update --init --recursive
+          fi
+          echo "::endgroup::"
+          echo "::group::what we got"
+          git submodule status --recursive
+          du -sh mame plugin/dpf 2>/dev/null || true
+          echo "::endgroup::"
+
+      # ccache is worth having and the other candidates are not.
+      #
+      # The submodule checkout is the single biggest cost of this workflow, and caching it
+      # would mean stuffing a 2 GB working tree through actions/cache -- which is slower
+      # than the shallow clone it replaces.  apt is ~40 s and the third-party actions that
+      # cache it bring their own failure modes.  The COMPILE, though, is ~50 translation
+      # units of DPF, DGL and MAME device sources that change on almost no commit, and
+      # ccache turns those into hits at a few MB of cache.  Keyed by commit with a prefix
+      # restore, so every run starts from the previous run's cache and saves its own.
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-ubuntu24-${{ github.sha }}
+          restore-keys: |
+            ccache-ubuntu24-
+
+      # ccache is used through argv[0], so a directory of symlinks in front of PATH catches
+      # every compiler the build invokes -- including the mingw ones the Makefile's `win`
+      # target sets on the sub-make's command line, which no CC/CXX we could set here would
+      # reach.
+      - name: Put ccache in front of every compiler
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/ccache-bin"
+          for c in gcc g++ x86_64-w64-mingw32-gcc x86_64-w64-mingw32-g++; do
+            ln -sf /usr/bin/ccache "$HOME/ccache-bin/$c"
+          done
+          echo "$HOME/ccache-bin" >> "$GITHUB_PATH"
+          ccache --zero-stats > /dev/null
+          ls -l "$HOME/ccache-bin"
+
+      # --- the build -----------------------------------------------------------------
+
+      - name: Build for Linux (core, LV2, CLAP, VST3, standalone)
+        run: |
+          set -euo pipefail
+          echo "::group::make"
+          cd plugin
+          make -j"$(nproc)" all
+          echo "::endgroup::"
+          echo "::group::what was built"
+          ls -lR bin
+          file bin/Voltaire110.clap bin/Voltaire110 bin/Voltaire110.lv2/*.so
+          echo "::endgroup::"
+
+      # The real gate.  tools/lv2_selftest.c loads the built LV2 bundle the way Ardour
+      # would, plays a note and insists the result is not silence; the state, patch and
+      # tone passes check the save/restore round trip; clapcheck opens a UI under a real
+      # CLAP host and fails if no panel update crosses from the DSP.  The ROMs it needs are
+      # in the repository under roms/, which is what U110_DATA_DIR points at.
+      #
+      # clap_check.sh starts its own Xvfb when there is no DISPLAY, so nothing here has to.
+      - name: Self-test the Linux build
+        run: |
+          set -euo pipefail
+          echo "::group::make selftest"
+          cd plugin
+          make selftest
+          echo "::endgroup::"
+
+      - name: Cross-compile the Windows CLAP
+        run: |
+          set -euo pipefail
+          echo "::group::make win"
+          cd plugin
+          make -j"$(nproc)" win
+          echo "::endgroup::"
+          echo "::group::what was built"
+          ls -l bin-win
+          file bin-win/Voltaire110.clap
+          echo "::endgroup::"
+
+      # DPF links the Windows build with -static-libgcc -static-libstdc++, so the .clap
+      # should import nothing but system DLLs.  If a libstdc++-6.dll or libwinpthread-1.dll
+      # ever shows up here, every Windows user gets a plugin their DAW silently refuses to
+      # load -- and they get it from a release, not from a build they can debug.  Cheaper
+      # to fail here.
+      - name: Check the Windows DLL has no runtime dependencies to ship
+        run: |
+          set -euo pipefail
+          echo "::group::imports"
+          x86_64-w64-mingw32-objdump -p plugin/bin-win/Voltaire110.clap | grep -i "DLL Name"
+          echo "::endgroup::"
+          if x86_64-w64-mingw32-objdump -p plugin/bin-win/Voltaire110.clap \
+               | grep -iE "DLL Name:.*(libstdc\+\+|libgcc|libwinpthread)"; then
+            echo "::error title=Windows build::the CLAP imports a mingw runtime DLL that the zip does not contain"
+            exit 1
+          fi
+          echo "imports system DLLs only -- nothing extra to ship"
+
+      - name: Compiler cache statistics
+        if: always()
+        run: ccache --show-stats
+
+      # --- packaging -----------------------------------------------------------------
+      #
+      # One zip per platform-and-format, named so that a file sitting in someone's
+      # Downloads folder a week later still says what it is.  The VST3 is built (it comes
+      # out of the same `make all`) and deliberately NOT packaged: it has no DSP -> UI path
+      # yet, so its panel never updates.  The Linux standalone is built and not packaged
+      # either -- it is the development loop, not a deliverable here.
+      - name: Package the zips
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          mkdir -p dist stage
+          cd stage
+
+          # The version is INSIDE the zip rather than in its name, because the file names
+          # are the ones the README and the release page tell people to look for.  A zip
+          # that has been renamed or moved can still say what it is.
+          version_txt() {
+            printf 'Voltaire 110\nversion  %s\ncommit   %s\nbuilt    %s\nchannel  %s\n' \
+              "$VERSION" "$GITHUB_SHA" "$STAMP" "${{ steps.version.outputs.channel }}"
+          }
+
+          pack() {   # pack <zip name> <section> <path...>
+            local zip="$1" section="$2"; shift 2
+            local dir="pkg-$section"
+            rm -rf "$dir"; mkdir -p "$dir"
+            cp -r "$@" "$dir/"
+            version_txt > "$dir/VERSION.txt"
+            ../.github/release-text.sh "$section" > "$dir/INSTALL.txt"
+            cp ../LICENSE "$dir/LICENSE"
+            ( cd "$dir" && zip -q -r -y "../../dist/$zip" . )
+            echo "  $zip"
+          }
+
+          echo "::group::packing"
+          pack Voltaire110-Linux-LV2.zip    linux-lv2    ../plugin/bin/Voltaire110.lv2
+          pack Voltaire110-Linux-CLAP.zip   linux-clap   ../plugin/bin/Voltaire110.clap
+          pack Voltaire110-Windows-CLAP.zip windows-clap ../plugin/bin-win/Voltaire110.clap
+          echo "::endgroup::"
+
+          echo "::group::contents"
+          cd ../dist
+          for z in *.zip; do echo "--- $z"; unzip -l "$z"; done
+          echo "::endgroup::"
+
+      - name: Upload Voltaire110-Linux-LV2
+        uses: actions/upload-artifact@v4
+        with:
+          name: Voltaire110-Linux-LV2
+          path: dist/Voltaire110-Linux-LV2.zip
+          if-no-files-found: error
+
+      - name: Upload Voltaire110-Linux-CLAP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Voltaire110-Linux-CLAP
+          path: dist/Voltaire110-Linux-CLAP.zip
+          if-no-files-found: error
+
+      - name: Upload Voltaire110-Windows-CLAP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Voltaire110-Windows-CLAP
+          path: dist/Voltaire110-Windows-CLAP.zip
+          if-no-files-found: error
+
+      # build_core.sh writes a .log per translation unit and says which one to look at;
+      # on a runner nobody can go and look, so bring them back.
+      - name: Upload the build logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            plugin/build/*.log
+            plugin/build-win/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Only a v* tag gets here.  A preview-* tag runs the whole build above and stops, which
+  # is the point of it: the zips are on the run's Artifacts panel and the Releases page is
+  # untouched.
+  release:
+    name: Publish the release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      # For .github/release-text.sh, which is the single copy of the install instructions.
+      - name: Check out emu110
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Download the zips the build produced
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Write the release notes
+        run: |
+          set -euo pipefail
+          .github/release-text.sh notes "${{ needs.build.outputs.version }}" > notes.md
+          echo "::group::notes.md"
+          cat notes.md
+          echo "::endgroup::"
+          cat notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      # --clobber on the upload so re-running a failed publish finishes the job instead of
+      # dying on the assets that made it the first time.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          echo "::group::assets"
+          ls -l dist
+          echo "::endgroup::"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "release $TAG exists -- updating it"
+            gh release edit "$TAG" --title "Voltaire 110 $VERSION" --notes-file notes.md
+          else
+            gh release create "$TAG" --title "Voltaire 110 $VERSION" --notes-file notes.md
+          fi
+          gh release upload "$TAG" dist/*.zip --clobber
+          echo "::notice title=Released::$TAG -> $(gh release view "$TAG" --json url -q .url)"
