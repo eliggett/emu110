@@ -962,15 +962,45 @@ private:
     static constexpr int kMenuCols = 4;
     static constexpr int kMenuRows = 16;
 
+    // Every grid menu here -- PATCH, TONE, and the value list -- is one number wide.  The
+    // text is kMenuFontOfRow of the row height, a column is so many ems of that text, and
+    // the box is its columns plus half a row of margin at each side.  So the box's width
+    // is a fixed multiple of its row height, and gridRowH() below is where that multiple
+    // is turned back into a row the window can afford.
+    static constexpr float kMenuFontOfRow = 0.68f;
+    static constexpr float kNameColEms    = 9.0f;    // "02 SOME TONE NAME"
+    static constexpr float kValueColEms   = 5.0f;    // "C#-1" and the numbered routings
+
     struct MenuLayout { float x, y, w, h, rowH, colW, headerH, fontSize; };
+
+    /// The row height a grid of `colEms` ems across can have in this window.
+    ///
+    /// The window's HEIGHT used to be the only thing that set the row, which is fine for
+    /// a panel whose window only ever grows sideways.  The DIVE drawer is not that: it
+    /// makes the window three times taller without making it one pixel wider, the row
+    /// grew with the height to its cap, and the eight-column TONE grid came out about
+    /// 1200 px across a 1100 px window -- centred, so it hung off the left edge and the
+    /// right edge at once.  The width gets the same vote as the height here, and every
+    /// grid that shares the shape is fixed by the same line.
+    ///
+    /// The 9 px floor is legibility and it wins over the width: a window narrow enough to
+    /// need a smaller row than that is one where the panel itself has stopped being
+    /// usable, and text nobody can read is not an improvement on a box that is too wide.
+    float gridRowH(float heightRows, float colEms, float maxRow) const
+    {
+        const float byHeight = (float(getHeight()) - 12.0f) / heightRows;
+        const float byWidth  = (float(getWidth()) - 24.0f)   // a dozen px of air each side
+                             / (colEms * kMenuFontOfRow + 1.0f);
+        const float r = byHeight < byWidth ? byHeight : byWidth;
+        return r < 9.0f ? 9.0f : (r > maxRow ? maxRow : r);
+    }
 
     MenuLayout patchLayout() const
     {
         MenuLayout m;
-        m.rowH = (float(getHeight()) - 12.0f) / float(kMenuRows + 2);
-        m.rowH = m.rowH < 9.0f ? 9.0f : (m.rowH > 26.0f ? 26.0f : m.rowH);
-        m.fontSize = m.rowH * 0.68f;
-        m.colW = m.fontSize * 9.0f;
+        m.rowH = gridRowH(float(kMenuRows + 2), float(kMenuCols) * kNameColEms, 26.0f);
+        m.fontSize = m.rowH * kMenuFontOfRow;
+        m.colW = m.fontSize * kNameColEms;
         m.headerH = m.rowH * 1.6f;
         m.w = kMenuCols * m.colW + m.rowH;               // half a row of margin each side
         m.h = m.headerH + kMenuRows * m.rowH + m.rowH * 0.5f;
@@ -1026,10 +1056,11 @@ private:
         rows = n < kMenuRows ? (n > 0 ? n : 1) : kMenuRows;
         cols = (n + rows - 1) / (rows > 0 ? rows : 1);
         MenuLayout m;
-        m.rowH = (float(getHeight()) - 12.0f) / float(kMenuRows + 2);
-        m.rowH = m.rowH < 9.0f ? 9.0f : (m.rowH > 26.0f ? 26.0f : m.rowH);
-        m.fontSize = m.rowH * 0.68f;
-        m.colW = m.fontSize * 5.0f;
+        // Sized on the columns it actually has: a two-column list of On/Off has no
+        // business being held to the width an eight-column one needs.
+        m.rowH = gridRowH(float(kMenuRows + 2), float(cols) * kValueColEms, 26.0f);
+        m.fontSize = m.rowH * kMenuFontOfRow;
+        m.colW = m.fontSize * kValueColEms;
         m.headerH = m.rowH * 1.6f;
         m.w = float(cols) * m.colW + m.rowH;
         m.h = m.headerH + float(rows) * m.rowH + m.rowH * 0.5f;
@@ -1538,11 +1569,25 @@ private:
                 "[DEC]+[INC] next test,   [LEFT]+[RIGHT] previous";
 
         fontFace(m_font);
-        fontSize(rowH * 0.72f);
         textAlign(ALIGN_CENTER | ALIGN_MIDDLE);
 
+        // One long line that cannot be wrapped or shortened without losing the key
+        // combinations it exists to give.  So it is measured, and if the window is too
+        // narrow to hold it the type comes down until it fits rather than running off
+        // both edges.
+        float fs = rowH * 0.72f;
+        fontSize(fs);
         Rectangle<float> b;
         textBounds(0.0f, 0.0f, kMsg, nullptr, b);
+        const float room = float(getWidth()) - rowH * 0.8f;
+        if (b.getWidth() + rowH * 2.0f > room && b.getWidth() > 0.0f)
+        {
+            fs *= (room - rowH * 2.0f) / b.getWidth();
+            fs = fs < 6.0f ? 6.0f : fs;
+            fontSize(fs);
+            textBounds(0.0f, 0.0f, kMsg, nullptr, b);
+        }
+
         const float w = b.getWidth() + rowH * 2.0f;
         const float h = rowH * 1.8f;
         const float x = std::floor((float(getWidth()) - w) * 0.5f);
@@ -1658,10 +1703,9 @@ private:
     ToneLayout toneLayout() const
     {
         ToneLayout m;
-        m.rowH = (float(getHeight()) - 12.0f) / float(kToneRows + 5);
-        m.rowH = m.rowH < 9.0f ? 9.0f : (m.rowH > 24.0f ? 24.0f : m.rowH);
-        m.fontSize = m.rowH * 0.68f;
-        m.colW = m.fontSize * 9.0f;
+        m.rowH = gridRowH(float(kToneRows + 5), float(kToneCols) * kNameColEms, 24.0f);
+        m.fontSize = m.rowH * kMenuFontOfRow;
+        m.colW = m.fontSize * kNameColEms;
         m.headerH = m.rowH * 1.6f;
         m.tabH = m.rowH * 1.3f;
         m.w = kToneCols * m.colW + m.rowH;
@@ -1903,13 +1947,29 @@ private:
     }
 
     /// Follow the window to the height the drawer now needs, keeping the panel's scale.
+    ///
+    /// Two calls, because they do two different things.  setSize() resizes OUR window --
+    /// under LV2 that is an X child window sitting inside whatever the host put it in,
+    /// and a host that does not watch it for changes (Ardour does not; Carla does) leaves
+    /// its container the size it was and clips everything past the old height, so the
+    /// drawer opens where nobody can see it.  requestSizeChange() is the one that asks
+    /// the host to follow.
+    ///
+    /// It is deliberately called HERE and nowhere else.  The obvious place is onResize,
+    /// which would cover every resize at once -- and that is exactly the trap: it fires
+    /// for the user's own drag too, hosts treat the request as a minimum size, and the
+    /// window ends up able to grow but never shrink.  Only the drawer changes our size
+    /// on purpose, so only the drawer says so.
     void resizeToDrawer()
     {
         const uint w = getWidth();
         const uint h = uint(std::lround(double(w) * designHeight()
                                         / voltaire::panel::kDesignWidth));
         if (h != getHeight())
+        {
             setSize(w, h);
+            requestSizeChange(w, h);
+        }
     }
 
     /// Window pixels -> design units, the space every rectangle in panel_geometry.h is in.
@@ -2789,6 +2849,7 @@ private:
         const float w = box.getWidth() + pad * 2.0f, h = 20.0f;
         float x = m_tipX + 14.0f, y = m_tipY - h - 8.0f;
         if (x + w > float(getWidth()))  x = float(getWidth()) - w;
+        if (x < 0.0f)                   x = 0.0f;
         if (y < 0.0f)                   y = m_tipY + 18.0f;
 
         beginPath();

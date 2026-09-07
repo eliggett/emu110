@@ -1,0 +1,151 @@
+diff --git a/distrho/DistrhoUI.hpp b/distrho/DistrhoUI.hpp
+index 7741840..db666d6 100644
+--- a/distrho/DistrhoUI.hpp
++++ b/distrho/DistrhoUI.hpp
+@@ -326,6 +326,21 @@ protected:
+     */
+     void onResize(const ResizeEvent& ev) override;
+ 
++   /**
++      Ask the host to give this UI a new size.
++
++      Call this after resizing the window when the UI itself decided to change size --
++      a drawer that opens, a page that needs more room.  Do NOT call it from onResize:
++      that fires for host-driven resizes too, and a host which treats the request as a
++      minimum size (Ardour does) is then pinned to whatever the user last dragged the
++      window to, so it can grow but never shrink.
++
++      Under CLAP and VST3 setSize() already goes through here, so calling it again with
++      the same size is redundant but harmless.  Under LV2 this is the only way the host
++      is told at all.
++    */
++    void requestSizeChange(uint width, uint height) override;
++
+     // -------------------------------------------------------------------------------------------------------
+ 
+ private:
+@@ -333,8 +348,6 @@ private:
+     PrivateData* const uiData;
+     friend class PluginWindow;
+     friend class UIExporter;
+-   /** @internal */
+-    void requestSizeChange(uint width, uint height) override;
+ 
+     DISTRHO_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(UI)
+ };
+diff --git a/distrho/src/DistrhoPluginLV2export.cpp b/distrho/src/DistrhoPluginLV2export.cpp
+index dd5cc92..d0bcfbd 100644
+--- a/distrho/src/DistrhoPluginLV2export.cpp
++++ b/distrho/src/DistrhoPluginLV2export.cpp
+@@ -164,6 +164,7 @@ static constexpr const char* const lv2ManifestUiOptionalFeatures[] = {
+     "ui:noUserResize",
+    #endif
+     "ui:parent",
++    "ui:resize",
+     "ui:touch",
+   #endif
+     "ui:requestValue",
+diff --git a/distrho/src/DistrhoUI.cpp b/distrho/src/DistrhoUI.cpp
+index 0241b59..ec6ce52 100644
+--- a/distrho/src/DistrhoUI.cpp
++++ b/distrho/src/DistrhoUI.cpp
+@@ -579,7 +579,13 @@ void UI::onResize(const ResizeEvent& ev)
+ {
+     UIWidget::onResize(ev);
+ 
+-   #if ! DISTRHO_UI_USES_SIZE_REQUEST
++   // NOT under LV2.  This fires for host-driven resizes as well as our own, and there is
++   // nothing in a resize event that says which it was.  ui:resize is a size REQUEST in
++   // the toolkit sense -- Ardour turns it straight into set_size_request(), a MINIMUM --
++   // so echoing the user's own drag back at the host pins the window's floor to whatever
++   // it was last dragged to and it can never be made smaller again.  A UI that means to
++   // change its own size calls requestSizeChange() below and says so.
++   #if ! DISTRHO_UI_USES_SIZE_REQUEST && ! defined(DISTRHO_PLUGIN_TARGET_LV2)
+     if (uiData->initializing)
+         return;
+ 
+@@ -589,7 +595,8 @@ void UI::onResize(const ResizeEvent& ev)
+    #endif
+ }
+ 
+-// NOTE: only used for CLAP and VST3
++// NOTE: used for CLAP and VST3, where DGL calls it out of Window::setSize, and for LV2,
++// where the UI calls it itself after resizing its own window.
+ void UI::requestSizeChange(const uint width, const uint height)
+ {
+    #if DISTRHO_UI_USES_SIZE_REQUEST
+@@ -597,6 +604,9 @@ void UI::requestSizeChange(const uint width, const uint height)
+         uiData->window->setSizeFromHost(width, height);
+     else
+         uiData->setSizeCallback(width, height);
++   #elif defined(DISTRHO_PLUGIN_TARGET_LV2)
++    if (! uiData->initializing)
++        uiData->setSizeCallback(width, height);
+    #else
+     // unused
+     (void)width;
+diff --git a/distrho/src/DistrhoUILV2.cpp b/distrho/src/DistrhoUILV2.cpp
+index 7f5e414..292f299 100644
+--- a/distrho/src/DistrhoUILV2.cpp
++++ b/distrho/src/DistrhoUILV2.cpp
+@@ -49,8 +49,16 @@ static constexpr const setStateFunc setStateCallback = nullptr;
+ static constexpr const sendNoteFunc sendNoteCallback = nullptr;
+ #endif
+ 
+-// unwanted in LV2, resize extension is deprecated and hosts can do it without extensions
+-static constexpr const setSizeFunc setSizeCallback = nullptr;
++// The UI asks the host for a new size through ui:resize; setSizeCallback below is the
++// class member that does it, so nothing is defined here.
++//
++// DPF left this as a nullptr on the grounds that the extension is deprecated and "hosts
++// can do it without extensions".  Some do: the child window is resized either way, and a
++// host that watches it follows along.  Ardour does not watch it.  A plugin that grows its
++// own window -- a drawer that slides out, say -- got a taller X window inside a container
++// that stayed the size it was, so everything past the old height was simply clipped away
++// and the user saw nothing happen at all.  Asking is one call and hosts that ignore it
++// are no worse off than they are now.
+ 
+ // --------------------------------------------------------------------------------------------------------------------
+ 
+@@ -88,6 +96,7 @@ public:
+           fUridUnmap(getLv2Feature<LV2_URID_Unmap>(features, LV2_URID__unmap)),
+           fUiPortMap(getLv2Feature<LV2UI_Port_Map>(features, LV2_UI__portMap)),
+           fUiRequestValue(getLv2Feature<LV2UI_Request_Value>(features, LV2_UI__requestValue)),
++          fUiResize(getLv2Feature<LV2UI_Resize>(features, LV2_UI__resize)),
+           fUiTouch(getLv2Feature<LV2UI_Touch>(features, LV2_UI__touch)),
+           fController(controller),
+           fWriteFunction(writeFunc),
+@@ -301,6 +310,7 @@ private:
+     const LV2_URID_Unmap*      const fUridUnmap;
+     const LV2UI_Port_Map*      const fUiPortMap;
+     const LV2UI_Request_Value* const fUiRequestValue;
++    const LV2UI_Resize*        const fUiResize;
+     const LV2UI_Touch*         const fUiTouch;
+ 
+     // LV2 UI stuff
+@@ -482,6 +492,25 @@ private:
+     {
+         return static_cast<UiLv2*>(ptr)->fileRequest(key);
+     }
++
++    /// The UI has resized itself; ask the host to give its container the same size.
++    ///
++    /// Called from UI::onResize, which fires for host-driven resizes too, so the host
++    /// gets told a size it already chose.  That is a no-op everywhere it matters and it
++    /// is the only shape that works: there is nothing in a configure event that says who
++    /// asked for it.
++    void setSize(const uint width, const uint height)
++    {
++        if (fUiResize == nullptr)
++            return;
++
++        fUiResize->ui_resize(fUiResize->handle, static_cast<int>(width), static_cast<int>(height));
++    }
++
++    static void setSizeCallback(void* const ptr, const uint width, const uint height)
++    {
++        static_cast<UiLv2*>(ptr)->setSize(width, height);
++    }
+ };
+ 
+ // --------------------------------------------------------------------------------------------------------------------
