@@ -14,7 +14,7 @@ Voltaire 110 currently supports Linux and Windows. On Linux, the plugin formats 
 
 ## How to get it
 
-Click "Releases" and download the latest release. You'll also need to either dump your U-110 ROM EPROMs or obtain the rom files some other way -- please understand that I cannot distribute them. You need version 2.03 of the ROM file, as well as the four WAVE ROM files. You can also add any SN-U110-XX files, which will represent the cartridges (cards). The primary ROM file must be named "U110v203.BIN". Cartridge files may be named SN-U110-XX.bin. 
+Click ["Releases"](https://github.com/eliggett/emu110/releases) and download the latest release. You'll also need to either dump your U-110 ROM EPROMs or obtain the rom files some other way -- please understand that I cannot distribute them. You need version 2.03 of the ROM file, as well as the four WAVE ROM files. You can also add any SN-U110-XX files, which will represent the cartridges (cards). The primary ROM file must be named "U110v203.BIN". Cartridge files may be named SN-U110-XX.bin. 
 
 ### Windows install: 
 Copy the CLAP file to `C:\Program Files\Common Files\CLAP\Voltaire110.clap`
