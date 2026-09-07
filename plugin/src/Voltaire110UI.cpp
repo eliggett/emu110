@@ -427,6 +427,10 @@ protected:
         restore();
 
         // Outside the panel transform on purpose: the menus are in window pixels.
+        // Under them, so an overlay covers it rather than fighting with it.
+        if (m_testMode)
+            drawTestHint();
+
         if (m_menu == Menu::Patch)
             drawPatchMenu();
         else if (m_menu == Menu::Tone)
@@ -493,7 +497,15 @@ protected:
             // whose only way out is "click somewhere that does nothing" reads as a menu
             // you are stuck in.  Its arg is null, and so is a click that missed.
             if (hit >= 0 && kResetItems[hit].arg != nullptr)
+            {
+                clearLatches();
+                // The UI knows because the UI asked.  Nothing else can tell: the test
+                // menu is left only by rebooting, so the flag is right until the next
+                // one either way, and reading it off the LCD would mean guessing which
+                // screens belong to the service menu.
+                m_testMode = std::strcmp(kResetItems[hit].arg, "test") == 0;
                 setState("reboot", kResetItems[hit].arg);
+            }
             repaint();
             return true;
         }
@@ -686,6 +698,24 @@ protected:
                     const int p = mapButton(i);
                     if (p < 0)
                         return true;                 // a real control with nothing behind it yet
+
+                    // SHIFT LATCHES, because the machine has combinations a mouse cannot
+                    // make.  Its service menu is stepped with two keys at once --
+                    // [DEC]+[INC] forward, [LEFT]+[RIGHT] back, and the firmware only
+                    // reads a pair when both are down in the SAME 100 Hz scan
+                    // (ROM-ANALYSIS.md 8.5) -- so with one pointer there is no way to
+                    // reach it at all.  A real U-110 has two hands; this is the second.
+                    //
+                    // A plain click on a latched button lets it go whether or not shift
+                    // is down, so a key cannot be left stuck by forgetting the modifier.
+                    if ((ev.mod & kModifierShift) != 0 || m_latch[i])
+                    {
+                        m_latch[i] = !m_latch[i];
+                        setParam(uint32_t(kParamButtonFirst + p),
+                                 m_latch[i] ? 1.0f : 0.0f);
+                        repaint();
+                        return true;
+                    }
                     m_held = i;
                     setParam(uint32_t(kParamButtonFirst + p), 1.0f);
                     repaint();
@@ -1377,7 +1407,8 @@ private:
           nullptr, "warm", false },
         { "Reboot into the service test menu",
           "DEC and INC held at power-on. RAM, LCD, keys, battery, MIDI, wave ROM,",
-          "sound and output checks. LEFT+RIGHT and DEC+INC step through them.",
+          "sound and output checks. Stepped through with two keys at once, which is "
+          "what shift-click is for.",
           "test", false },
         { "Initialise the memory and reboot",
           "PART and EDIT held at power-on: the machine's own factory reset.",
@@ -1490,6 +1521,46 @@ private:
         text(L.x + L.rowH * 0.7f, L.y + L.h - L.rowH * 0.7f,
              "the machine takes about five seconds to come up   |   Escape closes this",
              nullptr);
+    }
+
+    /// What to do with a panel that needs two fingers.
+    ///
+    /// Shown for as long as the machine is in the service menu, because that is exactly
+    /// how long it is impossible to work out: every one of those screens is stepped with
+    /// a two-key press, none of them says how to make one with a mouse, and the way out
+    /// is another reboot.  A line in a menu that has already been dismissed would not
+    /// have helped the person who is stuck.
+    void drawTestHint()
+    {
+        const float rowH = overlayRowH();
+        static constexpr const char *kMsg =
+                "TEST MODE   --   shift-click latches a button:   "
+                "[DEC]+[INC] next test,   [LEFT]+[RIGHT] previous";
+
+        fontFace(m_font);
+        fontSize(rowH * 0.72f);
+        textAlign(ALIGN_CENTER | ALIGN_MIDDLE);
+
+        Rectangle<float> b;
+        textBounds(0.0f, 0.0f, kMsg, nullptr, b);
+        const float w = b.getWidth() + rowH * 2.0f;
+        const float h = rowH * 1.8f;
+        const float x = std::floor((float(getWidth()) - w) * 0.5f);
+        const float y = float(getHeight()) - h - rowH * 0.4f;
+
+        beginPath();
+        roundedRect(x, y, w, h, rowH * 0.35f);
+        fillColor(Color(12, 14, 18, 0.92f));
+        fill();
+        strokeColor(Color(0, 163, 224, 0.8f));
+        strokeWidth(1.0f);
+        stroke();
+
+        fillColor(Color(214, 226, 236));
+        text(x + w * 0.5f, y + h * 0.5f, kMsg, nullptr);
+
+        // NanoVG's alignment is global state and every other page here assumes this one.
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
     }
 
     void drawPatchMenu()
@@ -2363,6 +2434,26 @@ private:
         return sx < sy ? sx : sy;
     }
 
+    /// Let go of every latched key.
+    ///
+    /// Called before a reboot, and that is not tidiness: the firmware decides what to
+    /// boot into by reading the key matrix ONCE while it comes up, so a key still latched
+    /// across a reset is a key held at power-on.  Latch [DEC] and ask for a plain reboot
+    /// and the machine would come up in the test menu instead, which is a very confusing
+    /// thing for a menu entry to do.
+    void clearLatches()
+    {
+        for (int i = 0; i < voltaire::panel::BUTTONID_COUNT; i ++)
+        {
+            if (!m_latch[i])
+                continue;
+            m_latch[i] = false;
+            const int p = mapButton(i);
+            if (p >= 0)
+                setParam(uint32_t(kParamButtonFirst + p), 0.0f);
+        }
+    }
+
     void setParam(uint32_t index, float value)
     {
         editParameter(index, true);
@@ -3149,6 +3240,22 @@ private:
             fillColor(Color(255, 255, 255, 0.14f));
             fill();
         }
+        for (int i = 0; i < voltaire::panel::BUTTONID_COUNT; i ++)
+        {
+            if (!m_latch[i])
+                continue;
+            const auto &l = voltaire::panel::kButton[i];
+            beginPath();
+            roundedRect(l.x, l.y, l.w, l.h, l.h * 0.15f);
+            fillColor(Color(255, 255, 255, 0.22f));
+            fill();
+            // A latch outlives the click that made it, so it is outlined as well as lit:
+            // a button that is merely bright looks like one the pointer is over.
+            strokeColor(Color(0, 163, 224, 0.9f));
+            strokeWidth(1.5f);
+            stroke();
+        }
+
         if (m_held < 0)
             return;
         const auto &r = voltaire::panel::kButton[m_held];
@@ -3248,6 +3355,8 @@ private:
     float m_volume = 0.0f;
     bool m_hf = true;
     int m_held = -1;
+    bool m_latch[voltaire::panel::BUTTONID_COUNT] = { false };
+    bool m_testMode = false;
     bool m_dragKnob = false;
     double m_dragY = 0;
     float m_dragStart = 0;

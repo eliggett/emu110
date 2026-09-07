@@ -978,6 +978,35 @@ cannot be picked out of a list of four by muscle memory. It is also recoverable 
 that matters in a DAW: the project on disk still holds the old NVRAM until the host saves
 again, so reopening the project brings the patches back.
 
+### `[!]` The service menu needs two fingers, and a mouse has one
+
+Booting into the test menu is not enough to *use* it. Every screen in it is stepped with a
+**two-key press** -- `[DEC]+[INC]` for the next test, `[LEFT]+[RIGHT]` for the previous --
+and the firmware only reads a pair when both keys are down in the **same 100 Hz scan**
+(`analysis/ROM-ANALYSIS.md` section 8.5: the scan routine tests one key's press *event*
+against the other's *held* state). No single key does anything at all on those screens.
+Driven from a panel where a click is a press and a release, the menu comes up and is then
+completely inert -- which is exactly how it was found.
+
+So **shift-click latches a panel button**: it goes down and stays down, drawn lit and
+outlined so it does not read as mere hover, and the next click on its partner makes the
+pair. A real U-110 has two hands; this is the second one. A plain click on a latched button
+lets it go whether or not shift is held, so a key cannot be left stuck by forgetting the
+modifier.
+
+`clearLatches()` runs before every reboot, and that is not tidiness. The firmware decides
+what to boot into by reading the key matrix once on the way up, so **a key still latched
+across a reset is a key held at power-on** -- latch `[DEC]`, ask for a plain reboot, and the
+machine would come up in the test menu instead. A menu entry that did something other than
+what it says is worse than no menu entry.
+
+The hint bar along the bottom of the panel is shown for exactly as long as the machine is
+in the service menu, because that is exactly how long this is impossible to work out: none
+of those screens says how to make a two-key press with a pointer, and the way out is
+another reboot. The UI knows it is in there because the UI is what asked -- and since the
+test menu is left only by rebooting, that flag stays right until the next one. Reading it
+off the LCD instead would mean guessing which screens belong to the service menu.
+
 **CARTRIDGE MANAGER opens the self check**, which is the same page the LCD opens and
 deliberately the same code path -- what the cards are and whether the machine can see them
 is one question with one answer, and two pages that drifted apart would be worse than one
