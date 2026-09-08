@@ -1343,12 +1343,15 @@ private:
     MenuLayout patchLayout() const
     {
         MenuLayout m;
-        m.rowH = gridRowH(float(kMenuRows + 2), float(kMenuCols) * kNameColEms, 26.0f);
+        // Three rows of chrome, not two: a header and a line along the bottom that says
+        // what the list is for and what just happened.  That line used to share the header
+        // row with the tabs, and a long one was drawn straight over them.
+        m.rowH = gridRowH(float(kMenuRows + 4), float(kMenuCols) * kNameColEms, 26.0f);
         m.fontSize = m.rowH * kMenuFontOfRow;
         m.colW = m.fontSize * kNameColEms;
         m.headerH = m.rowH * 1.6f;
         m.w = kMenuCols * m.colW + m.rowH;               // half a row of margin each side
-        m.h = m.headerH + kMenuRows * m.rowH + m.rowH * 0.5f;
+        m.h = m.headerH + kMenuRows * m.rowH + kFooterRows * m.rowH;
         m.x = std::floor((float(getWidth()) - m.w) * 0.5f);
         m.y = std::floor((float(getHeight()) - m.h) * 0.5f);
         return m;
@@ -2097,6 +2100,9 @@ private:
     /// each row shows a preset's bank beside its name.  Showing it is what makes filing
     /// discoverable: the bank is on screen, so clicking it to change it needs no
     /// explaining, and 30 presets to a page is plenty with the wheel to hand.
+    /// The line along the bottom of both lists.
+    static constexpr float kFooterRows = 1.4f;
+
     static constexpr int kLibCols  = 2;
     static constexpr int kLibRows  = kMenuRows - 1;
     static constexpr int kLibCells = kLibCols * kLibRows;
@@ -2106,7 +2112,7 @@ private:
         MenuLayout m = patchLayout();
         m.headerH = m.rowH * 2.9f;          // the tabs, then the banks
         m.colW = (m.w - m.rowH) / float(kLibCols);
-        m.h = m.headerH + float(kLibRows) * m.rowH + m.rowH * 0.5f;
+        m.h = m.headerH + float(kLibRows) * m.rowH + kFooterRows * m.rowH;
         m.y = std::floor((float(getHeight()) - m.h) * 0.5f);
         if (m.y < 4.0f)
             m.y = 4.0f;
@@ -2156,11 +2162,12 @@ private:
     /// share a name.  Override writes back over the one that was recalled, which is the
     /// other half of the same job and the half that used to mean saving a second copy and
     /// then deleting the first.
-    std::string saveButtonLabel() const
-    {
-        return m_bankMode == BankFilter::Named ? ("Save Patch to " + m_bankName)
-                                               : std::string("Save Patch");
-    }
+    /// A fixed label.  It used to name the bank, which read well but made the button as
+    /// wide as the longest bank name somebody might invent -- and the header has two
+    /// buttons and two tabs to fit.  Which bank it saves into is on screen anyway: the
+    /// chip is lit, and the line along the bottom says so in words.
+    static constexpr const char *kSaveLabel = "Save Patch";
+    std::string saveButtonLabel() const { return std::string(kSaveLabel); }
 
     static constexpr const char *kOverrideLabel = "Override Patch";
 
@@ -2675,18 +2682,39 @@ private:
         return m_libraryTab ? libraryLayout() : patchLayout();
     }
 
+    static constexpr const char *kPatchTabs[2] = { "INTERNAL 64", "LIBRARY" };
+
+    /// Where the two tabs are.  ONE definition, shared by the drawing and the hit test.
+    ///
+    /// Sized to their text rather than given a fixed nine ems each: two buttons went in
+    /// beside them and eighteen ems of tab left the header 6.9 ems over the width of the
+    /// box, so the buttons were drawn on top of the tabs.
+    void patchTabRect(const MenuLayout &m, int i, HeaderRect &r) const
+    {
+        r.y = m.y + m.rowH * 0.2f;
+        r.h = m.rowH;
+        r.x = m.x + m.rowH * 0.5f;
+        for (int k = 0; k < 2; k ++)
+        {
+            const float w = m.fontSize * (0.58f * float(std::strlen(kPatchTabs[k])) + 1.6f);
+            if (k == i)
+            { r.w = w; return; }
+            r.x += w + m.fontSize * 0.4f;
+        }
+        r.w = 0.0f;
+    }
+
     int patchTabHit(float px, float py) const
     {
         const MenuLayout m = currentPatchLayout();
-        // Measured from the top of the box rather than as a fraction of the header, which
-        // is 1.6 rows on one list and 2.9 on the other.
-        if (py < m.y + m.rowH * 0.15f || py >= m.y + m.rowH * 1.25f)
-            return -1;
-        const float x0 = m.x + m.rowH * 0.5f;
-        const float tabW = m.fontSize * 9.0f;
-        if (px < x0 || px >= x0 + tabW * 2.0f)
-            return -1;
-        return int((px - x0) / tabW);
+        for (int i = 0; i < 2; i ++)
+        {
+            HeaderRect r;
+            patchTabRect(m, i, r);
+            if (inRect(r, px, py))
+                return i;
+        }
+        return -1;
     }
 
     /// Which bank chip is under the pointer, as an index into bankChips(), or -1.
@@ -2708,21 +2736,20 @@ private:
 
     void drawPatchTabs(const MenuLayout &m)
     {
-        static const char *const kTabs[2] = { "INTERNAL 64", "LIBRARY" };
-        const float x0 = m.x + m.rowH * 0.5f;
-        const float tabW = m.fontSize * 9.0f;
+        textAlign(ALIGN_CENTER | ALIGN_MIDDLE);
         for (int i = 0; i < 2; i ++)
         {
+            HeaderRect r;
+            patchTabRect(m, i, r);
             const bool on = (i == 1) == m_libraryTab;
             beginPath();
-            roundedRect(x0 + float(i) * tabW, m.y + m.rowH * 0.2f,
-                        tabW - 4.0f, m.rowH, 3.0f);
+            roundedRect(r.x, r.y, r.w, r.h, 3.0f);
             fillColor(on ? Color(56, 60, 68) : Color(32, 34, 38));
             fill();
             fillColor(on ? Color(235, 235, 235) : Color(140, 146, 156));
-            text(x0 + float(i) * tabW + m.fontSize * 0.5f, m.y + m.rowH * 0.7f,
-                 kTabs[i], nullptr);
+            text(r.x + r.w * 0.5f, r.y + r.h * 0.5f, kPatchTabs[i], nullptr);
         }
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
     }
 
     void drawLibraryMenu()
@@ -2769,15 +2796,20 @@ private:
             std::snprintf(right, sizeof(right),
                           "%d of %d presets   |   click one to write the patch over it",
                           int(view.size()), int(m_library.entries().size()));
+        else if (m_bankMode == BankFilter::Named)
+            std::snprintf(right, sizeof(right),
+                          "%d of %d presets   |   Save Patch adds to %s",
+                          int(view.size()), int(m_library.entries().size()),
+                          m_bankName.c_str());
         else
             std::snprintf(right, sizeof(right),
-                          "%d of %d presets   |   click to play, click a bank to move it, "
-                          "right-click to rename or delete",
+                          "%d of %d presets   |   click to play   |   "
+                          "right-click to rename, move or delete",
                           int(view.size()), int(m_library.entries().size()));
         fontSize(m.fontSize * 0.72f);
-        textAlign(ALIGN_RIGHT | ALIGN_MIDDLE);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
         fillColor(Color(150, 155, 165));
-        text(sb.x - m.fontSize * 0.8f, m.y + m.rowH * 0.7f, right, nullptr);
+        text(m.x + m.rowH * 0.5f, m.y + m.h - m.rowH * 0.7f, right, nullptr);
 
         // ---- the bank row.
         const std::vector<Chip> chips = bankChips(m);
@@ -3139,13 +3171,13 @@ private:
         textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
         drawPatchTabs(m);
 
-        fontSize(m.fontSize * 0.8f);
-        textAlign(ALIGN_RIGHT | ALIGN_MIDDLE);
+        fontSize(m.fontSize * 0.72f);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
         fillColor(Color(150, 155, 165));
-        text(m.x + m.w - m.rowH * 0.5f, m.y + m.rowH * 0.8f,
+        text(m.x + m.rowH * 0.5f, m.y + m.h - m.rowH * 0.7f,
              m_patchNames.empty() ? "waiting for the machine"
              : m_writeMode ? "click a slot to store the patch being edited there"
-                           : "the machine's own bank", nullptr);
+                           : "the machine's own bank -- click one to play it", nullptr);
 
         if (m_patchNames.empty())
             return;
