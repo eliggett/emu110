@@ -1204,11 +1204,32 @@ protected:
         return true;
     }
 
+    // ---- keys, and the ones that never get here ---------------------------------------
+    //
+    // READ THIS BEFORE ADDING A KEY BINDING.  A plugin UI is a window inside the host's, the
+    // host sees every key first, and one it has bound to something of its own is simply
+    // never passed on.  This is not a bug to be fixed here and there is nothing the plugin
+    // can do about it: which keys arrive is the host's decision, and it differs per host and
+    // per user.
+    //
+    // Measured, not assumed:
+    //
+    //   Ardour   swallows Return, Space and plain letters including "a" -- transport and
+    //            its own global bindings.  There is a full-keyboard-focus setting that
+    //            changes this, but it is off by default and is the user's to turn on.
+    //   Carla    passes everything through.
+    //
+    // So: NO FUNCTION MAY BE REACHABLE ONLY BY A KEY.  Every one of these has a button or a
+    // click behind it -- the text fields have OK, every palette has an X, and Escape has
+    // both of those as well.  A key is a shortcut for people whose host allows it and never
+    // the only way in.  Naming a bank once needed Return and nothing else, and in Ardour
+    // that made the field impossible to finish at all.
+    //
+    // VOLTAIRE_KEYS=1 prints what actually arrives, which is the only way to tell "the
+    // handler is wrong" from "the key was never delivered".
+
     bool onKeyboard(const KeyboardEvent &ev) override
     {
-        // Whether a key reached us at all is not something the code can answer on its own:
-        // a plugin UI is a window inside the host's, and a host that binds a key to
-        // something of its own never passes it on.  VOLTAIRE_KEYS=1 says what arrives.
         {
             static const bool trace = std::getenv("VOLTAIRE_KEYS") != nullptr;
             if (trace && ev.press)

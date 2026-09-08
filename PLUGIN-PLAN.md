@@ -1368,6 +1368,32 @@ import, which has to resolve the same packing.
 `patchram`) plus parameters and slot config, with ROMs referenced by name + hash
 per §9.
 
+### 10.5.1 Keys are the host's to give, not ours to take `[C]`
+
+**A plugin UI is a window inside the host's**, so the host sees every key first and one it
+has bound to something of its own is never passed on. This is not a bug to fix: which keys
+arrive is the host's decision, and it differs per host and per user.
+
+Measured on the machines to hand:
+
+| | |
+|---|---|
+| **Ardour** | swallows `Return`, `Space` and plain letters including `a` — transport and its own global bindings. There is a full-keyboard-focus setting that changes this, but it is off by default and is the user's to turn on, not something the plugin can ask for. |
+| **Carla** | passes everything through. |
+
+**So no function may be reachable only by a key.** Every one has a button or a click behind
+it: the text fields have **OK**, every palette has an **X** in its corner, and Escape has
+both of those as well. A key is a shortcut for people whose host allows it, and never the
+only way in.
+
+This was learned the hard way. Naming a bank once needed `Return` and nothing else, which
+worked in Carla and made the field impossible to finish at all in Ardour — and the code was
+correct the whole time, which is exactly why it took a while to see.
+
+`VOLTAIRE_KEYS=1` prints every key event that reaches the UI, with what the field and the
+menu were doing. It is the only way to tell *"the handler is wrong"* from *"the key was
+never delivered"*, and the first question to ask of any key that appears not to work.
+
 ### 10.6 Output routing
 
 **Stereo out only** — decided. The `PAN_L` / `PAN_R` matrix at

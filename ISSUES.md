@@ -75,7 +75,13 @@ finished with an **OK button** beside the field, because a plugin UI does not re
 the Return key: the host sees it first and a DAW that binds Return to something of its own
 never passes it on. `VOLTAIRE_KEYS=1` prints every key that does arrive. Every overlay also
 has an **X** in its corner, for anyone who would not think to click in the dark or press
-Escape. Every one of these ends back
+Escape.
+
+**Note for anyone adding a key binding:** Ardour captures `Return`, `Space` and plain
+letters including `a`; Carla passes everything through. Ardour has a full-keyboard-focus
+setting that changes this, but it is off by default. So nothing may be reachable only by a
+key -- see PLUGIN-PLAN.md 10.5.1, and the comment above `onKeyboard` in
+`plugin/src/Voltaire110UI.cpp`. Every one of these ends back
 in the library rather than closing the menus, and Escape steps back to the library too,
 because the next thing anybody does after naming a bank or renaming a patch is in the
 library as well. Renaming changes the display
