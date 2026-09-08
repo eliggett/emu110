@@ -693,7 +693,6 @@ protected:
                                        : c.kind == 2 ? BankFilter::Unfiled
                                                      : BankFilter::Named;
                             m_bankName = c.name;
-                            m_bankPending = false;
                             m_libScroll = 0;
                             m_libraryNote.clear();
                         }
@@ -2256,17 +2255,7 @@ private:
             return;
         };
         add("All", 0, std::string());
-        std::vector<std::string> banks = m_library.banks();
-        // A bank just named but not yet used has no patches claiming it, so it is not in
-        // the derived list -- but it has to be on screen, or there would be nowhere to
-        // save the first patch into it.  It evaporates if nothing ever does.
-        if (m_bankMode == BankFilter::Named && !m_bankName.empty()
-                && std::find(banks.begin(), banks.end(), m_bankName) == banks.end())
-        {
-            banks.push_back(m_bankName);
-            std::sort(banks.begin(), banks.end());
-        }
-        for (const std::string &b : banks)
+        for (const std::string &b : allBanks())
             add(b, 1, b);
         if (m_library.anyUnfiled())
             add(voltaire::preset::kUnfiled, 2, std::string());
@@ -2376,6 +2365,21 @@ private:
 
     bool canOverride() const { return overrideBlockedBecause() == nullptr; }
 
+    /// Every bank worth offering: the ones patches are in, plus the ones named here.
+    std::vector<std::string> allBanks() const
+    {
+        return voltaire::preset::mergeBanks(m_library.banks(), m_sessionBanks);
+    }
+
+    void rememberBank(const std::string &name)
+    {
+        if (name.empty())
+            return;
+        if (std::find(m_sessionBanks.begin(), m_sessionBanks.end(), name)
+                == m_sessionBanks.end())
+            m_sessionBanks.push_back(name);
+    }
+
     void libraryRescan()
     {
         if (m_libraryDir.empty())
@@ -2393,9 +2397,9 @@ private:
         // under us -- another instance refiled its last patch, or somebody deleted the
         // file.  Showing an empty list with no tab lit is a browser nobody can leave
         // except by guessing, so fall back to All.
-        if (m_bankMode == BankFilter::Named && !m_bankPending)
+        if (m_bankMode == BankFilter::Named)
         {
-            const std::vector<std::string> banks = m_library.banks();
+            const std::vector<std::string> banks = allBanks();
             if (std::find(banks.begin(), banks.end(), m_bankName) == banks.end())
             { m_bankMode = BankFilter::All; m_bankName.clear(); }
         }
@@ -2473,7 +2477,6 @@ private:
         { m_libraryNote = err; return; }
 
         libraryRescan();
-        m_bankPending = false;
         m_libraryNote = p.bank.empty() ? ("saved \"" + p.name + "\"")
                                        : ("saved \"" + p.name + "\" into " + p.bank);
     }
@@ -2564,9 +2567,9 @@ private:
         libraryRescan();
         // If the bank being shown has just lost its last patch it no longer exists, so
         // showing it would be showing an empty list nobody can leave except by guessing.
-        if (m_bankMode == BankFilter::Named && !m_bankPending)
+        if (m_bankMode == BankFilter::Named)
         {
-            const std::vector<std::string> banks = m_library.banks();
+            const std::vector<std::string> banks = allBanks();
             if (std::find(banks.begin(), banks.end(), m_bankName) == banks.end())
                 m_bankMode = BankFilter::All;
         }
@@ -2980,8 +2983,10 @@ private:
 
     BankPickLayout bankPickLayout() const
     {
-        // banks + Unfiled + New bank
-        return listLayout(int(m_library.banks().size()) + 2);
+        // banks + Unfiled + New bank.  allBanks(), so a preset can be filed into one that
+        // was named a moment ago and has nothing in it yet -- which is the whole reason
+        // for making a bank before there is anything to put in it.
+        return listLayout(int(allBanks().size()) + 2);
     }
 
     int bankPickHit(float px, float py) const
@@ -3061,17 +3066,13 @@ private:
     {
         m_bankMode = name.empty() ? BankFilter::Unfiled : BankFilter::Named;
         m_bankName = name;
-        // A bank nothing has claimed yet must stay on screen, or there would be nowhere to
-        // save the first patch into it.
-        const std::vector<std::string> banks = m_library.banks();
-        m_bankPending = !name.empty()
-                && std::find(banks.begin(), banks.end(), name) == banks.end();
+        rememberBank(name);
         m_libScroll = 0;
     }
 
     void bankPickChoose(int i)
     {
-        const std::vector<std::string> banks = m_library.banks();
+        const std::vector<std::string> banks = allBanks();
         if (i < 0)
             return;
         if (size_t(i) < banks.size())
@@ -3133,14 +3134,14 @@ private:
         bankSelect(name);
         m_libraryNote = bankPickIsFiling()
                 ? m_libraryNote
-                : ("bank \"" + name + "\" -- Save this patch puts one in it");
+                : ("bank \"" + name + "\" is empty -- save or move a patch into it");
         backToLibrary();
     }
 
     void drawBankPick()
     {
         const BankPickLayout L = bankPickLayout();
-        const std::vector<std::string> banks = m_library.banks();
+        const std::vector<std::string> banks = allBanks();
 
         char head[160];
         if (bankPickIsFiling())
@@ -3155,8 +3156,18 @@ private:
         for (int i = 0; i < L.rows; i ++)
         {
             if (size_t(i) < banks.size())
-                listRow(L, i, i == m_menuHover, banks[size_t(i)].c_str(),
-                        Color(225, 228, 232));
+            {
+                // An empty one is dimmer and says so, since it is the one thing here that
+                // will not survive the window being closed.
+                const std::vector<std::string> onDisk = m_library.banks();
+                const bool real = std::find(onDisk.begin(), onDisk.end(),
+                                            banks[size_t(i)]) != onDisk.end();
+                char line[96];
+                std::snprintf(line, sizeof(line), real ? "%s" : "%s   (empty)",
+                              banks[size_t(i)].c_str());
+                listRow(L, i, i == m_menuHover, line,
+                        real ? Color(225, 228, 232) : Color(168, 174, 184));
+            }
             else if (size_t(i) == banks.size())
                 listRow(L, i, i == m_menuHover,
                         bankPickIsFiling() ? "Unfiled -- in no bank at all"
@@ -5010,7 +5021,15 @@ private:
     std::string m_presetTargetPath;
     std::string m_presetTargetName;
     std::string m_presetTargetBank;
-    bool m_bankPending = false;     ///< a bank named but not yet claimed by any patch
+    /// Banks named in this UI that no patch has claimed yet.
+    ///
+    /// A bank exists on disk only because a patch says so, and that is what keeps the list
+    /// honest -- but it made an empty bank vanish as soon as you looked away, which is
+    /// exactly when somebody who has just made one is going off to find patches to put in
+    /// it.  So the names live here for as long as the window is open.  Nothing is written:
+    /// close the plugin and an empty bank is gone, having never been anything but an
+    /// intention.
+    std::vector<std::string> m_sessionBanks;
     bool m_hoverBankZone = false;   ///< the pointer is over a row's bank, not its name
 
     /// Hover values that are not grid cells.

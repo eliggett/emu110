@@ -56,7 +56,11 @@ slot -- and the browser says so when a patch wants a card that is not mounted.
 
 **Banks are done, as categories.** A bank is a name a patch claims -- one line in the
 preset file -- so "Strings" and "Abstract" cost nothing to make and nothing to clean up:
-a bank exists while a patch is in it and stops existing when the last one leaves. The
+a bank exists while a patch is in it and stops existing when the last one leaves -- except
+that a bank named in the browser is **kept for as long as the plugin window is open**, even
+with nothing in it, so that it can be made first and filled afterwards. It is shown as
+"(empty)" in the move list, and closing the window is what forgets it: nothing empty is
+ever written to disk. The
 LIBRARY tab has a row of bank tabs (All, each bank, Unfiled, and **+ New bank**) that
 filter the list. **Save Patch** and **Override Patch** are buttons in the header. Save Patch always makes a
 new file and never overwrites; Override Patch writes back over the preset that was

@@ -1256,7 +1256,11 @@ explaining.
 
 A bank needs no creating before it is used, so **+ New bank** is one field and not a
 dialogue: name it, and it is the bank being browsed and the one Save will write into. It
-exists nowhere until a patch lands in it, and evaporates if none ever does.
+exists nowhere on disk until a patch lands in it -- but the browser keeps the names it has
+been given for as long as the window is open, because an empty bank that vanished the
+moment you looked away could never be filled, and going to find patches to put in one is
+exactly what somebody does next. Closing the plugin forgets the empty ones; nothing empty
+is ever written.
 
 This replaces the `.u110bank` idea for *organising*. A bank file is still the right shape
 for **exchanging** a set of patches with somebody, and that is what it is now for.

@@ -405,6 +405,33 @@ struct Entry
     long long   size  = 0;
 };
 
+/// Case-insensitive order, so a list of banks reads the way a person would write it.
+inline bool bankOrder(const std::string &a, const std::string &b)
+{
+    std::string x = a, y = b;
+    for (char &c : x) if (c >= 'A' && c <= 'Z') c = char(c + 32);
+    for (char &c : y) if (c >= 'A' && c <= 'Z') c = char(c + 32);
+    return x < y;
+}
+
+/// The banks to offer: the ones patches are actually in, plus any named this session that
+/// nothing has claimed yet.
+///
+/// A bank is a name a patch claims, so an empty one exists nowhere on disk -- but somebody
+/// who has just made one is usually about to put patches in it, and a bank that vanishes
+/// the moment they look away cannot be filled.  So the UI keeps the names it has been given
+/// until it closes, and this is where the two lists meet.  Sorted and without repeats: a
+/// name may be in one list or both, and the offer is the same either way.
+inline std::vector<std::string> mergeBanks(std::vector<std::string> onDisk,
+                                           const std::vector<std::string> &session)
+{
+    for (const std::string &b : session)
+        if (!b.empty() && std::find(onDisk.begin(), onDisk.end(), b) == onDisk.end())
+            onDisk.push_back(b);
+    std::sort(onDisk.begin(), onDisk.end(), bankOrder);
+    return onDisk;
+}
+
 /// Text that is safe to write as the value of a `key value` line, and to show in the UI.
 ///
 /// Control characters go, not least the newline: one of those in a name would forge a
@@ -520,14 +547,7 @@ public:
             if (!e.bank.empty()
                     && std::find(out.begin(), out.end(), e.bank) == out.end())
                 out.push_back(e.bank);
-        std::sort(out.begin(), out.end(),
-                  [](const std::string &a, const std::string &b)
-                  {
-                      std::string x = a, y = b;
-                      for (char &c : x) if (c >= 'A' && c <= 'Z') c = char(c + 32);
-                      for (char &c : y) if (c >= 'A' && c <= 'Z') c = char(c + 32);
-                      return x < y;
-                  });
+        std::sort(out.begin(), out.end(), bankOrder);
         return out;
     }
 

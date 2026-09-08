@@ -252,6 +252,20 @@ int main(int argc, char **argv)
     check(cleanPresetName("Two\nLines").find('\n') == std::string::npos,
           "and can never contain a newline either");
 
+    // ---- banks named this session, which have no patches in them yet -------------------
+    {
+        const std::vector<std::string> onDisk = { "Strings", "abstract" };
+        const std::vector<std::string> session = { "Pads", "Strings", "" };
+        const std::vector<std::string> all = mergeBanks(onDisk, session);
+        check(all.size() == 3, "an empty bank named this session is offered too");
+        check(std::find(all.begin(), all.end(), "Pads") != all.end(),
+              "and by name");
+        check(std::count(all.begin(), all.end(), std::string("Strings")) == 1,
+              "a bank in both lists is offered once, not twice");
+        check(all[0] == "abstract" && all[1] == "Pads" && all[2] == "Strings",
+              "and the order ignores capitals, so the list reads as written");
+    }
+
     // ---- the index sees what is on disk ------------------------------------------------
     {
         Index idx;
