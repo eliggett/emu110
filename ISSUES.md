@@ -71,10 +71,11 @@ renaming it is how you say "this is a different patch now". Hovering it says whi
 three is missing. Each preset shows its bank beside its name: clicking the name plays it, clicking
 the bank moves it. **Right-clicking gives Rename, Move to bank and Delete** -- delete
 asks again first, since there is no undo and no wastebasket. Naming a bank and renaming a preset are both
-finished by **clicking the field** as well as by pressing Enter: a plugin UI does not
-reliably get the Return key, because the host sees it first and a DAW that binds Return to
-something of its own never passes it on. `VOLTAIRE_KEYS=1` prints every key that does
-arrive. Every one of these ends back
+finished with an **OK button** beside the field, because a plugin UI does not reliably get
+the Return key: the host sees it first and a DAW that binds Return to something of its own
+never passes it on. `VOLTAIRE_KEYS=1` prints every key that does arrive. Every overlay also
+has an **X** in its corner, for anyone who would not think to click in the dark or press
+Escape. Every one of these ends back
 in the library rather than closing the menus, and Escape steps back to the library too,
 because the next thing anybody does after naming a bank or renaming a patch is in the
 library as well. Renaming changes the display

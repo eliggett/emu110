@@ -500,6 +500,17 @@ protected:
 
     bool onMouse(const MouseEvent &ev) override
     {
+        // Before every palette's own handling: the X means the same thing everywhere, and
+        // it sits over parts of some of them that would otherwise take the click.
+        if (m_menu != Menu::None && ev.press
+                && closeButtonHit(float(ev.pos.getX()), float(ev.pos.getY())))
+        {
+            closeCurrentMenu();
+            m_hoverClose = false;
+            repaint();
+            return true;
+        }
+
         // A menu is modal while it is up: it takes the click wherever it lands, so a
         // click meant to dismiss it cannot also press whatever is underneath.
         // The report is a wall of text with nothing to pick, so any click dismisses it --
@@ -542,14 +553,20 @@ protected:
         {
             if (!ev.press)
                 return true;
-            const int hit = listHit(presetActionsLayout(),
-                                    float(ev.pos.getX()), float(ev.pos.getY()));
+            const BankPickLayout L = presetActionsLayout();
+            if (m_typing == Typing::RenamePreset
+                    && inRect(fieldOkRect(L, kActRename),
+                              float(ev.pos.getX()), float(ev.pos.getY())))
+            {
+                commitTyping();
+                repaint();
+                return true;
+            }
+            const int hit = listHit(L, float(ev.pos.getX()), float(ev.pos.getY()));
             m_menuHover = -1;
             if (hit == kActRename)
             {
-                if (m_typing == Typing::RenamePreset)
-                    commitTyping();  // clicking the field again finishes it
-                else
+                if (m_typing != Typing::RenamePreset)
                 {
                     // Starts from the name it has: renaming is usually a correction.
                     m_typing = Typing::RenamePreset;
@@ -599,6 +616,15 @@ protected:
         {
             if (!ev.press)
                 return true;
+            const BankPickLayout bl = bankPickLayout();
+            if (m_typing == Typing::NewBank
+                    && inRect(fieldOkRect(bl, bl.rows - 1),
+                              float(ev.pos.getX()), float(ev.pos.getY())))
+            {
+                commitTyping();
+                repaint();
+                return true;
+            }
             const int hit = bankPickHit(float(ev.pos.getX()), float(ev.pos.getY()));
             if (hit < 0)
                 backToLibrary();
@@ -997,6 +1023,16 @@ protected:
 
     bool onMotion(const MotionEvent &ev) override
     {
+        // The X lights up wherever it is, before each palette looks at the pointer itself.
+        if (m_menu != Menu::None)
+        {
+            const bool over = closeButtonHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            if (over != m_hoverClose)
+            { m_hoverClose = over; repaint(); }
+        }
+        else if (m_hoverClose)
+            m_hoverClose = false;
+
         if (m_menu == Menu::Patch)
         {
             int hit;
@@ -1027,9 +1063,16 @@ protected:
             const BankPickLayout L = m_menu == Menu::BankPick ? bankPickLayout()
                                    : m_menu == Menu::PresetActions ? presetActionsLayout()
                                                                    : deleteConfirmLayout();
+            bool ok = false;
+            if (m_typing == Typing::NewBank && m_menu == Menu::BankPick)
+                ok = inRect(fieldOkRect(L, L.rows - 1),
+                            float(ev.pos.getX()), float(ev.pos.getY()));
+            else if (m_typing == Typing::RenamePreset && m_menu == Menu::PresetActions)
+                ok = inRect(fieldOkRect(L, kActRename),
+                            float(ev.pos.getX()), float(ev.pos.getY()));
             const int hit = listHit(L, float(ev.pos.getX()), float(ev.pos.getY()));
-            if (hit != m_menuHover)
-            { m_menuHover = hit; repaint(); }
+            if (hit != m_menuHover || ok != m_hoverFieldOk)
+            { m_menuHover = hit; m_hoverFieldOk = ok; repaint(); }
             return true;
         }
         if (m_menu == Menu::WriteConfirm)
@@ -1221,14 +1264,7 @@ protected:
         // opened from the library: leaving the delete question should put the list back,
         // not send somebody hunting for the PATCH button again.  A second Escape, now in
         // the library, closes it.
-        if (m_menu == Menu::BankPick || m_menu == Menu::PresetActions
-                || m_menu == Menu::DeleteConfirm || m_menu == Menu::OverwriteConfirm)
-            backToLibrary();
-        else
-        {
-            m_menu = Menu::None;
-            m_menuHover = -1;
-        }
+        closeCurrentMenu();
         repaint();
         return true;
     }
@@ -1464,6 +1500,8 @@ private:
         strokeWidth(1.0f);
         stroke();
 
+        drawCloseButton(m.x, m.y, m.w, m.rowH);
+
         fontFace(m_font);
         fontSize(m.fontSize * 1.05f);
         fillColor(Color(0, 163, 224));
@@ -1564,6 +1602,8 @@ private:
         strokeColor(Color(96, 102, 112));
         strokeWidth(1.0f);
         stroke();
+
+        drawCloseButton(x, y, w, rowH);
 
         fontFace(m_font);
         fontSize(rowH * 0.95f);
@@ -1704,6 +1744,8 @@ private:
         strokeColor(Color(96, 102, 112));
         strokeWidth(1.0f);
         stroke();
+
+        drawCloseButton(x, y, w, rowH);
 
         fontFace(m_font);
         textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
@@ -1872,6 +1914,8 @@ private:
         strokeWidth(1.0f);
         stroke();
 
+        drawCloseButton(L.x, L.y, L.w, L.rowH);
+
         fontFace(m_font);
         textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
         fontSize(L.rowH * 0.95f);
@@ -2039,6 +2083,8 @@ private:
         strokeWidth(1.0f);
         stroke();
 
+        drawCloseButton(L.x, L.y, L.w, L.rowH);
+
         fontFace(m_font);
         textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
         fontSize(L.rowH * 0.95f);
@@ -2186,8 +2232,9 @@ private:
         HeaderRect r;
         r.h = m.rowH * 1.1f;
         r.y = m.y + m.rowH * 0.15f;
-        r.w = m.fontSize * (0.58f * float(std::strlen(kOverrideLabel)) + 2.0f);
-        r.x = m.x + m.w - m.rowH * 0.5f - r.w;
+        r.w = m.fontSize * (0.58f * float(std::strlen(kOverrideLabel)) + 1.6f);
+        // Clear of the X in the corner, which is drawn over this same row.
+        r.x = m.x + m.w - m.rowH * (0.35f + kCloseSize + 0.4f) - r.w;
         return r;
     }
 
@@ -2197,7 +2244,7 @@ private:
         HeaderRect r;
         r.h = o.h;
         r.y = o.y;
-        r.w = m.fontSize * (0.58f * float(saveButtonLabel().size()) + 2.0f);
+        r.w = m.fontSize * (0.58f * float(saveButtonLabel().size()) + 1.6f);
         r.x = o.x - m.fontSize * 0.6f - r.w;
         return r;
     }
@@ -2783,6 +2830,8 @@ private:
         strokeWidth(1.0f);
         stroke();
 
+        drawCloseButton(m.x, m.y, m.w, m.rowH);
+
         fontFace(m_font);
         fontSize(m.fontSize * 1.05f);
         textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
@@ -2936,6 +2985,102 @@ private:
         return i >= 0 && i < L.rows ? i : -1;
     }
 
+    // ---- the way out of an overlay ----------------------------------------------------
+    //
+    // Clicking in the dark closes these, and so does Escape, but neither is visible and
+    // somebody meeting the panel for the first time has no reason to guess either.  So
+    // every palette gets an X in its corner.
+    //
+    // The rectangle is REMEMBERED AS IT IS DRAWN rather than computed twice.  Two of these
+    // boxes work out their geometry inside the draw itself, and a hit test that recomputed
+    // it would be a second expression for one rectangle -- which is the mistake that put
+    // the library's grid and its clicks a row and a half apart.
+
+    static constexpr float kCloseSize = 0.95f;      ///< of a row
+
+    void drawCloseButton(float bx, float by, float bw, float rowH)
+    {
+        HeaderRect r;
+        r.h = rowH * kCloseSize;
+        r.w = r.h;
+        r.x = bx + bw - r.w - rowH * 0.35f;
+        r.y = by + rowH * 0.28f;
+        m_closeRect = r;
+        m_closeFor  = m_menu;
+
+        const bool hot = m_hoverClose;
+        beginPath();
+        roundedRect(r.x, r.y, r.w, r.h, r.h * 0.3f);
+        fillColor(hot ? Color(150, 60, 56) : Color(44, 46, 52));
+        fill();
+        strokeColor(hot ? Color(230, 150, 140) : Color(96, 102, 112));
+        strokeWidth(1.0f);
+        stroke();
+
+        const float p = r.h * 0.32f;
+        beginPath();
+        moveTo(r.x + p, r.y + p);
+        lineTo(r.x + r.w - p, r.y + r.h - p);
+        moveTo(r.x + r.w - p, r.y + p);
+        lineTo(r.x + p, r.y + r.h - p);
+        strokeColor(hot ? Color(255, 225, 220) : Color(190, 195, 205));
+        strokeWidth(std::max(1.0f, r.h * 0.11f));
+        stroke();
+    }
+
+    bool closeButtonHit(float px, float py) const
+    {
+        return m_closeFor == m_menu && m_closeRect.w > 0.0f
+                && inRect(m_closeRect, px, py);
+    }
+
+    /// What Escape does, so the X does the same thing rather than a second version of it.
+    void closeCurrentMenu()
+    {
+        if (m_menu == Menu::BankPick || m_menu == Menu::PresetActions
+                || m_menu == Menu::DeleteConfirm || m_menu == Menu::OverwriteConfirm)
+            backToLibrary();
+        else
+        {
+            m_menu = Menu::None;
+            m_menuHover = -1;
+            m_typing = Typing::None;
+        }
+    }
+
+    /// The OK button at the right-hand end of a text field's row.
+    ///
+    /// A button, because a field that is finished by clicking its own text is not how text
+    /// fields work anywhere else -- somebody clicking into the middle of what they typed to
+    /// correct it would commit instead.  It exists at all because Enter cannot be relied
+    /// on: the host sees the key first and a DAW that binds Return never passes it on.
+    HeaderRect fieldOkRect(const BankPickLayout &L, int row) const
+    {
+        HeaderRect r;
+        r.h = L.rowH * 0.95f;
+        r.w = L.rowH * 2.4f;
+        r.x = L.x + L.w - L.rowH * 0.6f - r.w;
+        r.y = L.top + float(row) * L.rowH * 1.25f + (L.rowH * 1.15f - r.h) * 0.5f;
+        return r;
+    }
+
+    void drawFieldOk(const BankPickLayout &L, int row, bool hot)
+    {
+        const HeaderRect r = fieldOkRect(L, row);
+        beginPath();
+        roundedRect(r.x, r.y, r.w, r.h, r.h * 0.28f);
+        fillColor(hot ? Color(52, 116, 60) : Color(40, 96, 46));
+        fill();
+        strokeColor(Color(120, 200, 130));
+        strokeWidth(1.0f);
+        stroke();
+        fontSize(L.rowH * 0.75f);
+        textAlign(ALIGN_CENTER | ALIGN_MIDDLE);
+        fillColor(Color(225, 255, 225));
+        text(r.x + r.w * 0.5f, r.y + r.h * 0.5f, "OK", nullptr);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+    }
+
     /// One row of a list box, drawn the same way everywhere.
     void listRow(const BankPickLayout &L, int i, bool hot, const char *label,
                  const Color &c)
@@ -2979,6 +3124,8 @@ private:
         fontSize(L.rowH * 0.7f);
         fillColor(Color(140, 146, 156));
         text(L.x + L.rowH * 0.7f, L.y + L.h - L.rowH * 0.6f, footer, nullptr);
+
+        drawCloseButton(L.x, L.y, L.w, L.rowH);
     }
 
     BankPickLayout bankPickLayout() const
@@ -3010,7 +3157,7 @@ private:
         char head[160];
         std::snprintf(head, sizeof(head), "\"%s\"", m_presetTargetName.c_str());
         listBox(L, head, m_typing == Typing::RenamePreset
-                ? "click the name or press Enter to rename it   |   Escape cancels"
+                ? "type a name, then OK   |   Escape cancels"
                 : "these change the file, not the machine   |   Escape closes this");
 
         char line[96];
@@ -3018,7 +3165,8 @@ private:
         {
             std::snprintf(line, sizeof(line), "Name:  %s%s", m_typeBuf,
                           m_caretOn ? "_" : " ");
-            listRow(L, kActRename, m_menuHover == kActRename, line, Color(190, 255, 190));
+            listRow(L, kActRename, false, line, Color(190, 255, 190));
+            drawFieldOk(L, kActRename, m_hoverFieldOk);
         }
         else
             listRow(L, kActRename, m_menuHover == kActRename, "Rename...",
@@ -3091,10 +3239,9 @@ private:
                 bankSelect(std::string());
             backToLibrary();
         }
-        else if (m_typing == Typing::NewBank)
-            commitTyping();          // clicking the field again finishes it
-        else
+        else if (m_typing != Typing::NewBank)
         {
+            // The row arms the field; the OK button beside it is what finishes it.
             m_typing = Typing::NewBank;
             showCaret();
         }
@@ -3150,7 +3297,7 @@ private:
         else
             std::snprintf(head, sizeof(head), "CHOOSE A BANK");
         listBox(L, head, m_typing == Typing::NewBank
-                ? "click the name or press Enter to make it   |   Escape cancels"
+                ? "type a name, then OK   |   Escape cancels"
                 : "a bank is just a name a patch claims   |   Escape closes this");
 
         for (int i = 0; i < L.rows; i ++)
@@ -3181,9 +3328,11 @@ private:
                                   m_caretOn ? "_" : " ");
                 else
                     std::snprintf(line, sizeof(line), "New bank...");
-                listRow(L, i, i == m_menuHover, line,
+                listRow(L, i, i == m_menuHover && m_typing != Typing::NewBank, line,
                         m_typing == Typing::NewBank ? Color(190, 255, 190)
                                                     : Color(168, 174, 184));
+                if (m_typing == Typing::NewBank)
+                    drawFieldOk(L, i, m_hoverFieldOk);
             }
         }
     }
@@ -3206,6 +3355,8 @@ private:
         strokeColor(Color(96, 102, 112));
         strokeWidth(1.0f);
         stroke();
+
+        drawCloseButton(m.x, m.y, m.w, m.rowH);
 
         fontFace(m_font);
         fontSize(m.fontSize * 1.05f);
@@ -3373,6 +3524,8 @@ private:
         strokeColor(Color(96, 102, 112));
         strokeWidth(1.0f);
         stroke();
+
+        drawCloseButton(m.x, m.y, m.w, m.rowH);
 
         fontFace(m_font);
         fontSize(m.fontSize * 1.05f);
@@ -5031,6 +5184,12 @@ private:
     /// intention.
     std::vector<std::string> m_sessionBanks;
     bool m_hoverBankZone = false;   ///< the pointer is over a row's bank, not its name
+    bool m_hoverFieldOk = false;    ///< the pointer is over a field's OK button
+    bool m_hoverClose = false;      ///< the pointer is over the palette's X
+
+    /// Where the X was last drawn, and for which palette.
+    HeaderRect m_closeRect { 0.0f, 0.0f, 0.0f, 0.0f };
+    Menu m_closeFor = Menu::None;
 
     /// Hover values that are not grid cells.
     static constexpr int kHoverSave = -2;
