@@ -220,6 +220,37 @@ inline std::string fileNameFor(const std::string &display)
     return s;
 }
 
+/// A path in `dir` for a preset called `display` that no file is using yet.
+///
+/// Never overwrite: two patches may perfectly reasonably be called the same thing, and
+/// losing the first to save the second is not what anyone asking to save or rename wants.
+/// `keep` is a path that does not count as in the way -- the file being renamed itself, so
+/// that changing "Pad" to "pad" does not turn into "pad 2".
+inline std::string uniquePath(const std::string &dir, const std::string &display,
+                              const std::string &keep = std::string())
+{
+    const std::string stem = dir + "/" + fileNameFor(display);
+    std::string path = stem + kSuffix;
+    for (int n = 2; n < 10000; n ++)
+    {
+        struct stat st;
+        if (path == keep || ::stat(path.c_str(), &st) != 0)
+            break;
+        char suffix[16];
+        std::snprintf(suffix, sizeof(suffix), " %d", n);
+        path = stem + suffix + kSuffix;
+    }
+    return path;
+}
+
+/// Throw one away.  There is no undo and no wastebasket: the browser asks first instead.
+inline bool erase(const std::string &path, std::string &err)
+{
+    if (std::remove(path.c_str()) != 0)
+    { err = "could not delete " + path; return false; }
+    return true;
+}
+
 // ---- reading and writing -------------------------------------------------------------
 
 /// Write a preset, atomically.
@@ -374,8 +405,12 @@ struct Entry
     long long   size  = 0;
 };
 
-/// A bank name that is safe to write on a line of its own and to show in a tab.
-inline std::string cleanBankName(const std::string &in)
+/// Text that is safe to write as the value of a `key value` line, and to show in the UI.
+///
+/// Control characters go, not least the newline: one of those in a name would forge a
+/// second key in the file.  Trimmed, and capped so that nothing can push a menu off the
+/// side of the window.
+inline std::string cleanLine(const std::string &in, size_t maxLen)
 {
     std::string s;
     for (const char c : in)
@@ -385,10 +420,16 @@ inline std::string cleanBankName(const std::string &in)
         s.pop_back();
     while (!s.empty() && s.front() == ' ')
         s.erase(s.begin());
-    if (s.size() > 24)
-        s.resize(24);
+    if (s.size() > maxLen)
+        s.resize(maxLen);
     return s;
 }
+
+/// A bank name, which is shown in a tab and so has to be short.
+inline std::string cleanBankName(const std::string &in) { return cleanLine(in, 24); }
+
+/// A preset name, which gets a whole row and can afford more.
+inline std::string cleanPresetName(const std::string &in) { return cleanLine(in, 48); }
 
 /// The library as a list, kept across rescans so that opening the browser does not mean
 /// reading every file again.
@@ -409,6 +450,7 @@ public:
         if (d == nullptr)
             return;
 
+        std::map<std::string, Entry> fresh;
         const size_t suffixLen = std::strlen(kSuffix);
         while (const dirent *e = ::readdir(d))
         {
@@ -445,11 +487,15 @@ public:
                 { en.name = p.name; en.bank = p.bank; }
                 else
                     en.name = fn.substr(0, fn.size() - suffixLen) + "  (?)";
-                m_cache[path] = en;
             }
+            fresh[path] = en;
             m_entries.push_back(en);
         }
         ::closedir(d);
+
+        // Only what is still there: renaming and deleting change paths, and a cache keyed
+        // by path would otherwise keep every name a preset has ever had.
+        m_cache.swap(fresh);
 
         std::sort(m_entries.begin(), m_entries.end(),
                   [](const Entry &a, const Entry &b)

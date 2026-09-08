@@ -196,6 +196,33 @@ int main(int argc, char **argv)
           "and can never contain a newline, which would forge a second key");
     check(cleanBankName(std::string(200, 'x')).size() <= 24, "and cannot be enormous");
 
+    // ---- renaming and deleting, which the browser's right-click menu does --------------
+    {
+        std::string e2;
+
+        // A new name must never land on a file that already exists...
+        const std::string taken = dir + "/" + fileNameFor("Occupied") + kSuffix;
+        Preset other = out;
+        other.name = "Occupied";
+        (void)save(taken, other, e2);
+        const std::string fresh = uniquePath(dir, "Occupied");
+        check(fresh != taken, "a second preset of the same name gets its own file");
+
+        // ...except the file being renamed itself, or changing a name's capitals would
+        // walk it up through "name 2", "name 3" every time.
+        check(uniquePath(dir, "Occupied", taken) == taken,
+              "and renaming a preset to what it is already called stays put");
+
+        check(erase(taken, e2), "a preset can be deleted");
+        struct stat st;
+        check(::stat(taken.c_str(), &st) != 0, "and is really gone");
+        check(!erase(taken, e2), "deleting one that is not there is refused, not ignored");
+    }
+
+    check(cleanPresetName("  A Long One  ") == "A Long One", "a preset name is trimmed");
+    check(cleanPresetName("Two\nLines").find('\n') == std::string::npos,
+          "and can never contain a newline either");
+
     // ---- the index sees what is on disk ------------------------------------------------
     {
         Index idx;

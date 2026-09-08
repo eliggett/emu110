@@ -345,7 +345,7 @@ protected:
 
     void uiIdle() override
     {
-        if (m_nameEdit || m_bankEdit)
+        if (m_nameEdit || m_typing != Typing::None)
         {
             struct timespec ts;
             clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -449,6 +449,10 @@ protected:
             drawWriteConfirm();
         else if (m_menu == Menu::BankPick)
             drawBankPick();
+        else if (m_menu == Menu::PresetActions)
+            drawPresetActions();
+        else if (m_menu == Menu::DeleteConfirm)
+            drawDeleteConfirm();
         else if (m_menu == Menu::Tone)
             drawToneMenu();
         else if (m_menu == Menu::Value)
@@ -545,13 +549,53 @@ protected:
             return true;
         }
 
+        if (m_menu == Menu::PresetActions)
+        {
+            if (!ev.press)
+                return true;
+            const int hit = listHit(presetActionsLayout(),
+                                    float(ev.pos.getX()), float(ev.pos.getY()));
+            m_menuHover = -1;
+            if (hit == kActRename)
+            {
+                // Starts from the name it has, since renaming is usually a correction.
+                m_typing = Typing::RenamePreset;
+                std::snprintf(m_typeBuf, sizeof(m_typeBuf), "%s",
+                              m_presetTargetName.c_str());
+                m_typeCaret = int(std::strlen(m_typeBuf));
+                showCaret();
+            }
+            else if (hit == kActMoveBank)
+            { m_typing = Typing::None; m_menu = Menu::BankPick; }
+            else if (hit == kActDelete)
+            { m_typing = Typing::None; m_menu = Menu::DeleteConfirm; }
+            else if (hit < 0)
+            { m_typing = Typing::None; m_menu = Menu::None; }
+            repaint();
+            return true;
+        }
+
+        if (m_menu == Menu::DeleteConfirm)
+        {
+            if (!ev.press)
+                return true;
+            const int hit = listHit(deleteConfirmLayout(),
+                                    float(ev.pos.getX()), float(ev.pos.getY()));
+            if (hit == 0)
+                libraryDelete(m_presetTargetPath, m_presetTargetName);
+            m_menu = Menu::None;
+            m_menuHover = -1;
+            repaint();
+            return true;
+        }
+
         if (m_menu == Menu::BankPick)
         {
             if (!ev.press)
                 return true;
             const int hit = bankPickHit(float(ev.pos.getX()), float(ev.pos.getY()));
             if (hit < 0)
-            { m_menu = Menu::None; m_bankEdit = false; }
+            { m_menu = Menu::None; m_typing = Typing::None; }
             else
                 bankPickChoose(hit);
             m_menuHover = -1;
@@ -622,11 +666,11 @@ protected:
                         {
                             // Naming a bank is all it takes to have one; the first patch
                             // saved into it is what puts it on disk.
-                            m_bankTargetPath.clear();
-                            m_bankTargetName.clear();
-                            m_bankBuf[0] = '\0';
-                            m_bankCaret = 0;
-                            m_bankEdit = true;
+                            m_presetTargetPath.clear();
+                            m_presetTargetName.clear();
+                            m_typeBuf[0] = '\0';
+                            m_typeCaret = 0;
+                            m_typing = Typing::NewBank;
                             m_menu = Menu::BankPick;
                             m_menuHover = -1;
                             showCaret();
@@ -662,12 +706,15 @@ protected:
                 // the picker.  The name half plays it, which is what the list is for.
                 if (lh.bankZone || ev.button == kMouseButtonRight)
                 {
-                    m_bankTargetPath = view[size_t(idx)]->path;
-                    m_bankTargetName = view[size_t(idx)]->name;
-                    m_bankEdit = false;
-                    m_bankBuf[0] = '\0';
-                    m_bankCaret = 0;
-                    m_menu = Menu::BankPick;
+                    m_presetTargetPath = view[size_t(idx)]->path;
+                    m_presetTargetName = view[size_t(idx)]->name;
+                    m_presetTargetBank = view[size_t(idx)]->bank;
+                    m_typing = Typing::None;
+                    m_typeBuf[0] = '\0';
+                    m_typeCaret = 0;
+                    // The bank column means one thing, so it goes straight there; the
+                    // right button is the general "what else can I do to this".
+                    m_menu = lh.bankZone ? Menu::BankPick : Menu::PresetActions;
                     m_menuHover = -1;
                 }
                 else
@@ -940,9 +987,13 @@ protected:
             { m_menuHover = hit; m_hoverBankZone = zone; repaint(); }
             return true;
         }
-        if (m_menu == Menu::BankPick)
+        if (m_menu == Menu::BankPick || m_menu == Menu::PresetActions
+                || m_menu == Menu::DeleteConfirm)
         {
-            const int hit = bankPickHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            const BankPickLayout L = m_menu == Menu::BankPick ? bankPickLayout()
+                                   : m_menu == Menu::PresetActions ? presetActionsLayout()
+                                                                   : deleteConfirmLayout();
+            const int hit = listHit(L, float(ev.pos.getX()), float(ev.pos.getY()));
             if (hit != m_menuHover)
             { m_menuHover = hit; repaint(); }
             return true;
@@ -1078,21 +1129,28 @@ protected:
 
     bool onKeyboard(const KeyboardEvent &ev) override
     {
-        if (m_bankEdit && ev.press)
+        if (m_typing != Typing::None && ev.press)
         {
             if (ev.key == kKeyEscape)
-            { m_bankEdit = false; repaint(); return true; }
+            { m_typing = Typing::None; repaint(); return true; }
             if (ev.key == kKeyBackspace)
             {
-                if (m_bankCaret > 0)
-                    m_bankBuf[-- m_bankCaret] = '\0';
+                if (m_typeCaret > 0)
+                    m_typeBuf[-- m_typeCaret] = '\0';
                 showCaret();
                 repaint();
                 return true;
             }
             if (ev.key == kKeyEnter)
             {
-                commitNewBank();
+                if (m_typing == Typing::RenamePreset)
+                {
+                    libraryRename(m_presetTargetPath, m_typeBuf);
+                    m_typing = Typing::None;
+                    m_menu = Menu::None;
+                }
+                else
+                    commitNewBank();
                 repaint();
                 return true;
             }
@@ -1134,16 +1192,16 @@ protected:
     /// nothing.
     bool onCharacterInput(const CharacterInputEvent &ev) override
     {
-        if (m_bankEdit)
+        if (m_typing != Typing::None)
         {
             // A bank name is shown in a tab and written on a line of its own, so it takes
             // printable characters and nothing else -- a newline here would forge a second
             // key in the preset file.
             const unsigned c = ev.character;
-            if (c >= 0x20 && c < 0x7f && m_bankCaret < int(sizeof(m_bankBuf)) - 1)
+            if (c >= 0x20 && c < 0x7f && m_typeCaret < int(sizeof(m_typeBuf)) - 1)
             {
-                m_bankBuf[m_bankCaret ++] = char(c);
-                m_bankBuf[m_bankCaret] = '\0';
+                m_typeBuf[m_typeCaret ++] = char(c);
+                m_typeBuf[m_typeCaret] = '\0';
             }
             showCaret();
             repaint();
@@ -2339,6 +2397,54 @@ private:
                 : ("\"" + p.name + "\" filed under " + p.bank);
     }
 
+    /// Rename one.
+    ///
+    /// The FILE is renamed to match, so that a library browsed in a file manager reads the
+    /// same as one browsed here -- and never over another preset, which is what uniquePath
+    /// is for.  What is NOT touched is the ten-byte name inside the patch: that is the
+    /// machine's own field, it is what the LCD shows, and silently rewriting patch bytes
+    /// because somebody renamed a file would make the preset no longer the patch that was
+    /// captured.  The DIVE common page edits that one.
+    void libraryRename(const std::string &path, const std::string &want)
+    {
+        using namespace voltaire::preset;
+
+        const std::string name = cleanPresetName(want);   // one printable line, trimmed
+        if (name.empty())
+            return;
+
+        Preset p;
+        std::string err;
+        if (!voltaire::preset::load(path, p, err))
+        { m_libraryNote = err; return; }
+
+        p.name = name;
+        const std::string dest = uniquePath(m_libraryDir, name, path);
+        if (!voltaire::preset::save(dest, p, err))
+        { m_libraryNote = err; return; }
+        if (dest != path && !erase(path, err))
+        {
+            // The new one is already written, so the library is not lost -- but say so
+            // rather than leaving two copies about without a word.
+            m_libraryNote = "renamed, but the old file is still there: " + err;
+            libraryRescan();
+            return;
+        }
+        libraryRescan();
+        m_libraryNote = "renamed to \"" + name + "\"";
+    }
+
+    void libraryDelete(const std::string &path, const std::string &name)
+    {
+        std::string err;
+        if (!voltaire::preset::erase(path, err))
+        { m_libraryNote = err; return; }
+        libraryRescan();
+        if (m_libScroll > 0 && m_libScroll >= int(libraryView().size()))
+            m_libScroll = 0;
+        m_libraryNote = "deleted \"" + name + "\"";
+    }
+
     /// The two halves of the PATCH menu, as tabs in its header.  0 is the machine's own
     /// 64, 1 is the library; -1 is anywhere else.
     /// Whichever of the two lists is showing, since the library's header is taller.
@@ -2444,8 +2550,8 @@ private:
                           "nothing saved yet -- Save this patch puts one here");
         else
             std::snprintf(right, sizeof(right),
-                          "%d of %d presets   |   click a name to play it, "
-                          "click its bank to move it",
+                          "%d of %d presets   |   click to play, click a bank to move it, "
+                          "right-click to rename or delete",
                           int(view.size()), int(m_library.entries().size()));
         fontSize(m.fontSize * 0.72f);
         textAlign(ALIGN_RIGHT | ALIGN_MIDDLE);
@@ -2527,12 +2633,13 @@ private:
 
     struct BankPickLayout { float x, y, w, h, rowH, top; int rows; };
 
-    BankPickLayout bankPickLayout() const
+    /// One list box: a heading and `rows` entries, centred, shrunk to fit a short window.
+    /// Shared so that every box in the library reads the same and hit-tests the same.
+    BankPickLayout listLayout(int rows) const
     {
         BankPickLayout L;
         L.rowH = overlayRowH();
-        const std::vector<std::string> banks = m_library.banks();
-        L.rows = int(banks.size()) + 2;              // + Unfiled + New bank
+        L.rows = rows;
         L.w = L.rowH * 22.0f;
         const float maxW = float(getWidth()) - 16.0f;
         if (L.w > maxW)
@@ -2552,20 +2659,129 @@ private:
         return L;
     }
 
-    int bankPickHit(float px, float py) const
+    /// Which row of a list box is under the pointer, or -1.  Takes the layout so that the
+    /// drawing and the hit test cannot be looking at two different boxes.
+    static int listHit(const BankPickLayout &L, float px, float py)
     {
-        const BankPickLayout L = bankPickLayout();
         if (px < L.x || px > L.x + L.w || py < L.top)
             return -1;
         const int i = int((py - L.top) / (L.rowH * 1.25f));
         return i >= 0 && i < L.rows ? i : -1;
     }
 
+    /// One row of a list box, drawn the same way everywhere.
+    void listRow(const BankPickLayout &L, int i, bool hot, const char *label,
+                 const Color &c)
+    {
+        const float y = L.top + float(i) * L.rowH * 1.25f;
+        if (hot)
+        {
+            beginPath();
+            roundedRect(L.x + L.rowH * 0.4f, y, L.w - L.rowH * 0.8f,
+                        L.rowH * 1.15f, L.rowH * 0.25f);
+            fillColor(Color(0, 163, 224, 0.30f));
+            fill();
+        }
+        fontSize(L.rowH * 0.85f);
+        fillColor(c);
+        text(L.x + L.rowH * 0.9f, y + L.rowH * 0.6f, label, nullptr);
+    }
+
+    /// The frame every list box sits in, with its heading.
+    void listBox(const BankPickLayout &L, const char *heading, const char *footer)
+    {
+        beginPath();
+        rect(0, 0, getWidth(), getHeight());
+        fillColor(Color(0, 0, 0, 0.72f));
+        fill();
+
+        beginPath();
+        roundedRect(L.x, L.y, L.w, L.h, L.rowH * 0.4f);
+        fillColor(Color(22, 24, 28));
+        fill();
+        strokeColor(Color(96, 102, 112));
+        strokeWidth(1.0f);
+        stroke();
+
+        fontFace(m_font);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        fontSize(L.rowH * 0.9f);
+        fillColor(Color(255, 180, 90));
+        text(L.x + L.rowH * 0.7f, L.y + L.rowH * 1.1f, heading, nullptr);
+
+        fontSize(L.rowH * 0.7f);
+        fillColor(Color(140, 146, 156));
+        text(L.x + L.rowH * 0.7f, L.y + L.h - L.rowH * 0.6f, footer, nullptr);
+    }
+
+    BankPickLayout bankPickLayout() const
+    {
+        // banks + Unfiled + New bank
+        return listLayout(int(m_library.banks().size()) + 2);
+    }
+
+    int bankPickHit(float px, float py) const
+    {
+        return listHit(bankPickLayout(), px, py);
+    }
+
+    // ---- what right-clicking a preset offers ------------------------------------------
+    //
+    // Three things can be done to a preset that are not "play it", and they are on one
+    // menu because they are the same kind of thing: they change the file rather than the
+    // machine.  Delete asks again, because there is no undo and no wastebasket.
+
+    enum { kActRename = 0, kActMoveBank, kActDelete, kPresetActionCount };
+
+    BankPickLayout presetActionsLayout() const { return listLayout(kPresetActionCount); }
+
+    void drawPresetActions()
+    {
+        const BankPickLayout L = presetActionsLayout();
+        char head[160];
+        std::snprintf(head, sizeof(head), "\"%s\"", m_presetTargetName.c_str());
+        listBox(L, head, m_typing == Typing::RenamePreset
+                ? "Enter renames it   |   Escape cancels"
+                : "these change the file, not the machine   |   Escape closes this");
+
+        char line[96];
+        if (m_typing == Typing::RenamePreset)
+        {
+            std::snprintf(line, sizeof(line), "Name:  %s%s", m_typeBuf,
+                          m_caretOn ? "_" : " ");
+            listRow(L, kActRename, false, line, Color(190, 255, 190));
+        }
+        else
+            listRow(L, kActRename, m_menuHover == kActRename, "Rename...",
+                    Color(225, 228, 232));
+
+        const std::string bank = m_presetTargetBank.empty()
+                ? std::string("no bank") : m_presetTargetBank;
+        std::snprintf(line, sizeof(line), "Move to bank...   (now: %s)", bank.c_str());
+        listRow(L, kActMoveBank, m_menuHover == kActMoveBank, line, Color(225, 228, 232));
+
+        listRow(L, kActDelete, m_menuHover == kActDelete, "Delete", Color(255, 150, 120));
+    }
+
+    // ---- and confirming the one that cannot be undone ----------------------------------
+
+    BankPickLayout deleteConfirmLayout() const { return listLayout(2); }
+
+    void drawDeleteConfirm()
+    {
+        const BankPickLayout L = deleteConfirmLayout();
+        char head[160];
+        std::snprintf(head, sizeof(head), "DELETE \"%s\"?", m_presetTargetName.c_str());
+        listBox(L, head, "the file goes for good -- there is no wastebasket");
+        listRow(L, 0, m_menuHover == 0, "Delete it", Color(255, 150, 120));
+        listRow(L, 1, m_menuHover == 1, "Keep it", Color(225, 228, 232));
+    }
+
     /// What row `i` means: a bank name, "" for Unfiled, or the new-name field.
     /// The box does two jobs, told apart by whether a preset was named when it opened.
     /// With one, choosing a bank FILES it; without one -- the "+ New bank" chip -- choosing
     /// a bank just selects it to browse and to save into.
-    bool bankPickIsFiling() const { return !m_bankTargetPath.empty(); }
+    bool bankPickIsFiling() const { return !m_presetTargetPath.empty(); }
 
     void bankSelect(const std::string &name)
     {
@@ -2587,7 +2803,7 @@ private:
         if (size_t(i) < banks.size())
         {
             if (bankPickIsFiling())
-                libraryFile(m_bankTargetPath, banks[size_t(i)]);
+                libraryFile(m_presetTargetPath, banks[size_t(i)]);
             else
                 bankSelect(banks[size_t(i)]);
             m_menu = Menu::None;
@@ -2595,7 +2811,7 @@ private:
         else if (size_t(i) == banks.size())
         {
             if (bankPickIsFiling())
-                libraryFile(m_bankTargetPath, std::string());
+                libraryFile(m_presetTargetPath, std::string());
             else
                 bankSelect(std::string());
             m_menu = Menu::None;
@@ -2604,20 +2820,20 @@ private:
         {
             // The last row is the field itself: clicking it starts typing, and Enter does
             // whichever of the two jobs this box was opened for.
-            m_bankEdit = true;
+            m_typing = Typing::NewBank;
             showCaret();
         }
     }
 
     void commitNewBank()
     {
-        const std::string name = voltaire::preset::cleanBankName(m_bankBuf);
-        m_bankEdit = false;
+        const std::string name = voltaire::preset::cleanBankName(m_typeBuf);
+        m_typing = Typing::None;
         if (name.empty())
         { m_menu = Menu::None; return; }
 
         if (bankPickIsFiling())
-            libraryFile(m_bankTargetPath, name);
+            libraryFile(m_presetTargetPath, name);
         // Either way the new bank becomes the one being browsed, since that is almost
         // certainly what is wanted next -- and when nothing was filed into it, being
         // browsed is the only thing keeping it alive until a patch is saved there.
@@ -2633,76 +2849,39 @@ private:
         const BankPickLayout L = bankPickLayout();
         const std::vector<std::string> banks = m_library.banks();
 
-        beginPath();
-        rect(0, 0, getWidth(), getHeight());
-        fillColor(Color(0, 0, 0, 0.72f));
-        fill();
-
-        beginPath();
-        roundedRect(L.x, L.y, L.w, L.h, L.rowH * 0.4f);
-        fillColor(Color(22, 24, 28));
-        fill();
-        strokeColor(Color(96, 102, 112));
-        strokeWidth(1.0f);
-        stroke();
-
-        fontFace(m_font);
-        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
-        fontSize(L.rowH * 0.9f);
-        fillColor(Color(255, 180, 90));
         char head[160];
         if (bankPickIsFiling())
             std::snprintf(head, sizeof(head), "FILE \"%s\" UNDER",
-                          m_bankTargetName.c_str());
+                          m_presetTargetName.c_str());
         else
             std::snprintf(head, sizeof(head), "CHOOSE A BANK");
-        text(L.x + L.rowH * 0.7f, L.y + L.rowH * 1.1f, head, nullptr);
+        listBox(L, head, m_typing == Typing::NewBank
+                ? "Enter makes it   |   Escape cancels"
+                : "a bank is just a name a patch claims   |   Escape closes this");
 
         for (int i = 0; i < L.rows; i ++)
         {
-            const float y = L.top + float(i) * L.rowH * 1.25f;
-            if (i == m_menuHover)
-            {
-                beginPath();
-                roundedRect(L.x + L.rowH * 0.4f, y, L.w - L.rowH * 0.8f,
-                            L.rowH * 1.15f, L.rowH * 0.25f);
-                fillColor(Color(0, 163, 224, 0.30f));
-                fill();
-            }
-            fontSize(L.rowH * 0.85f);
-
             if (size_t(i) < banks.size())
-            {
-                fillColor(Color(225, 228, 232));
-                text(L.x + L.rowH * 0.9f, y + L.rowH * 0.6f, banks[size_t(i)].c_str(),
-                     nullptr);
-            }
+                listRow(L, i, i == m_menuHover, banks[size_t(i)].c_str(),
+                        Color(225, 228, 232));
             else if (size_t(i) == banks.size())
-            {
-                fillColor(Color(168, 174, 184));
-                text(L.x + L.rowH * 0.9f, y + L.rowH * 0.6f,
-                     bankPickIsFiling() ? "Unfiled -- in no bank at all"
-                                        : "Unfiled -- the ones in no bank", nullptr);
-            }
+                listRow(L, i, i == m_menuHover,
+                        bankPickIsFiling() ? "Unfiled -- in no bank at all"
+                                           : "Unfiled -- the ones in no bank",
+                        Color(168, 174, 184));
             else
             {
-                char line[64];
-                if (m_bankEdit)
-                    std::snprintf(line, sizeof(line), "New bank:  %s%s", m_bankBuf,
+                char line[96];
+                if (m_typing == Typing::NewBank)
+                    std::snprintf(line, sizeof(line), "New bank:  %s%s", m_typeBuf,
                                   m_caretOn ? "_" : " ");
                 else
                     std::snprintf(line, sizeof(line), "New bank...");
-                fillColor(m_bankEdit ? Color(190, 255, 190) : Color(168, 174, 184));
-                text(L.x + L.rowH * 0.9f, y + L.rowH * 0.6f, line, nullptr);
+                listRow(L, i, i == m_menuHover && m_typing != Typing::NewBank, line,
+                        m_typing == Typing::NewBank ? Color(190, 255, 190)
+                                                    : Color(168, 174, 184));
             }
         }
-
-        fontSize(L.rowH * 0.7f);
-        fillColor(Color(140, 146, 156));
-        text(L.x + L.rowH * 0.7f, L.y + L.h - L.rowH * 0.6f,
-             m_bankEdit ? "Enter files it   |   Escape cancels"
-                        : "a bank is just a name a patch claims   |   Escape closes this",
-             nullptr);
     }
 
     void drawPatchMenu()
@@ -4478,7 +4657,7 @@ private:
     uint8_t m_leds = 0, m_cursorPos = 0, m_cursorFlags = 0;
 
     enum class Menu { None, Patch, Tone, Value, Diag, About, Reset,
-                      WritePick, WriteConfirm, BankPick };
+                      WritePick, WriteConfirm, BankPick, PresetActions, DeleteConfirm };
     Menu m_menu = Menu::None;
 
     /// Which slot the WRITE about to be confirmed would overwrite, or -1.
@@ -4505,16 +4684,23 @@ private:
 
     /// The preset the bank picker is about to file, by path: an index would be stale the
     /// moment another instance saved something.
-    std::string m_bankTargetPath;   ///< empty means "choose which bank to browse"
-    std::string m_bankTargetName;
+    /// The preset a box is acting on, by path: an index would be stale the moment another
+    /// instance saved something.  Empty in the bank box means "choose which to browse".
+    std::string m_presetTargetPath;
+    std::string m_presetTargetName;
+    std::string m_presetTargetBank;
     bool m_bankPending = false;     ///< a bank named but not yet claimed by any patch
     bool m_hoverBankZone = false;   ///< the pointer is over a row's bank, not its name
 
     /// A hover value that is not a grid cell.
     static constexpr int kHoverSave = -2;
-    bool m_bankEdit = false;          ///< typing a new bank name
-    char m_bankBuf[32] = { 0 };
-    int  m_bankCaret = 0;
+    /// The one text field the library's boxes share.  Two of them need typing -- naming a
+    /// bank and renaming a preset -- and one field with a purpose is better than two fields
+    /// that have to be kept in step.
+    enum class Typing { None, NewBank, RenamePreset };
+    Typing m_typing = Typing::None;
+    char   m_typeBuf[64] = { 0 };
+    int    m_typeCaret = 0;
 
     // The About text as lines, split once at startup; m_aboutRows is those lines wrapped
     // to the window's current width, which only the renderer can know.

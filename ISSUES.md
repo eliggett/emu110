@@ -60,11 +60,13 @@ a bank exists while a patch is in it and stops existing when the last one leaves
 LIBRARY tab has a row of bank tabs (All, each bank, Unfiled, and **+ New bank**) that
 filter the list. **Save is a button in the header**, and it says which bank it will save
 into. Each preset shows its bank beside its name: clicking the name plays it, clicking
-the bank moves it. Right-clicking a preset does the same as clicking its bank.
+the bank moves it. **Right-clicking gives Rename, Move to bank and Delete** -- delete
+asks again first, since there is no undo and no wastebasket. Renaming changes the display
+name and the file to match, and deliberately not the ten-byte name inside the patch, which
+is the machine's own field and what the LCD shows.
 
-Still to do: **renaming and deleting presets from the browser** (asked for, not built
-yet), `.u110bank` files for exchanging a set with somebody, `.syx` interop, free-text
-search, and making the audition slot a setting rather than a constant.
+Still to do: `.u110bank` files for exchanging a set with somebody, `.syx` interop,
+free-text search, and making the audition slot a setting rather than a constant.
 
 Original note follows.
 
