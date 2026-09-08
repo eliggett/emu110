@@ -196,6 +196,35 @@ int main(int argc, char **argv)
           "and can never contain a newline, which would forge a second key");
     check(cleanBankName(std::string(200, 'x')).size() <= 24, "and cannot be enormous");
 
+    // ---- writing a new version over an existing preset --------------------------------
+    //
+    // What "Override Patch" does, and what clicking a preset from the WRITE button does.
+    // The point of it is that the preset keeps its IDENTITY -- name, bank, date -- and only
+    // the patch and the plugin's settings move on.  Saving a second copy and deleting the
+    // first is what this exists to avoid, so losing any of those three would defeat it.
+    {
+        std::string e2;
+        Preset was;
+        (void)load(path, was, e2);
+
+        Preset now = was;
+        now.record[20] = uint8_t(now.record[20] ^ 0xFF);   // a different patch
+        now.volumeDb = -9.0f;
+        now.hf = !was.hf;
+        check(save(path, now, e2), "a new version writes over the same file");
+
+        Preset back2;
+        check(load(path, back2, e2), "and reads back");
+        check(back2.name == was.name, "the name is kept");
+        check(back2.bank == was.bank, "the bank is kept");
+        check(back2.created == was.created, "and the date it was first saved");
+        check(back2.record == now.record, "while the patch is the new one");
+        check(back2.volumeDb < -8.99f && back2.hf == now.hf,
+              "and so are the settings");
+
+        (void)save(path, was, e2);
+    }
+
     // ---- renaming and deleting, which the browser's right-click menu does --------------
     {
         std::string e2;

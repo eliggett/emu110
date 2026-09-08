@@ -297,6 +297,12 @@ protected:
         if (m_diveOpen && blob.patch != m_patch)
             m_diveNeedRead = true;
         m_patch = blob.patch;
+        // A library preset is played FROM the audition slot, so the moment the machine is
+        // on any other patch it is no longer playing that file -- whether the panel moved
+        // it, the host restored a session, or somebody picked from the machine's own bank.
+        // Without this, Override would write whatever is playing over an unrelated preset.
+        if (m_patch != voltaire::preset::kAuditionSlot)
+            forgetLoadedPreset();
         std::memcpy(m_partMedia, blob.part_media, sizeof(m_partMedia));
         std::memcpy(m_partTone, blob.part_tone, sizeof(m_partTone));
         std::memcpy(m_partFlags, blob.part_flags, sizeof(m_partFlags));
@@ -443,7 +449,7 @@ protected:
 
         if (m_menu == Menu::Patch && m_libraryTab)
             drawLibraryMenu();
-        else if (m_menu == Menu::Patch || m_menu == Menu::WritePick)
+        else if (m_menu == Menu::Patch)
             drawPatchMenu();
         else if (m_menu == Menu::WriteConfirm)
             drawWriteConfirm();
@@ -453,6 +459,8 @@ protected:
             drawPresetActions();
         else if (m_menu == Menu::DeleteConfirm)
             drawDeleteConfirm();
+        else if (m_menu == Menu::OverwriteConfirm)
+            drawOverwriteConfirm();
         else if (m_menu == Menu::Tone)
             drawToneMenu();
         else if (m_menu == Menu::Value)
@@ -530,25 +538,6 @@ protected:
             return true;
         }
 
-        if (m_menu == Menu::WritePick)
-        {
-            if (!ev.press)
-                return true;
-            const int hit = patchHit(float(ev.pos.getX()), float(ev.pos.getY()));
-            // Picking does NOT write.  A click that missed the grid closes the menu, the
-            // same as everywhere else here; a click that hit asks first.
-            m_menuHover = -1;
-            if (hit >= 0 && size_t(hit) < m_patchNames.size())
-            {
-                m_writeTarget = hit;
-                m_menu = Menu::WriteConfirm;
-            }
-            else
-                m_menu = Menu::None;
-            repaint();
-            return true;
-        }
-
         if (m_menu == Menu::PresetActions)
         {
             if (!ev.press)
@@ -571,6 +560,19 @@ protected:
             { m_typing = Typing::None; m_menu = Menu::DeleteConfirm; }
             else if (hit < 0)
                 backToLibrary();
+            repaint();
+            return true;
+        }
+
+        if (m_menu == Menu::OverwriteConfirm)
+        {
+            if (!ev.press)
+                return true;
+            const int hit = listHit(deleteConfirmLayout(),
+                                    float(ev.pos.getX()), float(ev.pos.getY()));
+            if (hit == 0)
+                libraryWriteOver(m_presetTargetPath);
+            backToLibrary();
             repaint();
             return true;
         }
@@ -652,6 +654,12 @@ protected:
                     repaint();
                     return true;
                 }
+                if (overrideButtonHit(float(ev.pos.getX()), float(ev.pos.getY())))
+                {
+                    libraryOverride();
+                    repaint();
+                    return true;
+                }
 
                 // The bank row: looking around, so it does not close the menu.
                 const int chip = bankChipHit(float(ev.pos.getX()), float(ev.pos.getY()));
@@ -703,7 +711,7 @@ protected:
 
                 // The bank half of a row, and the right button anywhere on it, both open
                 // the picker.  The name half plays it, which is what the list is for.
-                if (lh.bankZone || ev.button == kMouseButtonRight)
+                if ((lh.bankZone && !m_writeMode) || ev.button == kMouseButtonRight)
                 {
                     m_presetTargetPath = view[size_t(idx)]->path;
                     m_presetTargetName = view[size_t(idx)]->name;
@@ -714,6 +722,14 @@ protected:
                     // The bank column means one thing, so it goes straight there; the
                     // right button is the general "what else can I do to this".
                     m_menu = lh.bankZone ? Menu::BankPick : Menu::PresetActions;
+                    m_menuHover = -1;
+                }
+                else if (m_writeMode)
+                {
+                    m_presetTargetPath = view[size_t(idx)]->path;
+                    m_presetTargetName = view[size_t(idx)]->name;
+                    m_presetTargetBank = view[size_t(idx)]->bank;
+                    m_menu = Menu::OverwriteConfirm;
                     m_menuHover = -1;
                 }
                 else
@@ -727,14 +743,26 @@ protected:
             }
 
             const int hit = patchHit(float(ev.pos.getX()), float(ev.pos.getY()));
-            m_menu = Menu::None;
             m_menuHover = -1;
             if (hit >= 0 && size_t(hit) < m_patchNames.size())
             {
-                char n[8];
-                std::snprintf(n, sizeof(n), "%d", hit);
-                setState("patchsel", n);
+                if (m_writeMode)
+                {
+                    // Picking does NOT write; it asks first, naming what would be lost.
+                    m_writeTarget = hit;
+                    m_menu = Menu::WriteConfirm;
+                }
+                else
+                {
+                    char n[8];
+                    std::snprintf(n, sizeof(n), "%d", hit);
+                    setState("patchsel", n);
+                    forgetLoadedPreset();
+                    m_menu = Menu::None;
+                }
             }
+            else
+                m_menu = Menu::None;
             repaint();
             return true;
         }
@@ -875,6 +903,7 @@ protected:
                         // because the menu takes it first and closes on anything that is
                         // not one of its entries -- this button included.
                         m_menu = i == voltaire::panel::BUT_TONE ? Menu::Tone : Menu::Patch;
+                        m_writeMode = false;
                         m_menuHover = -1;
                         m_toneHover = ToneHit();
                         // Rescanned on open rather than watched: instances share the
@@ -964,7 +993,7 @@ protected:
 
     bool onMotion(const MotionEvent &ev) override
     {
-        if (m_menu == Menu::Patch || m_menu == Menu::WritePick)
+        if (m_menu == Menu::Patch)
         {
             int hit;
             bool zone = false;
@@ -972,12 +1001,14 @@ protected:
             {
                 if (saveButtonHit(float(ev.pos.getX()), float(ev.pos.getY())))
                     hit = kHoverSave;
+                else if (overrideButtonHit(float(ev.pos.getX()), float(ev.pos.getY())))
+                    hit = kHoverOverride;
                 else
                 {
                     const LibHit lh = libraryHit(float(ev.pos.getX()),
                                                  float(ev.pos.getY()));
                     hit = lh.cell;
-                    zone = lh.bankZone;
+                    zone = lh.bankZone && !m_writeMode;
                 }
             }
             else
@@ -987,7 +1018,7 @@ protected:
             return true;
         }
         if (m_menu == Menu::BankPick || m_menu == Menu::PresetActions
-                || m_menu == Menu::DeleteConfirm)
+                || m_menu == Menu::DeleteConfirm || m_menu == Menu::OverwriteConfirm)
         {
             const BankPickLayout L = m_menu == Menu::BankPick ? bankPickLayout()
                                    : m_menu == Menu::PresetActions ? presetActionsLayout()
@@ -1181,7 +1212,7 @@ protected:
         // not send somebody hunting for the PATCH button again.  A second Escape, now in
         // the library, closes it.
         if (m_menu == Menu::BankPick || m_menu == Menu::PresetActions
-                || m_menu == Menu::DeleteConfirm)
+                || m_menu == Menu::DeleteConfirm || m_menu == Menu::OverwriteConfirm)
             backToLibrary();
         else
         {
@@ -2121,27 +2152,70 @@ private:
     /// for the first preset landed on it and quietly saved a duplicate instead.
     struct HeaderRect { float x, y, w, h; };
 
+    /// Save always makes a NEW preset and never overwrites -- two patches may reasonably
+    /// share a name.  Override writes back over the one that was recalled, which is the
+    /// other half of the same job and the half that used to mean saving a second copy and
+    /// then deleting the first.
     std::string saveButtonLabel() const
     {
-        return m_bankMode == BankFilter::Named ? ("Save into " + m_bankName)
-                                               : std::string("Save this patch");
+        return m_bankMode == BankFilter::Named ? ("Save Patch to " + m_bankName)
+                                               : std::string("Save Patch");
     }
 
-    HeaderRect saveButtonRect(const MenuLayout &m) const
+    static constexpr const char *kOverrideLabel = "Override Patch";
+
+    HeaderRect overrideButtonRect(const MenuLayout &m) const
     {
         HeaderRect r;
         r.h = m.rowH * 1.1f;
         r.y = m.y + m.rowH * 0.15f;
-        r.w = m.fontSize * (0.58f * float(saveButtonLabel().size()) + 2.0f);
+        r.w = m.fontSize * (0.58f * float(std::strlen(kOverrideLabel)) + 2.0f);
         r.x = m.x + m.w - m.rowH * 0.5f - r.w;
         return r;
     }
 
+    HeaderRect saveButtonRect(const MenuLayout &m) const
+    {
+        const HeaderRect o = overrideButtonRect(m);
+        HeaderRect r;
+        r.h = o.h;
+        r.y = o.y;
+        r.w = m.fontSize * (0.58f * float(saveButtonLabel().size()) + 2.0f);
+        r.x = o.x - m.fontSize * 0.6f - r.w;
+        return r;
+    }
+
+    static bool inRect(const HeaderRect &r, float px, float py)
+    {
+        return px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
+    }
+
     bool saveButtonHit(float px, float py) const
     {
-        const MenuLayout m = libraryLayout();
-        const HeaderRect r = saveButtonRect(m);
-        return px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
+        return inRect(saveButtonRect(libraryLayout()), px, py);
+    }
+
+    bool overrideButtonHit(float px, float py) const
+    {
+        return inRect(overrideButtonRect(libraryLayout()), px, py);
+    }
+
+    /// One header button, drawn the same way whichever it is.
+    void headerButton(const HeaderRect &r, const MenuLayout &m, const char *label,
+                      bool hot, bool enabled)
+    {
+        beginPath();
+        roundedRect(r.x, r.y, r.w, r.h, r.h * 0.28f);
+        fillColor(!enabled ? Color(30, 32, 36)
+                           : hot ? Color(52, 116, 60) : Color(40, 96, 46));
+        fill();
+        strokeColor(enabled ? Color(120, 200, 130) : Color(64, 68, 74));
+        strokeWidth(1.0f);
+        stroke();
+        fontSize(m.fontSize * 0.85f);
+        textAlign(ALIGN_CENTER | ALIGN_MIDDLE);
+        fillColor(enabled ? Color(225, 255, 225) : Color(110, 114, 120));
+        text(r.x + r.w * 0.5f, r.y + r.h * 0.5f, label, nullptr);
     }
 
     /// One tab along the bank row.  `kind` is 0 for All, 1 for a named bank, 2 for
@@ -2231,6 +2305,58 @@ private:
         m_hoverBankZone = false;
         m_typing = Typing::None;
     }
+
+    /// Stop offering to write back to a file the machine is no longer playing.
+    void forgetLoadedPreset()
+    {
+        m_loadedPath.clear();
+        m_loadedRecord.clear();
+        m_loadedLcdName.clear();
+        m_loadedBank.clear();
+    }
+
+    /// The ten-byte name the machine shows, out of a hex record.
+    std::string lcdNameOf(const std::string &hex) const
+    {
+        using namespace voltaire::preset;
+        if (hex.size() != size_t(kRecordBytes) * 2)
+            return std::string();
+        std::vector<uint8_t> rec(kRecordBytes);
+        for (unsigned i = 0; i < kRecordBytes; i ++)
+        {
+            const int hi = hexNibble(hex[i * 2]), lo = hexNibble(hex[i * 2 + 1]);
+            if (hi < 0 || lo < 0)
+                return std::string();
+            rec[i] = uint8_t((hi << 4) | lo);
+        }
+        return lcdName(rec);
+    }
+
+    /// Why Override cannot be pressed, or "" when it can.
+    ///
+    /// Three conditions, and the button says which one is missing rather than being greyed
+    /// out for reasons nobody can see:
+    ///
+    ///   * a library preset has to be what is playing, or there is no file to write to;
+    ///   * something has to have changed, or there is nothing to write;
+    ///   * the patch's own name has to be the one it was recalled with -- renaming it is
+    ///     how somebody says "this is a different patch now", and quietly writing it over
+    ///     the one it came from would throw away the patch they started from.
+    const char *overrideBlockedBecause() const
+    {
+        if (m_loadedPath.empty())
+            return "recall a library patch first";
+        if (m_patchDump.size() != m_loadedRecord.size())
+            return "waiting for the machine";
+        if (lcdNameOf(m_patchDump) != m_loadedLcdName)
+            return "the patch name changed -- Save Patch makes a new one";
+        if (m_patchDump == m_loadedRecord && m_volume == m_loadedVolume
+                && m_hf == m_loadedHf)
+            return "nothing has changed yet";
+        return nullptr;
+    }
+
+    bool canOverride() const { return overrideBlockedBecause() == nullptr; }
 
     void libraryRescan()
     {
@@ -2383,6 +2509,17 @@ private:
                 missing += n;
             }
         }
+        // Remember where it came from, so it can be written straight back.  The record is
+        // taken from the FILE rather than from the machine: the machine has not loaded it
+        // yet, and comparing against what we asked for is what makes "nothing has changed"
+        // true the instant after a recall.
+        m_loadedPath     = e.path;
+        m_loadedRecord   = toHex(p.record);
+        m_loadedLcdName  = lcdName(p.record);
+        m_loadedBank     = p.bank;
+        m_loadedVolume   = p.hasSettings ? p.volumeDb : m_volume;
+        m_loadedHf       = p.hasSettings ? p.hf : m_hf;
+
         m_libraryNote = missing.empty()
                 ? ("loaded \"" + p.name + "\" into P-64")
                 : ("loaded \"" + p.name + "\" -- needs card " + missing + ", not mounted");
@@ -2421,6 +2558,63 @@ private:
                 : ("\"" + p.name + "\" filed under " + p.bank);
     }
 
+    /// Write the patch being edited back over the preset it was recalled from.
+    ///
+    /// The file keeps its name, its bank and its date: this is a new version of the same
+    /// preset, not a new preset. Only the patch and the plugin's settings change.
+    void libraryOverride()
+    {
+        using namespace voltaire::preset;
+
+        if (!canOverride())
+        { m_libraryNote = overrideBlockedBecause(); return; }
+        libraryWriteOver(m_loadedPath);
+    }
+
+    /// Put the patch being edited into an existing preset file.
+    ///
+    /// The file keeps its name, its bank and its date: this is a new version of the same
+    /// preset, not a new preset.  Only the patch and the plugin's settings change.
+    void libraryWriteOver(const std::string &path)
+    {
+        using namespace voltaire::preset;
+
+        if (m_patchDump.size() != size_t(kRecordBytes) * 2)
+        { m_libraryNote = "the machine has not said what it is playing yet"; return; }
+
+        Preset p;
+        std::string err;
+        if (!voltaire::preset::load(path, p, err))
+        { m_libraryNote = err; return; }
+
+        p.record.resize(kRecordBytes);
+        for (unsigned i = 0; i < kRecordBytes; i ++)
+        {
+            const int hi = hexNibble(m_patchDump[i * 2]);
+            const int lo = hexNibble(m_patchDump[i * 2 + 1]);
+            if (hi < 0 || lo < 0)
+            { m_libraryNote = "the machine sent something that is not a patch"; return; }
+            p.record[i] = uint8_t((hi << 4) | lo);
+        }
+        p.volumeDb = m_volume;
+        p.hf = m_hf;
+
+        if (!voltaire::preset::save(path, p, err))
+        { m_libraryNote = err; return; }
+
+        // If that was the preset being played it now matches what is on disk again, so
+        // Override goes quiet until something changes rather than offering to repeat it.
+        if (path == m_loadedPath)
+        {
+            m_loadedRecord  = m_patchDump;
+            m_loadedLcdName = lcdName(p.record);
+            m_loadedVolume  = m_volume;
+            m_loadedHf      = m_hf;
+        }
+        libraryRescan();
+        m_libraryNote = "\"" + p.name + "\" written over";
+    }
+
     /// Rename one.
     ///
     /// The FILE is renamed to match, so that a library browsed in a file manager reads the
@@ -2454,6 +2648,8 @@ private:
             libraryRescan();
             return;
         }
+        if (m_loadedPath == path)
+            m_loadedPath = dest;              // same patch, new file: still writable back to
         libraryRescan();
         m_libraryNote = "renamed to \"" + name + "\"";
     }
@@ -2463,6 +2659,8 @@ private:
         std::string err;
         if (!voltaire::preset::erase(path, err))
         { m_libraryNote = err; return; }
+        if (m_loadedPath == path)
+            forgetLoadedPreset();             // there is nothing to write back to now
         libraryRescan();
         if (m_libScroll > 0 && m_libScroll >= int(libraryView().size()))
             m_libScroll = 0;
@@ -2551,27 +2749,26 @@ private:
 
         const std::vector<const voltaire::preset::Entry *> view = libraryView();
 
-        // ---- the Save button.
+        // ---- the two buttons.
         const HeaderRect sb = saveButtonRect(m);
-        beginPath();
-        roundedRect(sb.x, sb.y, sb.w, sb.h, sb.h * 0.28f);
-        fillColor(m_menuHover == kHoverSave ? Color(52, 116, 60) : Color(40, 96, 46));
-        fill();
-        strokeColor(Color(120, 200, 130));
-        strokeWidth(1.0f);
-        stroke();
-        fontSize(m.fontSize * 0.85f);
-        textAlign(ALIGN_CENTER | ALIGN_MIDDLE);
-        fillColor(Color(225, 255, 225));
-        text(sb.x + sb.w * 0.5f, sb.y + sb.h * 0.5f, saveButtonLabel().c_str(), nullptr);
+        const HeaderRect ob = overrideButtonRect(m);
+        headerButton(sb, m, saveButtonLabel().c_str(), m_menuHover == kHoverSave, true);
+        headerButton(ob, m, kOverrideLabel, m_menuHover == kHoverOverride, canOverride());
 
         // ---- what just happened, under the Save button and out of the tabs' way.
         char right[192];
-        if (!m_libraryNote.empty())
+        if (m_menuHover == kHoverOverride && !canOverride())
+            std::snprintf(right, sizeof(right), "Override Patch: %s",
+                          overrideBlockedBecause());
+        else if (!m_libraryNote.empty())
             std::snprintf(right, sizeof(right), "%s", m_libraryNote.c_str());
         else if (m_library.entries().empty())
             std::snprintf(right, sizeof(right),
-                          "nothing saved yet -- Save this patch puts one here");
+                          "nothing saved yet -- Save Patch puts one here");
+        else if (m_writeMode)
+            std::snprintf(right, sizeof(right),
+                          "%d of %d presets   |   click one to write the patch over it",
+                          int(view.size()), int(m_library.entries().size()));
         else
             std::snprintf(right, sizeof(right),
                           "%d of %d presets   |   click to play, click a bank to move it, "
@@ -2791,6 +2988,16 @@ private:
 
     BankPickLayout deleteConfirmLayout() const { return listLayout(2); }
 
+    void drawOverwriteConfirm()
+    {
+        const BankPickLayout L = deleteConfirmLayout();
+        char head[160];
+        std::snprintf(head, sizeof(head), "WRITE OVER \"%s\"?", m_presetTargetName.c_str());
+        listBox(L, head, "it keeps its name and its bank; the patch in it is replaced");
+        listRow(L, 0, m_menuHover == 0, "Write over it", Color(255, 150, 120));
+        listRow(L, 1, m_menuHover == 1, "Keep it as it is", Color(225, 228, 232));
+    }
+
     void drawDeleteConfirm()
     {
         const BankPickLayout L = deleteConfirmLayout();
@@ -2937,7 +3144,8 @@ private:
         fillColor(Color(150, 155, 165));
         text(m.x + m.w - m.rowH * 0.5f, m.y + m.rowH * 0.8f,
              m_patchNames.empty() ? "waiting for the machine"
-                                  : "the machine's own bank", nullptr);
+             : m_writeMode ? "click a slot to store the patch being edited there"
+                           : "the machine's own bank", nullptr);
 
         if (m_patchNames.empty())
             return;
@@ -3748,9 +3956,13 @@ private:
             // list is the PATCH menu -- the same 64 names, read out of the same memory --
             // because the question "which patch" already has an answer in this UI and
             // inventing a second one would be two lists to keep in step.
-            m_menu = Menu::WritePick;
+            m_menu = Menu::Patch;
+            m_writeMode = true;
             m_menuHover = -1;
             m_writeTarget = -1;
+            m_libraryNote.clear();
+            if (m_libraryTab)
+                libraryRescan();
             repaint();
             break;
         default:
@@ -4681,11 +4893,20 @@ private:
     uint8_t m_leds = 0, m_cursorPos = 0, m_cursorFlags = 0;
 
     enum class Menu { None, Patch, Tone, Value, Diag, About, Reset,
-                      WritePick, WriteConfirm, BankPick, PresetActions, DeleteConfirm };
+                      WriteConfirm, BankPick, PresetActions, DeleteConfirm,
+                      OverwriteConfirm };
     Menu m_menu = Menu::None;
 
     /// Which slot the WRITE about to be confirmed would overwrite, or -1.
     int m_writeTarget = -1;
+
+    /// The PATCH menu opened to STORE the patch rather than to choose one.
+    ///
+    /// Same two tabs either way, because the question "where does this patch go" has the
+    /// same two answers as "where do patches come from": one of the machine's 64 slots, or
+    /// the library.  The DIVE common page's WRITE opens it this way, the panel's PATCH
+    /// button opens it the other, and the verbs change rather than the menu.
+    bool m_writeMode = false;
 
     // ---- the user's own library.
     //
@@ -4708,6 +4929,20 @@ private:
 
     /// The preset the bank picker is about to file, by path: an index would be stale the
     /// moment another instance saved something.
+    // ---- what "Override Patch" needs to know.
+    //
+    // Recalling a preset, editing it and saving it back over itself is the ordinary way to
+    // work on a patch, and doing that by saving a second copy and then deleting the first
+    // is a chore.  So the browser remembers WHICH file the machine is playing, and offers
+    // to write straight back to it -- but only while that is still true, which takes three
+    // conditions rather than one.
+    std::string m_loadedPath;          ///< the library file the machine is playing, or ""
+    std::string m_loadedRecord;        ///< its 116 bytes as loaded, hex
+    std::string m_loadedLcdName;       ///< the ten-byte name it had then
+    std::string m_loadedBank;
+    float       m_loadedVolume = 0.0f;
+    bool        m_loadedHf = true;
+
     /// The preset a box is acting on, by path: an index would be stale the moment another
     /// instance saved something.  Empty in the bank box means "choose which to browse".
     std::string m_presetTargetPath;
@@ -4716,8 +4951,9 @@ private:
     bool m_bankPending = false;     ///< a bank named but not yet claimed by any patch
     bool m_hoverBankZone = false;   ///< the pointer is over a row's bank, not its name
 
-    /// A hover value that is not a grid cell.
+    /// Hover values that are not grid cells.
     static constexpr int kHoverSave = -2;
+    static constexpr int kHoverOverride = -3;
     /// The one text field the library's boxes share.  Two of them need typing -- naming a
     /// bank and renaming a preset -- and one field with a purpose is better than two fields
     /// that have to be kept in step.

@@ -58,8 +58,13 @@ slot -- and the browser says so when a patch wants a card that is not mounted.
 preset file -- so "Strings" and "Abstract" cost nothing to make and nothing to clean up:
 a bank exists while a patch is in it and stops existing when the last one leaves. The
 LIBRARY tab has a row of bank tabs (All, each bank, Unfiled, and **+ New bank**) that
-filter the list. **Save is a button in the header**, and it says which bank it will save
-into. Each preset shows its bank beside its name: clicking the name plays it, clicking
+filter the list. **Save Patch** and **Override Patch** are buttons in the header. Save Patch always makes a
+new file and never overwrites; Override Patch writes back over the preset that was
+recalled, so editing one and keeping it does not mean saving a copy and deleting the
+original. Override is only live while a library preset is what the machine is playing,
+something has changed, and the patch's own name is still the one it was recalled with --
+renaming it is how you say "this is a different patch now". Hovering it says which of the
+three is missing. Each preset shows its bank beside its name: clicking the name plays it, clicking
 the bank moves it. **Right-clicking gives Rename, Move to bank and Delete** -- delete
 asks again first, since there is no undo and no wastebasket. Every one of these ends back
 in the library rather than closing the menus, and Escape steps back to the library too,
@@ -67,6 +72,11 @@ because the next thing anybody does after naming a bank or renaming a patch is i
 library as well. Renaming changes the display
 name and the file to match, and deliberately not the ten-byte name inside the patch, which
 is the machine's own field and what the LCD shows.
+
+The DIVE common page's **WRITE** opens the same menu in a *write* mode: the machine's 64
+slots and the library are the two places a patch can go, so they are the two tabs either
+way, and only the verbs change. In write mode a slot or a preset is a destination, asked
+about before anything is replaced.
 
 Still to do: `.u110bank` files for exchanging a set with somebody, `.syx` interop,
 free-text search, and making the audition slot a setting rather than a constant.
