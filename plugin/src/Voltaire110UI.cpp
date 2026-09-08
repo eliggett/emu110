@@ -570,7 +570,7 @@ protected:
             else if (hit == kActDelete)
             { m_typing = Typing::None; m_menu = Menu::DeleteConfirm; }
             else if (hit < 0)
-            { m_typing = Typing::None; m_menu = Menu::None; }
+                backToLibrary();
             repaint();
             return true;
         }
@@ -583,8 +583,7 @@ protected:
                                     float(ev.pos.getX()), float(ev.pos.getY()));
             if (hit == 0)
                 libraryDelete(m_presetTargetPath, m_presetTargetName);
-            m_menu = Menu::None;
-            m_menuHover = -1;
+            backToLibrary();
             repaint();
             return true;
         }
@@ -595,7 +594,7 @@ protected:
                 return true;
             const int hit = bankPickHit(float(ev.pos.getX()), float(ev.pos.getY()));
             if (hit < 0)
-            { m_menu = Menu::None; m_typing = Typing::None; }
+                backToLibrary();
             else
                 bankPickChoose(hit);
             m_menuHover = -1;
@@ -1146,8 +1145,7 @@ protected:
                 if (m_typing == Typing::RenamePreset)
                 {
                     libraryRename(m_presetTargetPath, m_typeBuf);
-                    m_typing = Typing::None;
-                    m_menu = Menu::None;
+                    backToLibrary();
                 }
                 else
                     commitNewBank();
@@ -1178,8 +1176,18 @@ protected:
         }
         if (m_menu == Menu::None || !ev.press || ev.key != kKeyEscape)
             return false;
-        m_menu = Menu::None;
-        m_menuHover = -1;
+        // Escape goes back one step rather than all the way out, for the boxes that were
+        // opened from the library: leaving the delete question should put the list back,
+        // not send somebody hunting for the PATCH button again.  A second Escape, now in
+        // the library, closes it.
+        if (m_menu == Menu::BankPick || m_menu == Menu::PresetActions
+                || m_menu == Menu::DeleteConfirm)
+            backToLibrary();
+        else
+        {
+            m_menu = Menu::None;
+            m_menuHover = -1;
+        }
         repaint();
         return true;
     }
@@ -2208,6 +2216,22 @@ private:
         return out;
     }
 
+    /// Back to the browser.
+    ///
+    /// Every one of these boxes was opened FROM the library and the next thing anybody
+    /// does is in the library too -- name a bank and you want to save into it, rename or
+    /// delete one and you want to see that it took.  Closing the whole menu instead means
+    /// finding the PATCH button again to carry on.  Only playing a preset closes it,
+    /// because that is the one that was asking the machine to do something.
+    void backToLibrary()
+    {
+        m_menu = Menu::Patch;
+        m_libraryTab = true;
+        m_menuHover = -1;
+        m_hoverBankZone = false;
+        m_typing = Typing::None;
+    }
+
     void libraryRescan()
     {
         if (m_libraryDir.empty())
@@ -2806,7 +2830,7 @@ private:
                 libraryFile(m_presetTargetPath, banks[size_t(i)]);
             else
                 bankSelect(banks[size_t(i)]);
-            m_menu = Menu::None;
+            backToLibrary();
         }
         else if (size_t(i) == banks.size())
         {
@@ -2814,7 +2838,7 @@ private:
                 libraryFile(m_presetTargetPath, std::string());
             else
                 bankSelect(std::string());
-            m_menu = Menu::None;
+            backToLibrary();
         }
         else
         {
@@ -2830,7 +2854,7 @@ private:
         const std::string name = voltaire::preset::cleanBankName(m_typeBuf);
         m_typing = Typing::None;
         if (name.empty())
-        { m_menu = Menu::None; return; }
+        { backToLibrary(); return; }
 
         if (bankPickIsFiling())
             libraryFile(m_presetTargetPath, name);
@@ -2841,7 +2865,7 @@ private:
         m_libraryNote = bankPickIsFiling()
                 ? m_libraryNote
                 : ("bank \"" + name + "\" -- Save this patch puts one in it");
-        m_menu = Menu::None;
+        backToLibrary();
     }
 
     void drawBankPick()

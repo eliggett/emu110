@@ -61,7 +61,10 @@ LIBRARY tab has a row of bank tabs (All, each bank, Unfiled, and **+ New bank**)
 filter the list. **Save is a button in the header**, and it says which bank it will save
 into. Each preset shows its bank beside its name: clicking the name plays it, clicking
 the bank moves it. **Right-clicking gives Rename, Move to bank and Delete** -- delete
-asks again first, since there is no undo and no wastebasket. Renaming changes the display
+asks again first, since there is no undo and no wastebasket. Every one of these ends back
+in the library rather than closing the menus, and Escape steps back to the library too,
+because the next thing anybody does after naming a bank or renaming a patch is in the
+library as well. Renaming changes the display
 name and the file to match, and deliberately not the ten-byte name inside the patch, which
 is the machine's own field and what the LCD shows.
 
