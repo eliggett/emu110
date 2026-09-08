@@ -547,12 +547,17 @@ protected:
             m_menuHover = -1;
             if (hit == kActRename)
             {
-                // Starts from the name it has, since renaming is usually a correction.
-                m_typing = Typing::RenamePreset;
-                std::snprintf(m_typeBuf, sizeof(m_typeBuf), "%s",
-                              m_presetTargetName.c_str());
-                m_typeCaret = int(std::strlen(m_typeBuf));
-                showCaret();
+                if (m_typing == Typing::RenamePreset)
+                    commitTyping();  // clicking the field again finishes it
+                else
+                {
+                    // Starts from the name it has: renaming is usually a correction.
+                    m_typing = Typing::RenamePreset;
+                    std::snprintf(m_typeBuf, sizeof(m_typeBuf), "%s",
+                                  m_presetTargetName.c_str());
+                    m_typeCaret = int(std::strlen(m_typeBuf));
+                    showCaret();
+                }
             }
             else if (hit == kActMoveBank)
             { m_typing = Typing::None; m_menu = Menu::BankPick; }
@@ -1159,6 +1164,16 @@ protected:
 
     bool onKeyboard(const KeyboardEvent &ev) override
     {
+        // Whether a key reached us at all is not something the code can answer on its own:
+        // a plugin UI is a window inside the host's, and a host that binds a key to
+        // something of its own never passes it on.  VOLTAIRE_KEYS=1 says what arrives.
+        {
+            static const bool trace = std::getenv("VOLTAIRE_KEYS") != nullptr;
+            if (trace && ev.press)
+                d_stdout("key 0x%04X  mod 0x%X  typing %d  menu %d",
+                         ev.key, ev.mod, int(m_typing), int(m_menu));
+        }
+
         if (m_typing != Typing::None && ev.press)
         {
             if (ev.key == kKeyEscape)
@@ -1171,15 +1186,11 @@ protected:
                 repaint();
                 return true;
             }
-            if (ev.key == kKeyEnter)
+            // The keypad's Enter as well as the main one: it is a different key and this
+            // is a text field, not a transport control.
+            if (ev.key == kKeyEnter || ev.key == kKeyPadEnter)
             {
-                if (m_typing == Typing::RenamePreset)
-                {
-                    libraryRename(m_presetTargetPath, m_typeBuf);
-                    backToLibrary();
-                }
-                else
-                    commitNewBank();
+                commitTyping();
                 repaint();
                 return true;
             }
@@ -2994,7 +3005,7 @@ private:
         char head[160];
         std::snprintf(head, sizeof(head), "\"%s\"", m_presetTargetName.c_str());
         listBox(L, head, m_typing == Typing::RenamePreset
-                ? "Enter renames it   |   Escape cancels"
+                ? "click the name or press Enter to rename it   |   Escape cancels"
                 : "these change the file, not the machine   |   Escape closes this");
 
         char line[96];
@@ -3002,7 +3013,7 @@ private:
         {
             std::snprintf(line, sizeof(line), "Name:  %s%s", m_typeBuf,
                           m_caretOn ? "_" : " ");
-            listRow(L, kActRename, false, line, Color(190, 255, 190));
+            listRow(L, kActRename, m_menuHover == kActRename, line, Color(190, 255, 190));
         }
         else
             listRow(L, kActRename, m_menuHover == kActRename, "Rename...",
@@ -3079,13 +3090,32 @@ private:
                 bankSelect(std::string());
             backToLibrary();
         }
+        else if (m_typing == Typing::NewBank)
+            commitTyping();          // clicking the field again finishes it
         else
         {
-            // The last row is the field itself: clicking it starts typing, and Enter does
-            // whichever of the two jobs this box was opened for.
             m_typing = Typing::NewBank;
             showCaret();
         }
+    }
+
+    /// Finish whatever is being typed.
+    ///
+    /// Reachable BY MOUSE as well as by Enter, and that is not a convenience.  A plugin UI
+    /// does not reliably get the Return key: the host sees it first, and a DAW that binds
+    /// Return to something of its own -- Ardour moves the playhead with it -- simply never
+    /// passes it on.  Ordinary characters are not bound and do arrive, so a field that
+    /// takes typing but can only be committed with Enter is a field that fills up and then
+    /// does nothing.  Clicking the field itself finishes it.
+    void commitTyping()
+    {
+        if (m_typing == Typing::RenamePreset)
+        {
+            libraryRename(m_presetTargetPath, m_typeBuf);
+            backToLibrary();
+        }
+        else if (m_typing == Typing::NewBank)
+            commitNewBank();
     }
 
     void commitNewBank()
@@ -3119,7 +3149,7 @@ private:
         else
             std::snprintf(head, sizeof(head), "CHOOSE A BANK");
         listBox(L, head, m_typing == Typing::NewBank
-                ? "Enter makes it   |   Escape cancels"
+                ? "click the name or press Enter to make it   |   Escape cancels"
                 : "a bank is just a name a patch claims   |   Escape closes this");
 
         for (int i = 0; i < L.rows; i ++)
@@ -3140,7 +3170,7 @@ private:
                                   m_caretOn ? "_" : " ");
                 else
                     std::snprintf(line, sizeof(line), "New bank...");
-                listRow(L, i, i == m_menuHover && m_typing != Typing::NewBank, line,
+                listRow(L, i, i == m_menuHover, line,
                         m_typing == Typing::NewBank ? Color(190, 255, 190)
                                                     : Color(168, 174, 184));
             }
