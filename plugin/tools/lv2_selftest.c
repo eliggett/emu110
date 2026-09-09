@@ -983,7 +983,10 @@ int main(int argc, char **argv)
          * dwell 1.5 s, marker 12 dB/s.  Nothing depends on WHEN the machine makes a
          * sound or for how long, only on how the meter responds to what it made. */
         const float FLOORDB = -42.0f, CEILDB = 12.0f;
-        const double BARFALL = 20.0, HOLDFALL = 12.0, DWELL = 1.5;
+        /* Duplicated from the DSP on purpose -- the test has no way to read a
+         * constexpr, and a check that derived its expectation from the code under test
+         * would pass whatever that code did.  These are what the ballistics PROMISE. */
+        const double BARFALL = 60.0, HOLDFALL = 12.0, DWELL = 1.5;
         const double dt = (double)BLOCK / RATE;
         int mc = 0, mp = 0, c, i;
 

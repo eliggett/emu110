@@ -1079,15 +1079,25 @@ private:
     static constexpr float kMeterFloorDb = -42.0f;
     static constexpr float kMeterCeilDb  =  12.0f;
 
-    /// How fast the bar falls.  A peak is still within 1 dB of true 50 ms later, so no
-    /// UI frame rate -- 25 Hz, or a host that stalls to 12 -- can miss a transient.  This
-    /// is why the ballistics are HERE and not in the UI: the read cadence is the host's
-    /// to choose, so the value on the wire has to be correct at any instant it is read.
-    static constexpr double kMeterFallDbPerSec = 20.0;
+    /// How fast the bar falls.  Deliberately quick: the bar answers "what is happening
+    /// now", and a slow one smears a phrase into one long slope that says little about
+    /// the notes in it.  60 dB/s empties the whole scale in 0.9 s, one 3 dB segment every
+    /// 50 ms, so the bar follows anything the machine's own envelopes do.
+    ///
+    /// It can be this fast ONLY because the peak-hold marker below exists.  Without it
+    /// the bar's decay was also the only memory of the peak, and it had to fall slowly
+    /// enough that a 25 Hz reader could not miss a transient between frames.  The marker
+    /// took that job, so the bar no longer has two to do.
+    ///
+    /// The ballistics are HERE and not in the UI because the read cadence is the host's
+    /// to choose: the value on the wire has to be correct at any instant it is read.
+    static constexpr double kMeterFallDbPerSec = 60.0;
 
     /// The peak-hold marker: sit still long enough to be read, then slide down slower
     /// than the bar so it stays clear of it.  12 dB/s is one 3 dB segment per 250 ms,
-    /// which reads as a falling marker rather than a jump.
+    /// which reads as a falling marker rather than a jump -- and at a fifth of the bar's
+    /// rate it separates from it immediately, which is what makes the two legible as two
+    /// different statements rather than one thick bar.
     static constexpr double kHoldDwellSeconds  = 1.5;
     static constexpr double kHoldFallDbPerSec  = 12.0;
 
