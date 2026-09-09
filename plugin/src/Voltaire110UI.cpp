@@ -171,6 +171,38 @@ protected:
         { if (value != m_volume) { m_volume = value; m_dirty = true; } }
         else if (index == kParamHfCorrection)
         { const bool on = value > 0.5f; if (on != m_hf) { m_hf = on; m_dirty = true; } }
+        else if (index >= kParamMeterFirst && index < kParamCount)
+        {
+            // THE SEGMENT COUNT IS THE DIRTY FLAG, not the value.
+            //
+            // The panel is demand-driven: uiIdle() turns m_dirty into one repaint and an
+            // idle machine sets it for nothing.  A meter that asked for a repaint on every
+            // change would end that -- the value moves continuously, and one repaint is
+            // the whole SVG walk plus 1280 LCD dots.  But a SEGMENTED meter quantises the
+            // question for free: nothing on screen changes until a segment lights or goes
+            // out.  Silence still costs zero, a held note costs zero, and a full decay
+            // costs about seven repaints a second rather than the thirty the value
+            // arrives at.  This is why the meter is segmented and not a gradient.
+            const unsigned m = index - kParamMeterFirst;
+            float &slot = (m < 2) ? m_meterDb[m] : m_holdDb[m - 2];
+            if (value == slot)
+                return;
+            const int before = meterSegments(slot);
+            slot = value;
+            if (meterSegments(slot) != before)
+                m_dirty = true;
+        }
+    }
+
+    /// How many segments a level lights: the one definition, used by the draw and by the
+    /// repaint decision, so they cannot disagree.  0 means "nothing lit".
+    static int meterSegments(float db)
+    {
+        if (db <= kMeterFloorDb)
+            return 0;
+        const float t = (db - kMeterFloorDb) / (kMeterCeilDb - kMeterFloorDb);
+        const int n = int(t * float(kMeterSegments) + 0.9999f);
+        return n < 0 ? 0 : (n > kMeterSegments ? kMeterSegments : n);
     }
 
     /// The panel arrives as ONE blob, not as a pile of scalars.
@@ -339,6 +371,27 @@ protected:
     /// Half a second on, half a second off, and only while a field is being typed into.
     static constexpr double kCaretPeriod = 0.5;
 
+    // ---- the meter ------------------------------------------------------------------
+    //
+    // The scale must match Voltaire110Plugin.cpp, which is where it is argued for and
+    // where the ports declare it; these are the drawing's copy.  The selftest's `meter`
+    // pass asserts the ports never leave [floor, ceiling], so a disagreement shows up
+    // there rather than as a bar that runs off the end of its box.
+    static constexpr float kMeterFloorDb = -42.0f;
+    static constexpr float kMeterCeilDb  =  12.0f;
+
+    /// 18 segments over 54 dB is 3 dB each -- and 3 dB is one doubling of decorrelated
+    /// voices, so a segment is a real unit on a 31-voice multitimbral machine and not
+    /// just a tick.  It is also what keeps the repaint cost down: see parameterChanged().
+    static constexpr int kMeterSegments = 18;
+
+    /// Where the colours change, in segments from the left.  0 dB is the boundary
+    /// between yellow and red BECAUSE it is where the clip lamp fires -- the two say the
+    /// same thing at the same threshold by construction rather than by two tunings that
+    /// can drift apart.
+    static constexpr int kMeterGreenEnd  = 10;      // -42 .. -12 dB
+    static constexpr int kMeterYellowEnd = 14;      // -12 ..   0 dB
+
     /// A resize has to force a repaint.
     ///
     /// The panel is demand-driven -- uiIdle() turns a dirty flag into one repaint, and
@@ -441,6 +494,7 @@ protected:
         drawDivePage();
         drawLcd();
         drawLeds();
+        drawMeter();
         drawKnob();
         drawButtonFeedback();
 
@@ -4982,6 +5036,81 @@ private:
         drawLed(voltaire::panel::LED_FILT, m_hf, Color(255, 60, 40));
     }
 
+    /// The stereo meter: two horizontal segment rows in the artwork's reserved box.
+    ///
+    /// Geometry comes from generated/panel_geometry.h like every other control -- the box
+    /// is labelled VU_Horiz_Stereo in the Inkscape file and the exporter emits it, so
+    /// moving the meter means moving it in the artwork and nothing else.  The artwork
+    /// still paints its own rect underneath (the exporter strips no VU or LED shape), so
+    /// this draws the segments ON TOP of whatever ground the panel gives them, exactly
+    /// as drawLed() does.
+    void drawMeter()
+    {
+        const auto &r = voltaire::panel::kMeter[voltaire::panel::VU_HORIZ_STEREO];
+
+        // Two bars, stacked, with a little air around and between them.
+        const float pad = r.h * 0.14f;
+        const float gap = r.h * 0.09f;
+        const float barH = (r.h - pad * 2.0f - gap) * 0.5f;
+
+        // One cell per segment; the lit part of a cell is the cell less its gap.
+        const float cellW = r.w / float(kMeterSegments);
+        const float segGap = cellW * 0.20f;
+        const float segW = cellW - segGap;
+
+        for (int c = 0; c < 2; c ++)
+        {
+            const float y = r.y + pad + float(c) * (barH + gap);
+            const int lit  = meterSegments(m_meterDb[c]);
+            const int mark = meterSegments(m_holdDb[c]);
+
+            for (int i = 0; i < kMeterSegments; i ++)
+            {
+                const float x = r.x + float(i) * cellW;
+                const Color base = meterSegmentColor(i);
+                // The marker is the SAME hue as the zone it stands in, only brighter --
+                // so a hold sitting in the red is unmistakably different from one sitting
+                // in the green without needing a colour of its own.
+                const bool isMark = (mark > 0 && i == mark - 1);
+                const bool isLit  = (i < lit);
+
+                beginPath();
+                rect(x, y, segW, barH);
+                if (isMark)
+                    fillColor(base);
+                else if (isLit)
+                    fillColor(Color(int(base.red * 205), int(base.green * 205),
+                                    int(base.blue * 205)));
+                else
+                    // Unlit segments stay visible: an empty meter should read as a meter
+                    // rather than as a blank hole in the panel.
+                    fillColor(Color(int(base.red * 42), int(base.green * 42),
+                                    int(base.blue * 42)));
+                fill();
+            }
+        }
+
+        // 0 dBFS gets a real gridline, not just a change of hue.  On most meters 0 is a
+        // convention; here it is a measured fact about the hardware -- the level ONE
+        // VOICE at full envelope reaches through the PCM54HP -- and it is where the CLIP
+        // lamp fires.  Colour is the first thing lost to a dim screen or a colourblind
+        // viewer, and this particular boundary is worth more than a hue.
+        {
+            const float x = r.x + float(kMeterYellowEnd) * cellW - segGap * 0.5f;
+            beginPath();
+            rect(x - r.h * 0.02f, r.y, r.h * 0.04f, r.h);
+            fillColor(Color(215, 215, 220, 0.65f));
+            fill();
+        }
+    }
+
+    static Color meterSegmentColor(int i)
+    {
+        if (i < kMeterGreenEnd)  return Color(70, 220, 90);
+        if (i < kMeterYellowEnd) return Color(235, 200, 60);
+        return Color(240, 70, 50);
+    }
+
     void drawLed(int id, bool on, Color c)
     {
         const auto &r = voltaire::panel::kLed[id];
@@ -5260,6 +5389,13 @@ private:
 
     float m_volume = 0.0f;
     bool m_hf = true;
+
+    // The meter, in dB, exactly as the DSP publishes it.  The UI does no ballistics: the
+    // attack, the fall, the dwell and the marker's slower fall are all finished before
+    // the value reaches here, because the host chooses when these ports are read and a
+    // value that needed the reader's clock would be wrong whenever the host was busy.
+    float m_meterDb[2] = { kMeterFloorDb, kMeterFloorDb };
+    float m_holdDb[2]  = { kMeterFloorDb, kMeterFloorDb };
     int m_held = -1;
     bool m_latch[voltaire::panel::BUTTONID_COUNT] = { false };
     bool m_testMode = false;
