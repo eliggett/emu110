@@ -197,6 +197,11 @@ selftest: all
 		"https://github.com/eliggett/emu110/voltaire110" build/lv2_load.wav 0 load \
 		2>&1 | grep -E "^load:"
 	@echo
+	@U110_DATA_DIR=$${U110_DATA_DIR:-$(CURDIR)/..} build/lv2_selftest \
+		bin/$(NAME).lv2/$(NAME)_dsp.so \
+		"https://github.com/eliggett/emu110/voltaire110" build/lv2_meter.wav 0 meter \
+		2>&1 | grep -E "^meter:"
+	@echo
 	@$(MAKE) --no-print-directory presetcheck
 	@echo
 	@$(MAKE) --no-print-directory clapcheck

@@ -365,7 +365,22 @@ int main(int argc, char **argv)
     const int want_tone_test  = (argc > 5) && strcmp(argv[5], "tone") == 0;
     const int want_write_test = (argc > 5) && strcmp(argv[5], "write") == 0;
     const int want_load_test  = (argc > 5) && strcmp(argv[5], "load") == 0;
+    const int want_meter_test = (argc > 5) && strcmp(argv[5], "meter") == 0;
     int patch_checks = 0, patch_pass = 0;
+
+    /* The stereo meter and its peak-hold marker, as OUTPUT control ports.  A host reads
+     * these whenever it likes, so the ballistics have to be finished by the time the
+     * value lands here -- that is the whole reason they live in the DSP.  Ports 13-16. */
+    float meter[2] = { 0, 0 }, hold[2] = { 0, 0 };
+
+    /* The whole run as a series, sampled once per block, so the checks can measure the
+     * ballistics instead of guessing when to look.  Fixed wall-clock sample points were
+     * the first attempt and they were wrong: they assumed a sustained note, and the
+     * machine's own patch decays -- the bar had reached the floor before the note was
+     * even released.  What the constants promise is a RATE, so a rate is what to test. */
+#define MSAMP 4096
+    static float m_t[MSAMP], m_bar[MSAMP][2], m_hld[MSAMP][2];
+    int m_n = 0;
 
 
     d->connect_port(h, 0, outL);
@@ -376,7 +391,12 @@ int main(int argc, char **argv)
     d->connect_port(h, 5, &volume);
     d->connect_port(h, 6, &hf);
     for (int i = 0; i < 6; i++) d->connect_port(h, 7 + i, &btn[i]);
-    /* No output control ports any more: the panel arrives as a blob on events-out. */
+    /* The panel itself arrives as a blob on events-out; these four are the exception,
+     * because a level really is a scalar and that is what an output port is for. */
+    d->connect_port(h, 13, &meter[0]);
+    d->connect_port(h, 14, &meter[1]);
+    d->connect_port(h, 15, &hold[0]);
+    d->connect_port(h, 16, &hold[1]);
     if (d->activate) d->activate(h);
 
     const uint32_t urid_seq   = map_uri(NULL, LV2_ATOM__Sequence);
@@ -414,7 +434,7 @@ int main(int argc, char **argv)
          * machine's own menus, and this proves the whole loop from a host control port
          * through to the LCD. */
         btn[1] = (!want_fx && !want_patch_test && !want_tone_test && !want_write_test
-                  && !want_load_test
+                  && !want_load_test && !want_meter_test
                   && done >= (long)(7.0 * RATE) && done < (long)(8.0 * RATE)) ? 1.0f : 0.0f;
 
         if (want_fx) {
@@ -627,6 +647,15 @@ int main(int argc, char **argv)
                 wi->work(h, work_respond, NULL, g_work_size, g_work);
             g_work_size = 0;
         }
+        if (want_meter_test && m_n < MSAMP)
+        {
+            /* The ports are read AFTER run(), which is where a host reads them too. */
+            m_t[m_n] = (float)((double)done / RATE);
+            m_bar[m_n][0] = meter[0]; m_bar[m_n][1] = meter[1];
+            m_hld[m_n][0] = hold[0];  m_hld[m_n][1] = hold[1];
+            m_n++;
+        }
+
         {   /* Lamp bits, and how much of the run each was lit -- "ever seen" cannot show
              * a polarity mistake, and every lamp on this machine is active low. */
             const unsigned l = g_panel[96] & 0x0f;      /* struct field `leds` */
@@ -734,6 +763,8 @@ int main(int argc, char **argv)
                 d->connect_port(h2, 4, &latency);
                 d->connect_port(h2, 5, &volume); d->connect_port(h2, 6, &hf);
                 for (i = 0; i < 6; i++) d->connect_port(h2, 7 + i, &btn[i]);
+                d->connect_port(h2, 13, &meter[0]); d->connect_port(h2, 14, &meter[1]);
+                d->connect_port(h2, 15, &hold[0]);  d->connect_port(h2, 16, &hold[1]);
 
                 /* What the fresh instance holds WITHOUT a restore.  If this already
                  * matched, the comparison below would prove nothing -- both instances boot
@@ -849,6 +880,8 @@ int main(int argc, char **argv)
                         d->connect_port(h3, 4, &latency);
                         d->connect_port(h3, 5, &volume); d->connect_port(h3, 6, &hf);
                         for (i2 = 0; i2 < 6; i2++) d->connect_port(h3, 7 + i2, &btn[i2]);
+                        d->connect_port(h3, 13, &meter[0]); d->connect_port(h3, 14, &meter[1]);
+                        d->connect_port(h3, 15, &hold[0]);  d->connect_port(h3, 16, &hold[1]);
 
                         states_clear();
                         if (sl) store_cb(NULL, sl->urid, moved, strlen(moved),
@@ -941,6 +974,111 @@ int main(int argc, char **argv)
         patch_pass += (strcmp(name64, "Library Pt") == 0 && strcmp(name1, "Ac.Piano") == 0);
         printf("load: %d of %d checks passed%s\n", patch_pass, patch_checks,
                patch_pass == patch_checks ? "" : "   <-- FAILED");
+    }
+
+    if (want_meter_test)
+    {
+        /* Everything here is provable from the PORTS alone, the way a host sees them,
+         * and from the constants the DSP promises: floor -42, ceiling +12, bar 20 dB/s,
+         * dwell 1.5 s, marker 12 dB/s.  Nothing depends on WHEN the machine makes a
+         * sound or for how long, only on how the meter responds to what it made. */
+        const float FLOORDB = -42.0f, CEILDB = 12.0f;
+        const double BARFALL = 20.0, HOLDFALL = 12.0, DWELL = 1.5;
+        const double dt = (double)BLOCK / RATE;
+        int mc = 0, mp = 0, c, i;
+
+        int    ok_range = 1, ok_below = 0, ok_idle = 1, ok_barrate = 1;
+        int    ok_dwell = 1, ok_rose = 1, ok_holdrate = 1, ok_marker = 1;
+        float  vpeak[2] = { -99.0f, -99.0f };
+        int    ipeak[2] = { 0, 0 };
+        double hrate[2] = { 0.0, 0.0 };
+
+        for (c = 0; c < 2; c++)
+        {
+            for (i = 0; i < m_n; i++)
+            {
+                /* 1. A port may never leave the range it advertised to the host. */
+                if (m_bar[i][c] < FLOORDB - 0.01f || m_bar[i][c] > CEILDB + 0.01f) ok_range = 0;
+                if (m_hld[i][c] < FLOORDB - 0.01f || m_hld[i][c] > CEILDB + 0.01f) ok_range = 0;
+
+                /* 2. The marker may never sit BELOW the bar.  If it could, a rising
+                 *    signal would swallow it and a peak hold that can be swallowed is
+                 *    not a peak hold. */
+                if (m_hld[i][c] < m_bar[i][c] - 0.01f) ok_below++;
+
+                /* 3. Silence -- after the boot, before the note -- reads the floor
+                 *    EXACTLY.  A meter that idles above the floor never resets. */
+                if (m_t[i] > 10.0f && m_t[i] < 11.9f
+                    && (m_bar[i][c] != FLOORDB || m_hld[i][c] != FLOORDB)) ok_idle = 0;
+
+                if (m_bar[i][c] > vpeak[c]) { vpeak[c] = m_bar[i][c]; ipeak[c] = i; }
+            }
+
+            /* 4. Something lifted it off the floor at all: the check that fails if the
+             *    ports were never written. */
+            if (vpeak[c] <= FLOORDB + 1.0f) ok_rose = 0;
+
+            /* 5. The bar never falls FASTER than its constant, at any pair of adjacent
+             *    samples.  An upper bound rather than a rate, because between the peak
+             *    and the floor the bar may be tracking a signal that decays more slowly
+             *    than the ballistics would -- and it should. */
+            for (i = 1; i < m_n; i++)
+                if (m_bar[i][c] < m_bar[i-1][c] - (float)(BARFALL * dt) - 0.02f)
+                    ok_barrate = 0;
+
+            /* 6. The dwell: once past the peak nothing re-arms the marker, so it must
+             *    stand still for the full 1.5 s. */
+            for (i = ipeak[c]; i < m_n && m_t[i] < m_t[ipeak[c]] + (float)DWELL - 0.05f; i++)
+                if (m_hld[i][c] != vpeak[c]) ok_dwell = 0;
+
+            /* 7. ...and then fall, at its own rate.  Deterministic once the peak has
+             *    passed, so this one is measured against BOTH bounds. */
+            {
+                int a = -1, b = -1;
+                for (i = ipeak[c]; i < m_n; i++)
+                {
+                    if (m_hld[i][c] < vpeak[c] - 1.0f && a < 0) a = i;
+                    if (a >= 0 && m_hld[i][c] > FLOORDB + 1.0f) b = i;
+                }
+                if (a < 0 || b <= a) ok_holdrate = 0;
+                else
+                {
+                    hrate[c] = (m_hld[a][c] - m_hld[b][c]) / (m_t[b] - m_t[a]);
+                    if (hrate[c] < HOLDFALL * 0.95 || hrate[c] > HOLDFALL * 1.05)
+                        ok_holdrate = 0;
+                    /* 8. Slower than the bar, which is what keeps it readable: over the
+                     *    same window the bar must already be below it. */
+                    if (!(m_hld[b][c] > m_bar[b][c])) ok_marker = 0;
+                }
+            }
+        }
+
+        printf("meter: %d samples, peak %.1f/%.1f dB at %.2f/%.2f s\n",
+               m_n, vpeak[0], vpeak[1], m_t[ipeak[0]], m_t[ipeak[1]]);
+        printf("meter: marker falls at %.1f/%.1f dB/s (asked for %.1f)\n",
+               hrate[0], hrate[1], HOLDFALL);
+
+        mc++; mp += ok_range;
+        mc++; mp += (ok_below == 0);
+        mc++; mp += ok_idle;
+        mc++; mp += ok_rose;
+        mc++; mp += ok_barrate;
+        mc++; mp += ok_dwell;
+        mc++; mp += ok_holdrate;
+        mc++; mp += ok_marker;
+
+        if (!ok_range)    printf("meter: a port left its declared range\n");
+        if (ok_below)     printf("meter: marker below the bar in %d samples\n", ok_below);
+        if (!ok_idle)     printf("meter: silence does not read the floor\n");
+        if (!ok_rose)     printf("meter: the bar never moved -- ports not written?\n");
+        if (!ok_barrate)  printf("meter: the bar fell faster than %.0f dB/s\n", BARFALL);
+        if (!ok_dwell)    printf("meter: the marker moved during its dwell\n");
+        if (!ok_holdrate) printf("meter: the marker's fall rate is wrong\n");
+        if (!ok_marker)   printf("meter: the marker did not stay above the bar\n");
+
+        printf("meter: %d of %d checks passed%s\n", mp, mc,
+               mp == mc ? "" : "   <-- FAILED");
+        patch_checks += mc; patch_pass += mp;
     }
 
     if (want_write_test)

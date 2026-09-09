@@ -47,7 +47,11 @@ enum Params
 {
     kParamVolume = 0, kParamHfCorrection,
     kParamButtonFirst,
-    kParamCount = kParamButtonFirst + 6
+    // Output only, appended after the buttons: see the enum in Voltaire110Plugin.cpp for
+    // why nothing may ever be inserted ahead of them.
+    kParamMeterFirst = kParamButtonFirst + 6,
+    kParamMeterL = kParamMeterFirst, kParamMeterR, kParamHoldL, kParamHoldR,
+    kParamCount
 };
 
 /// The panel as the DSP sends it: one fixed layout, hex encoded, over the atom port.

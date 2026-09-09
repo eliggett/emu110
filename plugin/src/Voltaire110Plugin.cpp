@@ -386,6 +386,24 @@ enum Params
     kParamButtonDec,
     kParamButtonIncEnter,
 
+    // OUTPUT ONLY: the stereo meter, and its peak-hold marker.
+    //
+    // These are appended AFTER the buttons and nothing may ever be inserted before them:
+    // a host stores automation against the index in some formats, so moving an existing
+    // parameter silently rewires somebody's session.
+    //
+    // Output PARAMETERS rather than a field in the panel blob, and the reason is the
+    // blob's economy: it is sent only when memcmp says it changed, which is what keeps
+    // updateStateValue()'s allocation off the audio thread while the machine is idle.  A
+    // continuously moving float would make that comparison always-true and allocate every
+    // 50 ms forever.  A scalar with a real range and a real unit is exactly what an
+    // output port is for -- see the note above initState().
+    kParamMeterFirst,
+    kParamMeterL = kParamMeterFirst,
+    kParamMeterR,
+    kParamHoldL,
+    kParamHoldR,
+
     kParamCount
 };
 
@@ -395,6 +413,13 @@ const char *const kButtonNames[] = {
 };
 const char *const kButtonSymbols[] = {
     "btn_part_jump", "btn_edit_exit", "btn_left", "btn_right", "btn_dec", "btn_inc_enter"
+};
+
+const char *const kMeterNames[] = {
+    "Meter L", "Meter R", "Peak hold L", "Peak hold R"
+};
+const char *const kMeterSymbols[] = {
+    "meter_l", "meter_r", "hold_l", "hold_r"
 };
 
 } // anonymous namespace
@@ -455,7 +480,20 @@ protected:
             parameter.ranges.max = 1.0f;
             break;
         default:
-            if (index >= kParamButtonFirst && index < kParamCount)
+            if (index >= kParamMeterFirst && index < kParamCount)
+            {
+                const uint32_t m = index - kParamMeterFirst;
+                // NOT automatable: an output parameter is the plugin telling the host, and
+                // a host that tried to write one back would be fighting run().
+                parameter.hints = kParameterIsOutput;
+                parameter.name = kMeterNames[m];
+                parameter.symbol = kMeterSymbols[m];
+                parameter.unit = "dB";
+                parameter.ranges.def = kMeterFloorDb;
+                parameter.ranges.min = kMeterFloorDb;
+                parameter.ranges.max = kMeterCeilDb;
+            }
+            else if (index >= kParamButtonFirst && index < kParamMeterFirst)
             {
                 const uint32_t b = index - kParamButtonFirst;
                 parameter.hints = kParameterIsAutomatable | kParameterIsBoolean;
@@ -475,8 +513,12 @@ protected:
         {
         case kParamVolume:       return m_volumeDb;
         case kParamHfCorrection: return m_hfCorrection ? 1.0f : 0.0f;
+        case kParamMeterL:       return m_meterDb[0];
+        case kParamMeterR:       return m_meterDb[1];
+        case kParamHoldL:        return m_holdDb[0];
+        case kParamHoldR:        return m_holdDb[1];
         }
-        if (index >= kParamButtonFirst)
+        if (index >= kParamButtonFirst && index < kParamMeterFirst)
             return m_buttons[index - kParamButtonFirst] ? 1.0f : 0.0f;
         return 0.0f;
     }
@@ -500,7 +542,8 @@ protected:
             break;
         }
         default:
-            if (index >= kParamButtonFirst && index < kParamCount)
+            // kParamMeterFirst and up are outputs: run() owns them, a setter must not.
+            if (index >= kParamButtonFirst && index < kParamMeterFirst)
             {
                 const uint32_t b = index - kParamButtonFirst;
                 const bool down = value > 0.5f;
@@ -974,16 +1017,21 @@ protected:
         // The clip lamp is measured HERE, after the gain, because that is where clipping
         // actually happens -- the volume is a plugin-layer post-gain modelling an analogue
         // pot after the DAC, so the emulation never sees it.
-        float peak = 0.0f;
+        float peakL = 0.0f, peakR = 0.0f;
         for (uint32_t i = 0; i < frames; i ++)
         {
             m_gain += (m_gainTarget - m_gain) * 0.001f;
             outL[i] *= m_gain;
             outR[i] *= m_gain;
             const float a = std::fabs(outL[i]), b = std::fabs(outR[i]);
-            if (a > peak) peak = a;
-            if (b > peak) peak = b;
+            if (a > peakL) peakL = a;
+            if (b > peakR) peakR = b;
         }
+        updateMeters(peakL, peakR, frames);
+
+        // The lamp is the louder of the two: one channel over full scale is a clipped
+        // output whichever one it was.
+        const float peak = peakL > peakR ? peakL : peakR;
         if (peak >= 1.0f)
             m_clipHold = uint32_t(m_hostRate * kClipHoldSeconds);
         else if (m_clipHold > frames)
@@ -1005,7 +1053,43 @@ private:
 
     /// How long the clip lamp stays lit after a sample reaches full scale.  A single
     /// clipped sample is over in 20 us; without a hold you would never see it.
+    ///
+    /// Deliberately SHORTER than the meter's peak-hold dwell below, so after a transient
+    /// over 0 dB there is a window where the lamp is dark and the marker is still in the
+    /// red.  They are not the same statement: the lamp is an EVENT ("you clipped"), the
+    /// marker is a LEVEL ("your peak was here").  Syncing them would lose that.
     static constexpr double kClipHoldSeconds = 0.4;
+
+    // ---- the meter's scale ----------------------------------------------------------
+    //
+    // -42 dB is not the usual -60, and the reason is specific to this machine: there is
+    // no fixed noise floor to reveal.  Both of its error sources are signal-scaled -- the
+    // wave ROM is an 8-bit mini-float whose error is proportional to level by
+    // construction, and the interpolator "follows the note down instead of sitting at a
+    // fixed floor" (roland_lp.cpp, sample_interpolate_raw).  So a deeper floor would
+    // spend a third of a 132-unit box on a region that never has anything in it, at the
+    // cost of resolution where the music actually is.
+    //
+    // +12 dB of over-range because above 0 is NORMAL here, not an error state.  0 dBFS is
+    // calibrated as ONE VOICE at full envelope with a full-scale sample (roland_lp.h,
+    // VOICE_FS), the volume pot adds up to another 16 dB after the DAC, and every voice
+    // that joins the mix is a plain float += with nothing to clip against.  So the
+    // question a user has is not "am I over" but "by how much", and only a scale that
+    // extends past 0 can answer it.  Attenuating afterwards recovers the signal exactly.
+    static constexpr float kMeterFloorDb = -42.0f;
+    static constexpr float kMeterCeilDb  =  12.0f;
+
+    /// How fast the bar falls.  A peak is still within 1 dB of true 50 ms later, so no
+    /// UI frame rate -- 25 Hz, or a host that stalls to 12 -- can miss a transient.  This
+    /// is why the ballistics are HERE and not in the UI: the read cadence is the host's
+    /// to choose, so the value on the wire has to be correct at any instant it is read.
+    static constexpr double kMeterFallDbPerSec = 20.0;
+
+    /// The peak-hold marker: sit still long enough to be read, then slide down slower
+    /// than the bar so it stays clear of it.  12 dB/s is one 3 dB segment per 250 ms,
+    /// which reads as a falling marker rather than a jump.
+    static constexpr double kHoldDwellSeconds  = 1.5;
+    static constexpr double kHoldFallDbPerSec  = 12.0;
 
     /// Everything the panel needs, in one fixed layout.  Hex rather than base64 so the
     /// encoder is four lines and has no dependency; 99 bytes becomes 198 characters, which
@@ -1054,6 +1138,59 @@ private:
             m_coreR.resize(coreFrames);
         }
         m_core.renderStereo(m_coreL.data(), m_coreR.data(), coreFrames);
+    }
+
+    /// Peak, decay and peak-hold, once per block.
+    ///
+    /// Everything here is in HOST FRAMES rather than blocks, so the ballistics are the
+    /// same whatever buffer size the host runs -- the same trap publishPanel() documents.
+    /// Two log10 and a handful of compares per block; the per-sample work was already
+    /// being done for the clip lamp.
+    void updateMeters(float peakL, float peakR, uint32_t frames)
+    {
+        const float peak[2] = { peakL, peakR };
+        const double secs = double(frames) / m_hostRate;
+        const float barFall  = float(kMeterFallDbPerSec * secs);
+        const float holdFall = float(kHoldFallDbPerSec * secs);
+        const uint32_t dwell = uint32_t(kHoldDwellSeconds * m_hostRate);
+
+        for (int c = 0; c < 2; c ++)
+        {
+            // The floor is applied to the ARGUMENT as well as the result: log10(0) is
+            // -inf, and an -inf that reached the port would poison every host that
+            // displays it.  1e-6 is -120 dB, far below anything the scale shows.
+            const float db = peak[c] > 1.0e-6f
+                    ? 20.0f * std::log10(peak[c]) : kMeterFloorDb;
+
+            // Instant attack, exponential fall -- which is linear in dB, so the rate is
+            // just a subtraction.
+            m_meterDb[c] = std::max(db, m_meterDb[c] - barFall);
+            m_meterDb[c] = std::min(std::max(m_meterDb[c], kMeterFloorDb), kMeterCeilDb);
+
+            // The marker takes the BAR's value, never this block's raw peak.  That is
+            // what makes "the marker is never below the bar" true by construction rather
+            // than by luck: the bar has an instant attack, so it is always at least the
+            // raw peak, and the marker is therefore the running maximum of something the
+            // bar already reached.  Assigning `db` here instead puts the marker below the
+            // lit segments for a third of the run -- measured, not guessed.
+            //
+            // The dwell re-arms every block the bar is still at its maximum, so the
+            // countdown starts when the bar begins to fall, not when the note began.
+            if (m_meterDb[c] >= m_holdDb[c])
+            {
+                m_holdDb[c] = m_meterDb[c];
+                m_holdDwell[c] = dwell;
+            }
+            else if (m_holdDwell[c] > frames)
+            {
+                m_holdDwell[c] -= frames;
+            }
+            else
+            {
+                m_holdDwell[c] = 0;
+                m_holdDb[c] = std::max(m_meterDb[c], m_holdDb[c] - holdFall);
+            }
+        }
     }
 
     /// Pack the panel into the output parameters for the UI, at about 30 Hz.
@@ -2494,6 +2631,13 @@ private:
     unsigned m_lcdAccum = 0;
     char m_lastLcd[40] = { 0 };
     uint32_t m_clipHold = 0;
+
+    // The meter, in dB, as the UI reads it.  Written only by updateMeters() on the audio
+    // thread and read by getParameterValue() on that same thread (LV2 writes the output
+    // ports from run(); CLAP polls them from process()), so no atomics are needed.
+    float m_meterDb[2] = { kMeterFloorDb, kMeterFloorDb };
+    float m_holdDb[2]  = { kMeterFloorDb, kMeterFloorDb };
+    uint32_t m_holdDwell[2] = { 0, 0 };     ///< host frames left before the marker falls
     MountedCard m_cards[voltaire::kNumCardSlots];
     std::vector<uint8_t> m_savedNvram;
     std::string m_pgmSha, m_pgmName, m_pgmFound;
