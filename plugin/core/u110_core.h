@@ -40,6 +40,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace voltaire {
 
@@ -143,6 +144,34 @@ public:
 	/// Mount a PCM card, or pass data == nullptr to eject.  Undersized dumps are mirrored
 	/// up in 128K pages, as the address descrambling requires.
 	LoadResult loadCard(unsigned slot, const uint8_t *data, size_t len);
+
+	// --- changing a card in a RUNNING machine ---------------------------------------
+	//
+	// loadCard() does its descrambling straight into the PCM space the sound device is
+	// reading from, which is why it says "between render() calls" above.  Changing a card
+	// while the machine plays needs the same work split by cost instead: the expensive,
+	// allocating half on whatever thread the request arrived on, and only a memcpy where
+	// the audio is.
+	//
+	// The machine finds out the way the hardware tells it -- the presence bit on PORT1,
+	// polled by the firmware every service pass.  It is edge triggered against its own
+	// snapshot, so REPLACING a card means eject, let the firmware notice, then install;
+	// installing over a slot that still reads "present" leaves the firmware serving the
+	// old card's ID.  analysis/ROM-ANALYSIS.md section 6.9.
+
+	/// Turn a card image into what the PCM space wants, in a buffer of the caller's.
+	/// Touches no machine state, so any thread may call it while audio runs.  `out` is
+	/// resized to kCardBytes.  Undersized dumps are mirrored up, as loadCard does.
+	static LoadResult prepareCard(const uint8_t *data, size_t len, std::vector<uint8_t> &out);
+
+	/// Put a prepared image in a slot and mark the slot occupied.  One memcpy of
+	/// kCardBytes and one bit; no allocation, no file access.  Call it from the audio
+	/// thread, between the machine's blocks: measured at 10 us, against the 1333 us a
+	/// 64-frame block at 48 kHz has to play with, and only once per card change.
+	void installCard(unsigned slot, const uint8_t *prepared);
+
+	/// Mark a slot empty.  Same conditions as installCard.
+	void ejectCard(unsigned slot);
 
 	/// Hard reset.  Safe to call once images are loaded; the firmware then boots normally.
 	void reset();

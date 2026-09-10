@@ -65,6 +65,7 @@ struct PanelBlob
     uint8_t part_tone[6];           ///< tone within that media, counting from 0
     uint8_t part_flags[6];          ///< (b & 0xE0) == 0xC0: the part is switched off
     uint8_t part_chan[6];           ///< MIDI receive channel in the low nibble
+    uint8_t card_id[4];             ///< the firmware's own verdict per slot; see the DSP
 };
 
 /// One media's worth of tones: the internal wave ROM, or a mounted card.

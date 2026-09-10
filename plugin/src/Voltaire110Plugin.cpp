@@ -131,6 +131,20 @@ constexpr size_t kPgmBytes    = 0x10000;
 constexpr unsigned kDiagMaxEntries = 60;
 constexpr size_t   kDiagMaxChars   = 15000;
 
+/// The first `n` bytes, for asking a file what it is without reading half a megabyte of
+/// it.  Short files come back short rather than padded, so the caller can tell.
+std::vector<uint8_t> readFileHead(const std::string &path, size_t n)
+{
+    std::vector<uint8_t> data(n);
+    FILE *f = std::fopen(path.c_str(), "rb");
+    if (!f)
+        return std::vector<uint8_t>();
+    const size_t got = std::fread(data.data(), 1, n, f);
+    std::fclose(f);
+    data.resize(got);
+    return data;
+}
+
 std::vector<uint8_t> readFile(const std::string &path)
 {
     std::vector<uint8_t> data;
@@ -229,6 +243,50 @@ bool cardNumberFromName(const std::string &name, unsigned &number)
         return true;
     }
     return false;
+}
+
+/// What an image says it is, read out of the image itself.
+///
+/// The 16 bytes at offset 0 are the signature the FIRMWARE checks before it will mount a
+/// card (`0x93A2`, ROM-ANALYSIS.md section 6.5), the name sits at +0x10 and the catalogue
+/// ID at +0x20.  A dump is linear here -- the hardware's address and data permutations
+/// compose to the identity over the header, which is section 6.4 -- so this reads the file
+/// as it is, with no descrambling.
+///
+/// This is a better answer than the filename: it is what the machine itself will conclude.
+struct CardIdent
+{
+    bool        valid = false;      ///< the machine will accept this as a card
+    unsigned    number = 0;         ///< catalogue ID, e.g. 8 for SN-U110-08
+    std::string label;              ///< what it calls itself, trimmed
+};
+
+CardIdent identifyCard(const uint8_t *img, size_t n)
+{
+    static const uint8_t kSig[16] = {
+        'R','o','l','a','n','d','U','-','1','1','0',' ','N', 0xB1, 0x53, 0xAC
+    };
+    CardIdent id;
+    if (img == nullptr || n < 0x21)
+        return id;
+
+    // The label is worth having even when the signature does not check out: a file that
+    // says SN-U110-09 in plain text is worth naming that way in a list, and whether the
+    // machine will take it is a separate question the list answers separately.
+    for (size_t i = 0x10; i < 0x20; i ++)
+    {
+        const uint8_t c = img[i];
+        if (c < 0x20 || c >= 0x7f)
+            break;
+        id.label.push_back(char(c));
+    }
+    while (!id.label.empty() && id.label.back() == ' ')
+        id.label.pop_back();
+
+    id.valid = std::memcmp(img, kSig, sizeof(kSig)) == 0;
+    if (id.valid)
+        id.number = img[0x20];
+    return id;
 }
 
 struct CardFile
@@ -364,6 +422,9 @@ enum States
     kStateDiag,
     kStateDiagReq,
     kStateReboot,
+    kStateCardList,
+    kStateCardSet,
+    kStateCardScan,
     kStateCount
 };
 
@@ -708,6 +769,37 @@ protected:
             state.defaultValue = "";
             break;
 
+        case kStateCardList:
+            state.key = "cardlist";
+            state.label = "Cards available and mounted";
+            // What images are on the ROM search path, and what is in each of the four
+            // slots -- including the FIRMWARE's verdict on it, which is the only opinion
+            // that decides whether a card's tones can be played.  Not saved into a
+            // session: which images exist is a fact about this machine's disk, and the
+            // slot assignments are already in "settings".
+            state.hints = kStateIsOnlyForUI;
+            state.defaultValue = "";
+            break;
+
+        case kStateCardSet:
+            state.key = "cardset";
+            state.label = "Put a card in a slot";
+            // "<slot> <path>", or "<slot> -" to empty it.  Nothing to save: what it
+            // produces is recorded in "settings" like any other mounted card.
+            state.hints = kStateIsOnlyForDSP;
+            state.defaultValue = "";
+            break;
+
+        case kStateCardScan:
+            state.key = "cardscan";
+            state.label = "Look for card images again";
+            // The UI asking, when it opens the page.  Rescanned rather than watched, for
+            // the same reason the preset library is: somebody may have just dropped a
+            // file in, and nothing else would ever notice.
+            state.hints = kStateIsOnlyForDSP;
+            state.defaultValue = "";
+            break;
+
         case kStateReboot:
             state.key = "reboot";
             state.label = "Restart the machine";
@@ -730,6 +822,11 @@ protected:
             return String(m_patchDumpHex);
         if (std::strcmp(key, "tones") == 0)
             return String(m_tonesText);
+        // Composed on the spot rather than answered from the cache: a UI opening into a
+        // host that is not running audio yet has never had a push, and this is the page
+        // that has to be right at that moment.
+        if (std::strcmp(key, "cardlist") == 0)
+            return String(composeCardList().c_str());
         // Answered here as well as pushed, because a UI opening into a host that is not
         // running audio yet gets its whole first picture through getState() -- and a
         // machine that never started is exactly the case this report is for.
@@ -884,6 +981,21 @@ protected:
             return;
         }
 
+        if (std::strcmp(key, "cardscan") == 0)
+        {
+            // Composed HERE, like diagreq below and for the same reason: it opens
+            // directories and builds a string, and run() may do neither.
+            m_cardListOut = composeCardList();
+            m_cardListPending.store(true, std::memory_order_release);
+            return;
+        }
+
+        if (std::strcmp(key, "cardset") == 0)
+        {
+            queueCardSet(value);
+            return;
+        }
+
         if (std::strcmp(key, "diagreq") == 0)
         {
             // Composed HERE, on the UI's thread, and only handed over as a finished
@@ -976,6 +1088,15 @@ protected:
             updateStateValue("diag", m_diagOut.c_str());
         }
 
+        // Same story: built on another thread, handed over here.  Above the ROM check
+        // too, because "no card images anywhere" is one of the things it has to be able
+        // to say.
+        if (m_cardListPending.load(std::memory_order_acquire))
+        {
+            m_cardListPending.store(false, std::memory_order_relaxed);
+            updateStateValue("cardlist", m_cardListOut.c_str());
+        }
+
         if (!m_romsLoaded)
         {
             std::memset(outL, 0, sizeof(float) * frames);
@@ -990,6 +1111,7 @@ protected:
         // to rather than at the start of the next one.  The reboot goes first because it
         // cancels the other three.
         tickReboot(coreFrames);
+        tickCards(coreFrames);
         tickPatchWrite();
         tickPatchSelect(coreFrames);
         tickToneSelect(coreFrames);
@@ -1115,6 +1237,13 @@ private:
         uint8_t part_tone[6];       ///< tone within that media, counting from 0
         uint8_t part_flags[6];      ///< as the firmware keeps them; see kPartFlagsOffset
         uint8_t part_chan[6];       ///< MIDI receive channel in the low nibble
+        // The FIRMWARE's verdict on each card slot, from its own cache at 0x2743:
+        // 0 = nothing there, 0xFF = it looked at the card and refused it ("Illegal CARD"),
+        // otherwise the card's catalogue ID.  This and not the plugin's own bookkeeping is
+        // what decides whether a card's tones can be played, so it is what the cartridge
+        // page shows.  Four bytes that move only when a card does, so the memcmp above
+        // stays quiet.
+        uint8_t card_id[4];
     };
 
     static void encodeHex(const uint8_t *src, size_t n, char *dst)
@@ -1236,6 +1365,8 @@ private:
                 blob.part_flags[i] = m_core.readMem(uint16_t(rec + kPartFlagsOffset));
                 blob.part_chan[i]  = m_core.readMem(uint16_t(rec + kPartChannelOffset));
             }
+            for (unsigned i = 0; i < voltaire::kNumCardSlots; i ++)
+                blob.card_id[i] = m_core.readMem(uint16_t(kCardIdAddr + i));
             if (std::memcmp(&blob, &m_lastBlob, sizeof(blob)) != 0)
             {
                 m_lastBlob = blob;
@@ -1791,6 +1922,90 @@ private:
     /// screen is up, and 6 s tested identically), so the margin costs nothing.
     static constexpr uint32_t kBootHoldFrames = voltaire::kCoreSampleRate * 4500 / 1000;
 
+    /// The second half of a card change: the part that has to happen in the machine's own
+    /// time.  See queueCardSet() for the first.
+    ///
+    /// A slot is always emptied first, even one that was already empty, because the
+    /// firmware compares the presence pins against a snapshot it took last pass
+    /// (0x2747, ROM-ANALYSIS.md section 6.9).  Install over a slot that still reads
+    /// "present" and there is no edge to see: the machine goes on serving the old card's
+    /// tones from the new card's bytes.  Measured, not guessed -- 600 ms of it.
+    ///
+    /// Each wait is on the firmware's OWN cache of what it thinks is in the slot, not on
+    /// a frame count, because that is the thing that actually has to be true before the
+    /// next step is safe.  The timeout is only for a machine that is not answering at all
+    /// -- booting, or sitting in the service menu -- and it is generous: mounting takes
+    /// 320-330 ms of emulated time, nearly all of it reading the header and the tone
+    /// records through the borrowed voice-0 ROM port.
+    void tickCards(uint32_t coreFrames)
+    {
+        if (!m_romsLoaded)
+            return;
+
+        if (m_cardStep == CardStep::Idle)
+        {
+            CardJobState want = CardJobState::Ready;
+            if (!m_cardJobState.compare_exchange_strong(want, CardJobState::Running,
+                                                        std::memory_order_acquire))
+                return;
+            m_core.ejectCard(m_cardJobSlot);
+            m_cardStep = CardStep::EjectWait;
+            m_cardStepFrames = 0;
+            return;
+        }
+
+        m_cardStepFrames += coreFrames;
+        const uint8_t id = m_core.readMem(uint16_t(kCardIdAddr + m_cardJobSlot));
+
+        if (m_cardStep == CardStep::EjectWait)
+        {
+            // 0 is "nothing there".  0xFF would mean the firmware had looked at a card and
+            // refused it, which it cannot still be saying about a slot we just emptied.
+            if (id != 0x00 && m_cardStepFrames < kCardStepTimeout)
+                return;
+            if (!m_cardJobInstall)
+            {
+                finishCardJob();
+                return;
+            }
+            m_core.installCard(m_cardJobSlot, m_cardStage.data());
+            m_cardStep = CardStep::MountWait;
+            m_cardStepFrames = 0;
+            return;
+        }
+
+        // Done when the machine has an opinion either way: an ID, or 0xFF for a card it
+        // refused.  Nothing here treats the refusal as an error -- the UI shows what the
+        // firmware decided, which is the only verdict that counts.
+        if (id == 0x00 && m_cardStepFrames < kCardStepTimeout)
+            return;
+        finishCardJob();
+    }
+
+    void finishCardJob()
+    {
+        m_cardStep = CardStep::Idle;
+        m_cardJobState.store(CardJobState::Idle, std::memory_order_release);
+    }
+
+    /// A reboot is about to happen, so finish any card change now rather than half way.
+    /// Nothing is lost by hurrying: the machine that comes up runs the same poller with
+    /// its "everything is newly inserted" flag set (0x45DE), so it will find whatever is
+    /// in the slots without being told.
+    void settleCardJob()
+    {
+        CardJobState want = CardJobState::Ready;
+        if (m_cardStep == CardStep::Idle
+                && !m_cardJobState.compare_exchange_strong(want, CardJobState::Running,
+                                                           std::memory_order_acquire))
+            return;
+        if (m_cardJobInstall)
+            m_core.installCard(m_cardJobSlot, m_cardStage.data());
+        else
+            m_core.ejectCard(m_cardJobSlot);
+        finishCardJob();
+    }
+
     void tickReboot(uint32_t coreFrames)
     {
         const int want = m_rebootRequest.exchange(kRebootNone, std::memory_order_relaxed);
@@ -1805,6 +2020,10 @@ private:
             m_toneRequest.store(-1, std::memory_order_relaxed);
             m_diveBusy = false;
             m_diveJobReady.store(false, std::memory_order_relaxed);
+            // The exception to "their requests go too": a card change is about the
+            // SLOTS, not about the machine that was reading them, and the slots survive
+            // a reboot exactly as they do on the bench.
+            settleCardJob();
             m_nameWritePending.store(false, std::memory_order_relaxed);
             m_diveWrTail.store(m_diveWrHead.load(std::memory_order_acquire),
                                std::memory_order_release);
@@ -2155,24 +2374,15 @@ private:
                       "image the machine can address.", slot, path.c_str(), img.size());
             return false;
         }
-        // What the card calls itself, from its own header: "SN-U110-08" and the like sit
-        // at offset 0x10 of the dump as plain text.  Only ever shown, never matched
-        // against anything -- a card somebody wrote themselves may say whatever it likes,
-        // and falls back to its catalogue number.
-        std::string label;
-        if (img.size() > 0x20)
-            for (size_t i = 0x10; i < 0x20; i ++)
-            {
-                const uint8_t c = img[i];
-                if (c < 0x20 || c >= 0x7f)
-                    break;
-                label.push_back(char(c));
-            }
-        while (!label.empty() && label.back() == ' ')
-            label.pop_back();
-
-        m_cards[slot] = MountedCard { true, number, path,
-                                      voltaire::Sha256::of(img.data(), img.size()), label };
+        // The image names itself, and that beats the filename.  `number` is only what the
+        // name suggested; a dump carries its catalogue ID at +0x20 and its own text at
+        // +0x10, and that is what the machine reads too.  A file whose header does not
+        // check out keeps the filename's number -- it is going to be refused anyway, and
+        // saying which card it was MEANT to be is more use in a session file than 0.
+        const CardIdent id = identifyCard(img.data(), img.size());
+        m_cards[slot] = MountedCard { true, id.valid ? id.number : number, path,
+                                      voltaire::Sha256::of(img.data(), img.size()),
+                                      id.label };
         return true;
     }
 
@@ -2202,6 +2412,140 @@ private:
                 slot ++;
             }
         }
+    }
+
+    // ---- changing a card while the machine plays ------------------------------------
+    //
+    // Two halves, because the work is two very different costs.  Everything expensive
+    // happens HERE, on whatever thread the UI's request arrived on: opening the file,
+    // reading half a megabyte, descrambling it into the staging buffer.  What is left for
+    // run() is a memcpy and a bit.
+    //
+    // And it cannot be one act even there, because the firmware is edge triggered against
+    // its own snapshot of the presence pins: replacing a card means eject, wait for the
+    // machine to notice, then install.  Waiting is what tickCards() is for.
+    //
+    // "<slot> <path>", or "<slot> -" to empty the slot.  The path goes last and is taken
+    // to the end of the line, so it may contain spaces.
+    void queueCardSet(const char *value)
+    {
+        char *end = nullptr;
+        const long slot = std::strtol(value, &end, 10);
+        if (end == value || slot < 0 || slot >= long(voltaire::kNumCardSlots))
+            return;
+        while (*end == ' ')
+            end ++;
+        std::string path(end);
+        while (!path.empty() && (path.back() == '\n' || path.back() == ' '))
+            path.pop_back();
+        if (path.empty())
+            return;
+        const bool eject = path == "-";
+
+        // One change at a time.  They come from a person clicking, so a second one while
+        // the first is still in the machine means the person is ahead of a state machine
+        // that takes about a third of a second -- say so and drop it, rather than queue
+        // work against a slot whose contents are about to change anyway.
+        CardJobState expected = CardJobState::Idle;
+        if (!m_cardJobState.compare_exchange_strong(expected, CardJobState::Filling,
+                                                    std::memory_order_acq_rel))
+        {
+            d_stderr2("Voltaire 110: still changing a card; slot %ld ignored.", slot);
+            return;
+        }
+
+        if (!eject)
+        {
+            const std::vector<uint8_t> img = readFile(path);
+            if (img.empty())
+            {
+                d_stderr2("Voltaire 110: card slot %ld: cannot read %s",
+                          slot, path.c_str());
+                m_cardJobState.store(CardJobState::Idle, std::memory_order_release);
+                return;
+            }
+            if (voltaire::U110Core::prepareCard(img.data(), img.size(), m_cardStage)
+                    != voltaire::LoadResult::Ok)
+            {
+                d_stderr2("Voltaire 110: card slot %ld: %s is %zu bytes, which is not a "
+                          "card image the machine can address.",
+                          slot, path.c_str(), img.size());
+                m_cardJobState.store(CardJobState::Idle, std::memory_order_release);
+                return;
+            }
+
+            // The bookkeeping is updated HERE and not when the machine accepts it,
+            // because what a session records is which IMAGE is in the slot, and that is
+            // true whatever the firmware makes of it.  A card the machine refuses is
+            // still the card somebody put in, and it should come back in the same slot
+            // and be refused again rather than quietly vanish from the project.
+            const CardIdent id = identifyCard(img.data(), img.size());
+            unsigned number = id.number;
+            if (!id.valid)
+            {
+                cardNumberFromName(baseName(path), number);
+                d_stderr2("Voltaire 110: card slot %ld: %s has no U-110 card header. "
+                          "The machine will show \"Illegal CARD\".",
+                          slot, baseName(path).c_str());
+            }
+            m_cards[slot] = MountedCard { true, number, path,
+                                          voltaire::Sha256::of(img.data(), img.size()),
+                                          id.label };
+        }
+        else
+        {
+            m_cards[slot] = MountedCard();
+        }
+
+        m_cardJobSlot = unsigned(slot);
+        m_cardJobInstall = !eject;
+        m_cardJobState.store(CardJobState::Ready, std::memory_order_release);
+
+        // The list the UI is showing has just gone stale in a way only this side knows
+        // about, so refresh it without waiting to be asked.
+        m_cardListOut = composeCardList();
+        m_cardListPending.store(true, std::memory_order_release);
+    }
+
+    /// What the cartridge page needs: every image on the search path, and what is in each
+    /// slot.  One line per record, marker first, TABS between the fields that may contain
+    /// spaces -- a label like "SN-U110-09 0.27" and a path both can:
+    ///
+    ///     A <number>\t<label>\t<path>              an image that could be mounted
+    ///     S <slot> <number>\t<label>\t<path>       what is in a slot now
+    ///
+    /// The firmware's VERDICT on each slot is deliberately not here.  It changes without
+    /// anybody asking -- a card is mounted a third of a second after it goes in, and may
+    /// be refused -- so it belongs on the channel that carries live state, which is the
+    /// panel blob's card_id[].  This list changes only when somebody changes it.
+    ///
+    /// Composed off the audio thread, always: it opens directories and builds a string.
+    std::string composeCardList() const
+    {
+        std::string out;
+        char line[1200];
+
+        for (const CardFile &c : scanForCards())
+        {
+            // Only the header is read, not the half megabyte behind it.
+            const std::vector<uint8_t> head = readFileHead(c.path, 0x21);
+            const CardIdent id = identifyCard(head.data(), head.size());
+            std::snprintf(line, sizeof(line), "A %u\t%s\t%s\n",
+                          id.valid ? id.number : c.number,
+                          id.label.empty() ? "" : id.label.c_str(), c.path.c_str());
+            out += line;
+        }
+
+        for (unsigned i = 0; i < voltaire::kNumCardSlots; i ++)
+        {
+            if (!m_cards[i].present)
+                continue;
+            std::snprintf(line, sizeof(line), "S %u %u\t%s\t%s\n",
+                          i, m_cards[i].number, m_cards[i].label.c_str(),
+                          m_cards[i].path.c_str());
+            out += line;
+        }
+        return out;
     }
 
     /// Where a saved session's card image lives NOW.  Sessions travel between machines and
@@ -2456,6 +2800,10 @@ private:
 
         loadCards();
 
+        // The staging buffer for later card changes.  Allocated here, once, so that the
+        // only thing a change costs the audio thread is the memcpy out of it.
+        m_cardStage.resize(voltaire::kCardBytes);
+
         m_core.reset();
         m_romsLoaded = true;
         m_diagStatus = "ok";
@@ -2649,6 +2997,32 @@ private:
     float m_holdDb[2]  = { kMeterFloorDb, kMeterFloorDb };
     uint32_t m_holdDwell[2] = { 0, 0 };     ///< host frames left before the marker falls
     MountedCard m_cards[voltaire::kNumCardSlots];
+
+    // ---- a card change in flight.
+    //
+    // m_cards[] above stays owned by the thread that takes the request, so that a host
+    // saving the session never reads a std::string another thread is writing.  What
+    // crosses to the audio thread is this: a slot number, a flag, and half a megabyte of
+    // already-descrambled image.
+    enum class CardJobState : int { Idle, Filling, Ready, Running };
+    enum class CardStep : int { Idle, EjectWait, MountWait };
+
+    /// Allocated once, at construction.  Handing the audio thread a std::vector to take
+    /// ownership of would mean freeing the old one somewhere, and there is nowhere safe.
+    std::vector<uint8_t> m_cardStage;
+    std::atomic<CardJobState> m_cardJobState { CardJobState::Idle };
+    unsigned m_cardJobSlot = 0;
+    bool     m_cardJobInstall = false;
+
+    CardStep m_cardStep = CardStep::Idle;
+    uint32_t m_cardStepFrames = 0;      ///< core frames spent waiting on this step
+
+    /// Two seconds of emulated time, against a mount that takes a third of one.  This is
+    /// not a timing assumption, it is a way out for a machine that is not answering.
+    static constexpr uint32_t kCardStepTimeout = uint32_t(2.0 * voltaire::kCoreSampleRate);
+
+    std::string m_cardListOut;              ///< composed off the audio thread
+    std::atomic<bool> m_cardListPending { false };
     std::vector<uint8_t> m_savedNvram;
     std::string m_pgmSha, m_pgmName, m_pgmFound;
 

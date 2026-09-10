@@ -168,6 +168,8 @@ dpf/utils/lv2_ttl_generator:
 # host's rate, MIDI as LV2 atoms, and the generated TTL's port layout.
 selftest: all
 	@gcc -O2 -o build/lv2_selftest tools/lv2_selftest.c -ldl $$(pkg-config --cflags lv2)
+	@gcc -O2 -DBLOCK=32 -o build/lv2_selftest_small tools/lv2_selftest.c -ldl \
+		$$(pkg-config --cflags lv2)
 	@U110_DATA_DIR=$${U110_DATA_DIR:-$(CURDIR)/..} build/lv2_selftest \
 		bin/Voltaire110.lv2/Voltaire110_dsp.so \
 		"https://github.com/eliggett/emu110/voltaire110" build/lv2_selftest.wav
@@ -201,6 +203,21 @@ selftest: all
 		bin/$(NAME).lv2/$(NAME)_dsp.so \
 		"https://github.com/eliggett/emu110/voltaire110" build/lv2_meter.wav 0 meter \
 		2>&1 | grep -E "^meter:"
+	@echo
+	@U110_DATA_DIR=$${U110_DATA_DIR:-$(CURDIR)/..} build/lv2_selftest \
+		bin/$(NAME).lv2/$(NAME)_dsp.so \
+		"https://github.com/eliggett/emu110/voltaire110" build/lv2_cards.wav 0 cards \
+		2>&1 | grep -E "^cards:"
+	@echo
+	@# Again at 32 frames a block.  Not a slower repeat: a card change is a sequence
+	@# carried out one block at a time, and the gap the firmware has to notice a slot
+	@# emptying is one block long.  At 256 frames a version that never waited for the
+	@# machine to acknowledge the eject passed everything here; at 32 it fails, which is
+	@# the buffer size somebody tracking live does their work at.
+	@U110_DATA_DIR=$${U110_DATA_DIR:-$(CURDIR)/..} build/lv2_selftest_small \
+		bin/$(NAME).lv2/$(NAME)_dsp.so \
+		"https://github.com/eliggett/emu110/voltaire110" build/lv2_cards32.wav 0 cards \
+		2>&1 | grep -E "^cards:" | sed 's/^cards:/cards32:/'
 	@echo
 	@$(MAKE) --no-print-directory presetcheck
 	@echo

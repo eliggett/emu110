@@ -31,7 +31,12 @@ static void rt_arm(int on)   { if (rt_audit_set_active) rt_audit_set_active(on);
 #include <string.h>
 
 #define RATE     48000.0
+/* The host's buffer size.  Overridable because it is not cosmetic: everything the plugin
+ * does between blocks happens at this granularity, so a small buffer is a different test
+ * and not merely a slower one.  See the `cards` pass, which is run at both. */
+#ifndef BLOCK
 #define BLOCK    256
+#endif
 #define SECONDS  20.0
 #define ATOM_CAP 4096
 
@@ -49,13 +54,36 @@ static const struct { int len; unsigned char b[16]; } kFxSetup[] = {
 /* The panel, as the UI receives it: the plugin's PanelBlob, hex, inside a key/value
  * atom.  Decoding it here rather than scanning for a run of hex characters means the
  * test breaks LOUDLY if the struct grows, instead of quietly reading the wrong field. */
-#define PANEL_BYTES 124
+#define PANEL_BYTES 128
 #define PANEL_PART_MEDIA 100               /* six bytes, then six of tone, then six flags */
 #define PANEL_PART_TONE  106
+#define PANEL_CARD_ID    124               /* four: the FIRMWARE's verdict per card slot */
 static unsigned char g_panel[PANEL_BYTES];
 static char g_patches[8192];              /* the patch names, one per line */
 static char g_patchdump[512];             /* the active patch, as hex */
 static char g_tones[16384];               /* the tone list, "G media label" / "T name" */
+static char g_cardlist[8192];             /* "A num<tab>label<tab>path" / "S slot num..." */
+static char g_cardpath[2][1024];          /* two images to play with, whatever is here */
+static unsigned g_cardnum[2];
+static int  g_ncards = 0;
+static int  g_cardstage[5];               /* one per check, filled as the run goes */
+static int  g_cardgroups[2];              /* tone groups with the card in, and after */
+
+/* How many media the machine can currently offer tones from: the internal ROM is always
+ * one, and each mounted card adds another. */
+static int count_tone_groups(void)
+{
+    int n = 0;
+    const char *p = g_tones;
+    while (*p) {
+        const char *nl;
+        if (p[0] == 'G') n++;
+        nl = strchr(p, '\n');
+        if (!nl) break;
+        p = nl + 1;
+    }
+    return n;
+}
 
 static int hexbyte(const char *p)
 {
@@ -122,6 +150,8 @@ static void absorb_events_out(void *ev_out, uint32_t urid_midi,
             strcpy(g_patches, val);
         else if (strcmp(key, "tones") == 0 && strlen(val) < sizeof(g_tones))
             strcpy(g_tones, val);
+        else if (strcmp(key, "cardlist") == 0 && strlen(val) < sizeof(g_cardlist))
+            strcpy(g_cardlist, val);
         else if (strcmp(key, "patchdump") == 0 && strlen(val) < sizeof(g_patchdump))
             strcpy(g_patchdump, val);
     }
@@ -366,6 +396,7 @@ int main(int argc, char **argv)
     const int want_write_test = (argc > 5) && strcmp(argv[5], "write") == 0;
     const int want_load_test  = (argc > 5) && strcmp(argv[5], "load") == 0;
     const int want_meter_test = (argc > 5) && strcmp(argv[5], "meter") == 0;
+    const int want_card_test  = (argc > 5) && strcmp(argv[5], "cards") == 0;
     int patch_checks = 0, patch_pass = 0;
 
     /* The stereo meter and its peak-hold marker, as OUTPUT control ports.  A host reads
@@ -434,7 +465,7 @@ int main(int argc, char **argv)
          * machine's own menus, and this proves the whole loop from a host control port
          * through to the LCD. */
         btn[1] = (!want_fx && !want_patch_test && !want_tone_test && !want_write_test
-                  && !want_load_test && !want_meter_test
+                  && !want_load_test && !want_meter_test && !want_card_test
                   && done >= (long)(7.0 * RATE) && done < (long)(8.0 * RATE)) ? 1.0f : 0.0f;
 
         if (want_fx) {
@@ -513,6 +544,137 @@ int main(int argc, char **argv)
                 patch_pass += (g_panel[PANEL_PART_MEDIA] == 0 && g_panel[PANEL_PART_TONE] == 40);
                 printf("tone: part 1 still on media %u tone %u\n",
                        g_panel[PANEL_PART_MEDIA], g_panel[PANEL_PART_TONE]);
+            }
+        }
+
+        /* Changing cards the way a user does: a path per slot, and then TIME.  Every
+         * check below is on the FIRMWARE's own cache of what it thinks is in each slot,
+         * which the panel blob carries, because that is the only opinion that decides
+         * whether a card's tones can be played.  The plugin's own bookkeeping agreeing
+         * with itself would prove nothing.
+         *
+         * A note is sounding from 12 s to 16 s, which covers the swap and the removal on
+         * purpose: those are the cases that were broken until the CPU's PORT1 model was
+         * fixed, and a test that only ever swapped cards in silence would not have
+         * noticed. */
+        if (want_card_test)
+        {
+            const double t = (double)done / RATE, dt = (double)BLOCK / RATE;
+            const int at = (t <= 8.0 && 8.0 < t + dt) ? 0
+                         : (t <= 8.6 && 8.6 < t + dt) ? 1
+                         : (t <= 9.2 && 9.2 < t + dt) ? 2
+                         : (t <= 9.8 && 9.8 < t + dt) ? 3
+                         : (t <= 10.4 && 10.4 < t + dt) ? 4
+                         : (t <= 11.5 && 11.5 < t + dt) ? 5
+                         : (t <= 12.5 && 12.5 < t + dt) ? 6
+                         : (t <= 13.5 && 13.5 < t + dt) ? 7
+                         : (t <= 14.0 && 14.0 < t + dt) ? 8
+                         : (t <= 15.0 && 15.0 < t + dt) ? 9
+                         : (t <= 15.2 && 15.2 < t + dt) ? 10
+                         : (t <= 15.4 && 15.4 < t + dt) ? 11
+                         : (t <= 15.6 && 15.6 < t + dt) ? 12
+                         : (t <= 16.6 && 16.6 < t + dt) ? 13 : -1;
+            char req[1100];
+            int i;
+            switch (at)
+            {
+            case 0:
+                put_keyvalue(seq, urid_kv, "cardscan", "1");
+                break;
+            case 1:
+                /* Whatever this machine actually has.  Asking the plugin what it can
+                 * offer keeps the test off any particular filename.
+                 *
+                 * Guarded because the window test above can match two consecutive blocks
+                 * when the buffer is small: t advances by (done+BLOCK)/RATE, which is not
+                 * bit-for-bit t + BLOCK/RATE, so the intervals can overlap by an ulp. */
+                if (g_ncards != 0) break;
+                for (const char *p = g_cardlist; *p; ) {
+                    const char *nl = strchr(p, '\n');
+                    unsigned num = 0;
+                    const char *tab = strchr(p, '\t');
+                    if (p[0] == 'A' && tab && (!nl || tab < nl)) {
+                        const char *last = strchr(tab + 1, '\t');
+                        num = (unsigned)strtoul(p + 2, NULL, 10);
+                        if (last && (!nl || last < nl)) {
+                            const size_t n = nl ? (size_t)(nl - (last + 1))
+                                                : strlen(last + 1);
+                            if (g_ncards == 0
+                                    || (g_ncards == 1 && num != g_cardnum[0])) {
+                                if (n < sizeof(g_cardpath[0])) {
+                                    memcpy(g_cardpath[g_ncards], last + 1, n);
+                                    g_cardpath[g_ncards][n] = 0;
+                                    g_cardnum[g_ncards] = num;
+                                    g_ncards++;
+                                }
+                            }
+                        }
+                    }
+                    if (!nl || g_ncards >= 2) break;
+                    p = nl + 1;
+                }
+                printf("cards: the plugin offers %d usable image%s", g_ncards,
+                       g_ncards == 1 ? "" : "s");
+                for (i = 0; i < g_ncards; i++) printf("%s %02u", i ? "," : ":", g_cardnum[i]);
+                printf("\n");
+                /* fall through to the ejects */
+            case 2: case 3: case 4:
+                snprintf(req, sizeof(req), "%d -", at - 1);
+                put_keyvalue(seq, urid_kv, "cardset", req);
+                break;
+            case 5:
+                g_cardstage[0] = (g_panel[PANEL_CARD_ID] == 0 && g_panel[PANEL_CARD_ID+1] == 0
+                               && g_panel[PANEL_CARD_ID+2] == 0 && g_panel[PANEL_CARD_ID+3] == 0);
+                printf("cards: with every slot emptied the machine reads %02X %02X %02X %02X\n",
+                       g_panel[PANEL_CARD_ID], g_panel[PANEL_CARD_ID+1],
+                       g_panel[PANEL_CARD_ID+2], g_panel[PANEL_CARD_ID+3]);
+                break;
+            case 6:
+                if (g_ncards >= 1) {
+                    snprintf(req, sizeof(req), "2 %s", g_cardpath[0]);
+                    put_keyvalue(seq, urid_kv, "cardset", req);
+                }
+                break;
+            case 7:
+                g_cardstage[1] = (g_ncards >= 1 && g_panel[PANEL_CARD_ID+2] == g_cardnum[0]);
+                g_cardgroups[0] = count_tone_groups();
+                printf("cards: slot 3 <- card %02u, machine reads %02X, %d tone group(s)\n",
+                       g_ncards ? g_cardnum[0] : 0, g_panel[PANEL_CARD_ID+2],
+                       g_cardgroups[0]);
+                break;
+            case 8:
+                /* The swap, with NO eject in between.  The plugin has to take the card
+                 * out, wait for the firmware to notice, and only then put the other one
+                 * in; do it in one step and the machine goes on serving the first card's
+                 * ID from the second card's bytes. */
+                if (g_ncards >= 2) {
+                    snprintf(req, sizeof(req), "2 %s", g_cardpath[1]);
+                    put_keyvalue(seq, urid_kv, "cardset", req);
+                }
+                break;
+            case 9:
+                g_cardstage[2] = (g_ncards >= 2 && g_panel[PANEL_CARD_ID+2] == g_cardnum[1]);
+                printf("cards: swapped to card %02u without ejecting first, machine reads %02X\n",
+                       g_ncards >= 2 ? g_cardnum[1] : 0, g_panel[PANEL_CARD_ID+2]);
+                break;
+            case 10:
+                put_keyvalue(seq, urid_kv, "cardset", "2 /nonexistent/not-a-card.bin");
+                break;
+            case 11:
+                g_cardstage[3] = (g_ncards >= 2 && g_panel[PANEL_CARD_ID+2] == g_cardnum[1]);
+                printf("cards: after a path that does not exist, slot 3 still reads %02X\n",
+                       g_panel[PANEL_CARD_ID+2]);
+                break;
+            case 12:
+                put_keyvalue(seq, urid_kv, "cardset", "2 -");
+                break;
+            case 13:
+                g_cardstage[4] = (g_panel[PANEL_CARD_ID+2] == 0);
+                g_cardgroups[1] = count_tone_groups();
+                printf("cards: pulled while a note was sounding, machine reads %02X, "
+                       "%d tone group(s)\n", g_panel[PANEL_CARD_ID+2], g_cardgroups[1]);
+                break;
+            default: break;
             }
         }
 
@@ -974,6 +1136,42 @@ int main(int argc, char **argv)
         patch_pass += (strcmp(name64, "Library Pt") == 0 && strcmp(name1, "Ac.Piano") == 0);
         printf("load: %d of %d checks passed%s\n", patch_pass, patch_checks,
                patch_pass == patch_checks ? "" : "   <-- FAILED");
+    }
+
+    if (want_card_test)
+    {
+        int cc = 0, cp = 0;
+        if (g_ncards < 2) {
+            printf("cards: fewer than two card images on the search path -- nothing to "
+                   "swap between, so this proves nothing.  Put two SN-U110 dumps in the "
+                   "ROM directory.\n");
+        }
+        cc++; cp += (g_ncards >= 2);
+        if (g_ncards < 2) printf("cards: the plugin offered fewer than two images\n");
+
+        cc++; cp += g_cardstage[0];
+        if (!g_cardstage[0]) printf("cards: emptying every slot did not clear the "
+                                    "firmware's cache\n");
+        cc++; cp += g_cardstage[1];
+        if (!g_cardstage[1]) printf("cards: the machine did not mount the card that was "
+                                    "put in slot 3\n");
+        cc++; cp += g_cardstage[2];
+        if (!g_cardstage[2]) printf("cards: after a swap the machine is still serving the "
+                                    "OLD card's ID -- the eject/settle/insert sequence is "
+                                    "not working\n");
+        cc++; cp += g_cardstage[3];
+        if (!g_cardstage[3]) printf("cards: a request naming a file that does not exist "
+                                    "changed the slot, or wedged the state machine\n");
+        cc++; cp += g_cardstage[4];
+        if (!g_cardstage[4]) printf("cards: removing a card while a note sounded was not "
+                                    "noticed\n");
+        cc++; cp += (g_cardgroups[0] == 2 && g_cardgroups[1] == 1);
+        if (!(g_cardgroups[0] == 2 && g_cardgroups[1] == 1))
+            printf("cards: the tone list did not follow the card in and out "
+                   "(%d groups with it, %d without)\n", g_cardgroups[0], g_cardgroups[1]);
+
+        printf("cards: %d of %d checks passed%s\n", cp, cc,
+               cp == cc ? "" : "   <-- FAILED");
     }
 
     if (want_meter_test)

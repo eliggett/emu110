@@ -722,18 +722,9 @@ LoadResult U110Core::loadWaveRom(unsigned bank, const uint8_t *data, size_t len)
 	return LoadResult::Ok;
 }
 
-LoadResult U110Core::loadCard(unsigned slot, const uint8_t *data, size_t len)
+LoadResult U110Core::prepareCard(const uint8_t *data, size_t len, std::vector<uint8_t> &out)
 {
-	if (slot >= kNumCardSlots)
-		return LoadResult::NoSuchSlot;
-	u8 *const dst = &m_impl->pcmrom[slot * CARD_STRIDE + CARD_OFFSET];
-	if (!data)
-	{
-		std::fill_n(dst, CARD_SIZE, u8(0xff));
-		m_impl->card_present |= 1 << slot;
-		return LoadResult::Ok;
-	}
-	if (len > CARD_SIZE)
+	if (!data || len == 0 || len > CARD_SIZE)
 		return LoadResult::WrongSize;
 
 	// Undersized dumps are mirrored up.  Address descrambling means this can only be done
@@ -748,8 +739,43 @@ LoadResult U110Core::loadCard(unsigned slot, const uint8_t *data, size_t len)
 		for (size_t ofs = mirror; ofs < CARD_SIZE; ofs += mirror)
 			std::memcpy(image.data() + ofs, image.data(), mirror);
 	}
-	descramble_pcm(dst, image.data(), CARD_SIZE);
+	out.resize(CARD_SIZE);
+	descramble_pcm(out.data(), image.data(), CARD_SIZE);
+	return LoadResult::Ok;
+}
+
+void U110Core::installCard(unsigned slot, const uint8_t *prepared)
+{
+	if (slot >= kNumCardSlots || prepared == nullptr)
+		return;
+	std::memcpy(&m_impl->pcmrom[slot * CARD_STRIDE + CARD_OFFSET], prepared, CARD_SIZE);
 	m_impl->card_present &= ~(1 << slot);
+}
+
+void U110Core::ejectCard(unsigned slot)
+{
+	if (slot >= kNumCardSlots)
+		return;
+	// The presence bit is what the firmware acts on; the fill is hygiene, so that a slot
+	// nothing should be reading cannot be read as the card that used to be there.
+	std::fill_n(&m_impl->pcmrom[slot * CARD_STRIDE + CARD_OFFSET], CARD_SIZE, u8(0xff));
+	m_impl->card_present |= 1 << slot;
+}
+
+LoadResult U110Core::loadCard(unsigned slot, const uint8_t *data, size_t len)
+{
+	if (slot >= kNumCardSlots)
+		return LoadResult::NoSuchSlot;
+	if (!data)
+	{
+		ejectCard(slot);
+		return LoadResult::Ok;
+	}
+	std::vector<u8> prepared;
+	const LoadResult r = prepareCard(data, len, prepared);
+	if (r != LoadResult::Ok)
+		return r;
+	installCard(slot, prepared.data());
 	return LoadResult::Ok;
 }
 
