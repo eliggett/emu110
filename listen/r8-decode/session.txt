@@ -1,0 +1,25 @@
+Roland SN-R8 CARD DECODE (tools/r8_extract.py)     <- neither hardware nor a MAME render
+
+These are not recordings and not emulator output.  They are the sample data on a Roland
+SN-R8 PCM card, decoded straight out of the ROM image by tools/r8_extract.py: descramble,
+expand the 8-bit float, integrate the deltas, write at the engine's 32 kHz.  No envelope,
+no pitch shift, no output filter, peak-normalised per file.
+
+They exist to answer one question by ear -- does the U-110's decoder read R-8 data
+correctly? -- and the answer is yes.  See analysis/R8-CONVERSION.md.
+
+    sn-r8-10-dance/     SN-R8-10 "Dance", six of its twenty-six tones
+
+Each R-8 tone carries TWO sample blocks and the machine sounds both, so each tone gives
+three files:
+
+    NN_NAME_A.wav       block A alone -- the attack and body
+    NN_NAME_B.wav       block B alone -- the low end, where the tone has one
+    NN_NAME.wav         A + B, which is roughly what the R-8 makes
+
+04_909_S is the clearest illustration: A is the snare's noise at 5.3 kHz, B is the shell
+tone at 132 Hz, and only the sum is a snare drum.  12_909_T splits the same way, 1.2 kHz
+against 68 Hz.  13_909_CHH is noise in both blocks, as a hi-hat should be.  17_RVB_CLP has
+no B block at all.
+
+Source dumps live outside the repo, in ~/Downloads/roland_sn-u-stuff_for-elliott/ .

@@ -1,5 +1,15 @@
 # Roland R-8 Wave ROM / PCM Card Architecture
 
+> **Superseded by [`R8-CONVERSION.md`](R8-CONVERSION.md).** This document was written by
+> Gemini from a single card and never checked against the bytes. Its architecture is right
+> — shared MB87419/MB87420 silicon, bit-identical bus permutations, the same 8-bit float
+> sample encoding, the header template, the offset table, 48-byte records — and several of
+> its specifics are wrong, including every sample address in its §5 tone table, the reading
+> of the loop and end fields, and the claim that the two formats are structurally
+> incompatible. `R8-CONVERSION.md` §7 scores it item by item. **Do not build anything on
+> the numbers below**; kept because the errors are instructive and its correct half arrived
+> early and saved time.
+
 Subject file:
 - `SN-R8-10_Dance.bin` (524,288 bytes / 512 KB, Roland R-8 / R-8M Sound ROM Card SN-R8-10 "Dance", label: `"Swangin!"`)
 

@@ -1190,20 +1190,31 @@ Tone 1, `A.PIANO 1` (a V-MIX tone, i.e. two velocity-mixed partials):
 ```
  +00  41 2E 50 49 41 4E 4F 20 31 20     "A.PIANO 1 "   10-byte name
  +0A  03 00 40 40 00 01                 header params
- +10  1E 27 2E 34 3D 47 54 60 FF FF FF  partial 1: 8 ascending split points
- +1B  00 01 02 03 04 05 06 07 08                   9 sample indices
- +24  FF FF FF 7F 7F 64 40 00 38 7F 67 C0          level / envelope
+ +10  1E 27 2E 34 3D 47 54 60 FF FF FF  partial 1: 11 ascending split points
+ +1B  00 01 02 03 04 05 06 07 08 FF FF FF        12 sample indices
+ +27  7F 7F 64 40 00 38 7F 67 C0                 9 level / envelope bytes
  +30  1E 27 2E 34 3D 47 54 60 FF FF FF  partial 2: same shape
- +3B  09 0A 0B 0C 0D 0E 0F 10 11                   next 9 samples
- +44  FF FF FF 7F 7F 64 41 00 39 7F 67 C0
+ +3B  09 0A 0B 0C 0D 0E 0F 10 11 FF FF FF        next 12
+ +47  7F 7F 64 41 00 39 7F 67 C0
 ```
 
 The two 32-byte blocks at `+0x10` and `+0x30` are structurally identical — **two
 partials**, matching the manual's SINGLE / DUAL / DETUNE / V-MIX / V-SW tone types.
 `[C]` The ascending byte run `1E 27 2E 34 3D 47 54 60` reads as **key split points**
 (MIDI notes 30, 39, 46, 52, 61, 71, 84, 96) and the run that follows as the **sample
-index per zone** — a multisample keymap of up to nine zones per partial. That reading fits
-the data everywhere it has been spot-checked but has not been proven against playback.
+index per zone** — a multisample keymap.
+
+`[C]` **The widths are 11 splits and 12 zones per partial**, not the 8 and 9 an earlier
+revision recorded (see correction #34). 11 + 12 + 9 = 32 exactly, and 12 zones x 2 partials
+is the 24 sample slots per part the firmware reserves — `0xF0` = 240 = 24 x 10 bytes at
+work RAM `0x2A60`, and the `x12` loop at `0x8179`. `A.PIANO 1` hides the difference because
+it fills only 8 and 9 of them and pads the rest with `0xFF`; the drum tones do not, and
+`ROCK DRUMS` on SN-U110-10 uses all 11 and all 12.
+
+Zone selection, from the firmware's own routine: walk the splits and take the first one the
+note does not exceed; past every split, take the twelfth sample. A drum tone exploits that
+to split the keyboard between the two partials — see `R8-CONVERSION.md` §3.2, which needed
+this record laid out exactly in order to write one.
 
 ### 6.7 How a patch part selects a card tone
 
@@ -1749,6 +1760,8 @@ stress-tested and which have not.
 | 31 | "Voice volume (regs `06`/`07`) is a linear 16-bit multiplier" (MAME's `smp_data * chn.volume`) | **Wrong** — reg 07 is **logarithmic, 16 units per octave**, and the two bytes are independent fields | Found by disassembling the writer rather than fitting curves. The firmware builds the value at `0x69F0`-`0x6A59` and stores it with a single `st 44, 140c`, but `6A27: ldb 45, 42` loads the high byte from a **different register**: the low byte (reg 06) is a 7-bit level clamped to 1..0x7F, the high byte (reg 07) is a separate log-domain level. The scale comes from the firmware's own table at `0xAEC6`, which reads 143, 159, 175, 191, 207, 223, 239, 255 at indices 1, 2, 4, 8, 16, 32, 64, 128 — **every doubling of amplitude adds exactly 16**, so 16 units per octave = 0.3763 dB per unit. Notes use a **voice pair** whose two partials are layered by velocity (at velocity 40 the second partial's reg 07 is `0x30` against the first's `0xC2`) and sum. Read linearly a velocity sweep spanning **21.3 dB** on hardware collapsed to **5.3 dB**; decoded this way the emulator now spans **20.1 dB**, within **1.3 dB** of hardware at every measured velocity. Two lessons: velocity touches **only** regs 06/07 — sample address, rate, loop and end are byte-identical, so measuring what does *not* change localised the field immediately; and after three failed attempts to fit a curve through three data points, **disassembling the code that writes the register took minutes and gave the exact scale**, the same shortcut that was available (and missed) for the `0x1F00` routing table. `[I]` The role of the low byte, and a residual ~1.3 dB, remain open. |
 | 32 | The flute's 443 Hz reading is "because that patch has chorus" (§ Tuning) | **Wrong** — it is the **tone's own detune**; that patch has no effect at all | Reached for the effect because the patch *stores* chorus parameters, without checking whether anything reads them. Nothing does: the enable bits live in a config byte selected by the OUTPUT MODE (`0xA726 + 8*index`, bit 1 tremolo, bit 3 chorus), and every one of the 64 factory patches picks a mode whose bits are clear. **Stored settings are not applied settings** — the same shape of error as #29's register that did not exist. The recordings were the tell and I had them: mono to a correlation of 1.00000, which is what mode 22 `M31` "centred" means, and a chorus that produced a doublet would have had to be doing so in mono. See `analysis/EFFECTS.md`. |
 | 33 | "`PORT1` bit 4 is set/cleared around card operations" `[I]` (§2 register table, and the driver's own comment) | **Wrong** — it is a **tone-generator busy flag** | The three writes were found by grepping for writes to the port and reading their *addresses* against the card sections; two of the three sit in voice code, which one screen of disassembly around each would have shown. Same shortcut missed as #29 and #31: **disassemble the code that writes the register.** What makes this one worth a row is that the parked `[I]` turned out to be load-bearing. All three writes are read-modify-write instructions on the port whose low nibble is the card-presence pins, and MAME's `port1_r()` returned `in & latch`, so from the first note played the presence bits were latched low and card *removal* stopped being detected. The defect was invisible for as long as nobody swapped a card while a note sounded — which is to say, for as long as nobody used the feature §6.9 documents. An open question is not the same as a harmless one. |
+| 34 | A tone record's partial holds "**8** key split points" and "**9** sample indices" (§6.6 record structure) | **Wrong** — it is **11 and 12** | The widths were read off `A.PIANO 1`, which fills 8 splits and 9 indices and pads the rest with `0xFF` — so the padding got counted as structure, and the arithmetic that would have caught it was never done: 8 + 9 + level/envelope has to reach 32, and only 11 + 12 + 9 does. Two independent checks were sitting in reach the whole time. `ROCK DRUMS` on SN-U110-10 uses **all** 11 and all 12, so any drum tone would have shown it; and the firmware reserves `0xF0` = 240 = 24 x 10 bytes per part at `0x2A60` with an `x12` loop at `0x8179`, i.e. 12 zones per partial, which §6.6 quotes two paragraphs earlier without noticing it contradicts the widths above it. **A record layout is arithmetic, not a reading** — the fields must sum to the stride, and a padded example cannot establish a width. It surfaced only when writing a card rather than reading one (`R8-CONVERSION.md`), because generating a structure exercises every field while parsing a familiar example exercises the ones you already believe in. |
+
 
 Claims that **survived** contact with the schematic and service notes, having originally
 been derived from the ROM image alone: the MCS-96 identification, the `0x2000-0x20FF` ROM

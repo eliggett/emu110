@@ -6,6 +6,7 @@ to get wrong and most expensive to get wrong:
     hardware/     a real Roland U-110, recorded through an interface
     emulated/     MAME renders
     comparisons/  Audacity projects and composites that hold both at once
+    r8-decode/    neither: sample data read straight out of a Roland SN-R8 card
 
 Before this split the two sat side by side under names like `env` and `env-dh`, and only
 the first line of each `session.txt` said which was which. That is a trap — an emulator
