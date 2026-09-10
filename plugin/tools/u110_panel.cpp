@@ -13,6 +13,8 @@
 //   lcd                  print the two LCD lines
 //   peek ADDR LEN        hex dump
 //   poke ADDR VAL        one byte
+//   card SLOT FILE       put a card image in a slot, as inserting one does
+//   eject SLOT           take it out again
 //   midi HEX...          bytes onto the wire
 //   dt1 A1 A2 A3 V       one Roland DT1 parameter write, checksum computed here
 //   copy DST SRC LEN     what the plugin would do: lift memory into a slot
@@ -247,6 +249,41 @@ int main(int argc, char **argv)
         {
             core.writeMem(uint16_t(std::strtoul(a1, nullptr, 0)),
                           uint8_t(std::strtoul(a2, nullptr, 0)));
+        }
+        // The card commands do exactly what a hand does: change what the slot contains
+        // WHILE THE MACHINE IS RUNNING, and then let the firmware find out for itself.
+        // Nothing here pokes RAM or tells the firmware anything -- the only thing that
+        // crosses over is the presence bit on PORT1, which is the one wire the hardware
+        // has for this.  A relative FILE is resolved against --roms.
+        else if (c == "card")
+        {
+            const unsigned slot = unsigned(std::strtoul(a1, nullptr, 0));
+            const std::string file = a2[0] == '/' ? std::string(a2) : roms + "/" + a2;
+            const std::vector<uint8_t> d = read_file(file);
+            if (d.empty())
+            { std::printf("  FAIL  cannot read %s\n", file.c_str()); failures ++; }
+            else if (core.loadCard(slot, d.data(), d.size()) != voltaire::LoadResult::Ok)
+            { std::printf("  FAIL  %s is not a card image\n", file.c_str()); failures ++; }
+            else
+                std::printf("  ..    slot %u <- %s (%zu bytes)\n", slot,
+                            file.c_str(), d.size());
+        }
+        else if (c == "cards")
+        {
+            voltaire::PanelState st;
+            core.snapshot(st);
+            std::printf("  ..    core says present: %X   firmware ids: %02X %02X %02X %02X"
+                        "   PORT1 snapshot 2747: %02X\n",
+                        st.card_present,
+                        core.readMem(0x2743), core.readMem(0x2744),
+                        core.readMem(0x2745), core.readMem(0x2746),
+                        core.readMem(0x2747));
+        }
+        else if (c == "eject")
+        {
+            const unsigned slot = unsigned(std::strtoul(a1, nullptr, 0));
+            core.loadCard(slot, nullptr, 0);
+            std::printf("  ..    slot %u ejected\n", slot);
         }
         else if (c == "midi")
         {
