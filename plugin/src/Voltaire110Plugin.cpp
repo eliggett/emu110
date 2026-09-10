@@ -1949,6 +1949,11 @@ private:
                                                         std::memory_order_acquire))
                 return;
             m_core.ejectCard(m_cardJobSlot);
+            // A slot losing the card that is about to go in elsewhere empties in the same
+            // breath: the firmware's poller walks all four slots on one pass, so both
+            // edges cost the same single wait.
+            if (m_cardJobDup >= 0)
+                m_core.ejectCard(unsigned(m_cardJobDup));
             m_cardStep = CardStep::EjectWait;
             m_cardStepFrames = 0;
             return;
@@ -1961,10 +1966,19 @@ private:
         {
             // 0 is "nothing there".  0xFF would mean the firmware had looked at a card and
             // refused it, which it cannot still be saying about a slot we just emptied.
-            if (id != 0x00 && m_cardStepFrames < kCardStepTimeout)
+            const uint8_t dupId = m_cardJobDup < 0 ? 0x00
+                    : m_core.readMem(uint16_t(kCardIdAddr + m_cardJobDup));
+            if ((id != 0x00 || dupId != 0x00) && m_cardStepFrames < kCardStepTimeout)
                 return;
+
+            // Now, and not a moment earlier: the machine has let go of these slots, which
+            // means it has re-resolved the parts that used them and stopped their voices.
+            // Until it has, something may still be reading the bytes.
+            if (m_cardJobDup >= 0)
+                m_core.clearCardData(unsigned(m_cardJobDup));
             if (!m_cardJobInstall)
             {
+                m_core.clearCardData(m_cardJobSlot);
                 finishCardJob();
                 return;
             }
@@ -1999,10 +2013,20 @@ private:
                 && !m_cardJobState.compare_exchange_strong(want, CardJobState::Running,
                                                            std::memory_order_acquire))
             return;
+        if (m_cardJobDup >= 0)
+        {
+            m_core.ejectCard(unsigned(m_cardJobDup));
+            m_core.clearCardData(unsigned(m_cardJobDup));
+        }
         if (m_cardJobInstall)
+        {
             m_core.installCard(m_cardJobSlot, m_cardStage.data());
+        }
         else
+        {
             m_core.ejectCard(m_cardJobSlot);
+            m_core.clearCardData(m_cardJobSlot);
+        }
         finishCardJob();
     }
 
@@ -2441,6 +2465,7 @@ private:
         if (path.empty())
             return;
         const bool eject = path == "-";
+        int dup = -1;               ///< another slot holding this same card, to be emptied
 
         // One change at a time.  They come from a person clicking, so a second one while
         // the first is still in the machine means the person is ahead of a state machine
@@ -2491,6 +2516,22 @@ private:
             m_cards[slot] = MountedCard { true, number, path,
                                           voltaire::Sha256::of(img.data(), img.size()),
                                           id.label };
+
+            // One card, one slot.  A patch names a card by CATALOGUE ID and the firmware
+            // returns the FIRST slot holding it (0x7D40, ROM-ANALYSIS.md section 6.7), so
+            // the same card in two slots leaves the second one unreachable -- a slot that
+            // looks full and can never be played from.  The new slot wins and the old one
+            // is emptied, which is also what a person with one physical card would have
+            // to do.
+            for (unsigned i = 0; i < voltaire::kNumCardSlots; i ++)
+                if (i != unsigned(slot) && m_cards[i].present && m_cards[i].number == number)
+                {
+                    d_stdout("Voltaire 110: card %02u moved from slot %u to slot %ld.",
+                             number, i, slot);
+                    m_cards[i] = MountedCard();
+                    dup = int(i);
+                    break;
+                }
         }
         else
         {
@@ -2498,6 +2539,7 @@ private:
         }
 
         m_cardJobSlot = unsigned(slot);
+        m_cardJobDup = dup;
         m_cardJobInstall = !eject;
         m_cardJobState.store(CardJobState::Ready, std::memory_order_release);
 
@@ -3012,6 +3054,7 @@ private:
     std::vector<uint8_t> m_cardStage;
     std::atomic<CardJobState> m_cardJobState { CardJobState::Idle };
     unsigned m_cardJobSlot = 0;
+    int      m_cardJobDup = -1;         ///< a slot to empty alongside, or -1
     bool     m_cardJobInstall = false;
 
     CardStep m_cardStep = CardStep::Idle;

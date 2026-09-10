@@ -171,7 +171,21 @@ public:
 	void installCard(unsigned slot, const uint8_t *prepared);
 
 	/// Mark a slot empty.  Same conditions as installCard.
+	///
+	/// The presence bit ONLY -- the card's bytes are left alone, because the firmware
+	/// takes a moment to notice and stop the voices that were playing from them, and
+	/// anything written into that region meanwhile is read as sample data by a voice that
+	/// is still sounding.  Measured on a card tone pulled mid-note: filling with 0xFF
+	/// here leaves one 5 ms window at 72 counts where the new order gives exact silence.
+	/// Small -- the firmware is quick, so the exposure is a few milliseconds however big
+	/// the host's buffer is -- but it is audible junk in place of nothing, and it costs
+	/// nothing to not do it.  Call clearCardData() once the machine has let go.
 	void ejectCard(unsigned slot);
+
+	/// Wipe an empty slot's bytes.  Only safe once the firmware has acknowledged the
+	/// slot is empty (its cache at 0x2743 reads 0), because that is the point at which it
+	/// has re-resolved the parts and stopped their voices.
+	void clearCardData(unsigned slot);
 
 	/// Hard reset.  Safe to call once images are loaded; the firmware then boots normally.
 	void reset();

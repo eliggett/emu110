@@ -66,8 +66,9 @@ static char g_cardlist[8192];             /* "A num<tab>label<tab>path" / "S slo
 static char g_cardpath[2][1024];          /* two images to play with, whatever is here */
 static unsigned g_cardnum[2];
 static int  g_ncards = 0;
-static int  g_cardstage[5];               /* one per check, filled as the run goes */
-static int  g_cardgroups[2];              /* tone groups with the card in, and after */
+static int  g_cardstage[6];               /* one per check, filled as the run goes */
+static int  g_cardgroups[2];              /* tone groups with one card in, and with two */
+static int  g_cardrecall = 0;             /* did a fresh instance come back holding them */
 
 /* How many media the machine can currently offer tones from: the internal ROM is always
  * one, and each mounted card adds another. */
@@ -562,18 +563,21 @@ int main(int argc, char **argv)
             const double t = (double)done / RATE, dt = (double)BLOCK / RATE;
             const int at = (t <= 8.0 && 8.0 < t + dt) ? 0
                          : (t <= 8.6 && 8.6 < t + dt) ? 1
-                         : (t <= 9.2 && 9.2 < t + dt) ? 2
-                         : (t <= 9.8 && 9.8 < t + dt) ? 3
-                         : (t <= 10.4 && 10.4 < t + dt) ? 4
-                         : (t <= 11.5 && 11.5 < t + dt) ? 5
-                         : (t <= 12.5 && 12.5 < t + dt) ? 6
-                         : (t <= 13.5 && 13.5 < t + dt) ? 7
-                         : (t <= 14.0 && 14.0 < t + dt) ? 8
-                         : (t <= 15.0 && 15.0 < t + dt) ? 9
-                         : (t <= 15.2 && 15.2 < t + dt) ? 10
-                         : (t <= 15.4 && 15.4 < t + dt) ? 11
-                         : (t <= 15.6 && 15.6 < t + dt) ? 12
-                         : (t <= 16.6 && 16.6 < t + dt) ? 13 : -1;
+                         : (t <= 9.0 && 9.0 < t + dt) ? 2
+                         : (t <= 9.4 && 9.4 < t + dt) ? 3
+                         : (t <= 9.8 && 9.8 < t + dt) ? 4
+                         : (t <= 10.4 && 10.4 < t + dt) ? 5
+                         : (t <= 10.8 && 10.8 < t + dt) ? 6
+                         : (t <= 11.4 && 11.4 < t + dt) ? 16
+                         : (t <= 11.8 && 11.8 < t + dt) ? 7
+                         : (t <= 12.2 && 12.2 < t + dt) ? 8
+                         : (t <= 13.2 && 13.2 < t + dt) ? 9
+                         : (t <= 13.6 && 13.6 < t + dt) ? 10
+                         : (t <= 14.0 && 14.0 < t + dt) ? 11
+                         : (t <= 14.4 && 14.4 < t + dt) ? 12
+                         : (t <= 15.4 && 15.4 < t + dt) ? 13
+                         : (t <= 15.8 && 15.8 < t + dt) ? 14
+                         : (t <= 16.8 && 16.8 < t + dt) ? 15 : -1;
             char req[1100];
             int i;
             switch (at)
@@ -636,8 +640,11 @@ int main(int argc, char **argv)
                 }
                 break;
             case 7:
-                g_cardstage[1] = (g_ncards >= 1 && g_panel[PANEL_CARD_ID+2] == g_cardnum[0]);
+                g_cardstage[1] = (g_ncards >= 1 && g_panel[PANEL_CARD_ID+2] == g_cardnum[0]
+                                  && g_panel[PANEL_PART_MEDIA] == g_cardnum[0]);
                 g_cardgroups[0] = count_tone_groups();
+                printf("cards: part 1 plays media %02X from the card\n",
+                       g_panel[PANEL_PART_MEDIA]);
                 printf("cards: slot 3 <- card %02u, machine reads %02X, %d tone group(s)\n",
                        g_ncards ? g_cardnum[0] : 0, g_panel[PANEL_CARD_ID+2],
                        g_cardgroups[0]);
@@ -666,13 +673,50 @@ int main(int argc, char **argv)
                        g_panel[PANEL_CARD_ID+2]);
                 break;
             case 12:
-                put_keyvalue(seq, urid_kv, "cardset", "2 -");
+                /* The same card, asked for in a DIFFERENT slot.  A patch names a card by
+                 * catalogue ID and the firmware answers with the first slot holding it,
+                 * so two copies would leave one of them unreachable.  The new slot wins
+                 * and the old one empties -- while a note is sounding, which is also the
+                 * removal case that a broken PORT1 model used to miss. */
+                if (g_ncards >= 2) {
+                    snprintf(req, sizeof(req), "0 %s", g_cardpath[1]);
+                    put_keyvalue(seq, urid_kv, "cardset", req);
+                }
                 break;
             case 13:
-                g_cardstage[4] = (g_panel[PANEL_CARD_ID+2] == 0);
+                g_cardstage[4] = (g_ncards >= 2 && g_panel[PANEL_CARD_ID] == g_cardnum[1]
+                                  && g_panel[PANEL_CARD_ID+2] == 0);
+                printf("cards: card %02u asked for in slot 1 while it was in slot 3, and "
+                       "while a note sounded: slots now read %02X %02X %02X %02X\n",
+                       g_ncards >= 2 ? g_cardnum[1] : 0,
+                       g_panel[PANEL_CARD_ID], g_panel[PANEL_CARD_ID+1],
+                       g_panel[PANEL_CARD_ID+2], g_panel[PANEL_CARD_ID+3]);
+                break;
+            case 16:
+                /* Put PART 1 on a tone from the card that is about to be swapped out,
+                 * so the note that starts at 12 s is being played FROM THE SLOT.  Until
+                 * this, the swap happened while the machine played an internal tone,
+                 * which is the easy case: nothing was reading the bytes being replaced. */
+                if (g_ncards >= 1) {
+                    snprintf(req, sizeof(req), "0 %u 0", g_cardnum[0]);
+                    put_keyvalue(seq, urid_kv, "tonesel", req);
+                }
+                break;
+            case 14:
+                if (g_ncards >= 1) {
+                    snprintf(req, sizeof(req), "2 %s", g_cardpath[0]);
+                    put_keyvalue(seq, urid_kv, "cardset", req);
+                }
+                break;
+            case 15:
+                g_cardstage[5] = (g_ncards >= 2 && g_panel[PANEL_CARD_ID] == g_cardnum[1]
+                                  && g_panel[PANEL_CARD_ID+2] == g_cardnum[0]);
                 g_cardgroups[1] = count_tone_groups();
-                printf("cards: pulled while a note was sounding, machine reads %02X, "
-                       "%d tone group(s)\n", g_panel[PANEL_CARD_ID+2], g_cardgroups[1]);
+                printf("cards: two cards mounted, slots read %02X %02X %02X %02X, "
+                       "%d tone group(s)\n",
+                       g_panel[PANEL_CARD_ID], g_panel[PANEL_CARD_ID+1],
+                       g_panel[PANEL_CARD_ID+2], g_panel[PANEL_CARD_ID+3],
+                       g_cardgroups[1]);
                 break;
             default: break;
             }
@@ -1070,6 +1114,103 @@ int main(int argc, char **argv)
     }
 
     if (rt_audit_report) rt_audit_report();
+    if (want_card_test)
+        /* Recall.  The whole point of a cartridge manager is that the DAW brings the
+     * cards back with the project, so save the session the way a host does, hand it
+     * to a fresh instance, and ask THAT one what it is holding. */
+    {
+        const LV2_State_Interface *si = d->extension_data
+                ? (const LV2_State_Interface *)d->extension_data(LV2_STATE__interface)
+                : NULL;
+        char *before = NULL;
+        size_t before_len = 0;
+        int recalled = 0;
+
+        if (si == NULL) printf("cards: plugin exposes no LV2 state interface\n");
+        else {
+            states_clear();
+            si->save(h, store_cb, NULL, 0, NULL);
+            before = state_dup("settings", &before_len);
+            if (before) {
+                const char *p = before;
+                printf("cards: the session records --\n");
+                while (*p) {
+                    const char *nl = strchr(p, '\n');
+                    if (strncmp(p, "card ", 5) == 0)
+                        printf("cards:   | %.*s\n",
+                               nl ? (int)(nl - p) : (int)strlen(p), p);
+                    if (!nl) break;
+                    p = nl + 1;
+                }
+            }
+            snapshot_take();
+
+            {
+                LV2_Handle h4 = d->instantiate(d, RATE, "./", features);
+                if (h4 == NULL) printf("cards: instantiate for the recall FAILED\n");
+                else {
+                    char *after = NULL;
+                    size_t after_len = 0;
+                    int i;
+                    d->connect_port(h4, 0, outL); d->connect_port(h4, 1, outR);
+                    d->connect_port(h4, 2, ev_in); d->connect_port(h4, 3, ev_out);
+                    d->connect_port(h4, 4, &latency);
+                    d->connect_port(h4, 5, &volume); d->connect_port(h4, 6, &hf);
+                    for (i = 0; i < 6; i++) d->connect_port(h4, 7 + i, &btn[i]);
+                    d->connect_port(h4, 13, &meter[0]); d->connect_port(h4, 14, &meter[1]);
+                    d->connect_port(h4, 15, &hold[0]);  d->connect_port(h4, 16, &hold[1]);
+
+                    snapshot_put(1);
+                    si->restore(h4, retrieve_cb, NULL, 0, NULL);
+                    states_clear();
+                    si->save(h4, store_cb, NULL, 0, NULL);
+                    after = state_dup("settings", &after_len);
+
+                    /* Line for line, not merely "some cards came back": which image
+                     * is in which slot is the whole of what was asked for. */
+                    if (before && after) {
+                        const char *p = before;
+                        recalled = 1;
+                        while (*p) {
+                            const char *nl = strchr(p, '\n');
+                            const size_t n = nl ? (size_t)(nl - p) : strlen(p);
+                            if (strncmp(p, "card ", 5) == 0) {
+                                char line[1200];
+                                if (n < sizeof(line) - 1) {
+                                    memcpy(line, p, n); line[n] = 0;
+                                    if (strstr(after, line) == NULL) recalled = 0;
+                                }
+                            }
+                            if (!nl) break;
+                            p = nl + 1;
+                        }
+                    }
+                    if (!recalled && after) {
+                        const char *q = after;
+                        printf("cards: the fresh instance instead records --\n");
+                        while (*q) {
+                            const char *nl = strchr(q, '\n');
+                            if (strncmp(q, "card ", 5) == 0)
+                                printf("cards:   | %.*s\n",
+                                       nl ? (int)(nl - q) : (int)strlen(q), q);
+                            if (!nl) break;
+                            q = nl + 1;
+                        }
+                        if (strstr(after, "card ") == NULL)
+                            printf("cards:   | (no cards at all)\n");
+                    }
+                    printf("cards: a fresh instance handed the saved session %s\n",
+                           recalled ? "came back holding the same cards, in the same "
+                                      "slots" : "DID NOT come back with the same cards");
+                    free(after);
+                    d->cleanup(h4);
+                }
+            }
+            free(before);
+        }
+    g_cardrecall = recalled;
+    }
+
     if (d->deactivate) d->deactivate(h);
     d->cleanup(h);
 
@@ -1163,12 +1304,16 @@ int main(int argc, char **argv)
         if (!g_cardstage[3]) printf("cards: a request naming a file that does not exist "
                                     "changed the slot, or wedged the state machine\n");
         cc++; cp += g_cardstage[4];
-        if (!g_cardstage[4]) printf("cards: removing a card while a note sounded was not "
-                                    "noticed\n");
-        cc++; cp += (g_cardgroups[0] == 2 && g_cardgroups[1] == 1);
-        if (!(g_cardgroups[0] == 2 && g_cardgroups[1] == 1))
-            printf("cards: the tone list did not follow the card in and out "
-                   "(%d groups with it, %d without)\n", g_cardgroups[0], g_cardgroups[1]);
+        if (!g_cardstage[4]) printf("cards: the same card asked for in a second slot did "
+                                    "not move -- it is in two slots, or in neither\n");
+        cc++; cp += g_cardstage[5];
+        if (!g_cardstage[5]) printf("cards: two cards in two slots did not both mount\n");
+        cc++; cp += (g_cardgroups[0] == 2 && g_cardgroups[1] == 3);
+        if (!(g_cardgroups[0] == 2 && g_cardgroups[1] == 3))
+            printf("cards: the tone list did not follow the cards (%d group(s) with one "
+                   "card, %d with two)\n", g_cardgroups[0], g_cardgroups[1]);
+
+        cc++; cp += g_cardrecall;
 
         printf("cards: %d of %d checks passed%s\n", cp, cc,
                cp == cc ? "" : "   <-- FAILED");

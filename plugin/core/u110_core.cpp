@@ -756,10 +756,14 @@ void U110Core::ejectCard(unsigned slot)
 {
 	if (slot >= kNumCardSlots)
 		return;
-	// The presence bit is what the firmware acts on; the fill is hygiene, so that a slot
-	// nothing should be reading cannot be read as the card that used to be there.
-	std::fill_n(&m_impl->pcmrom[slot * CARD_STRIDE + CARD_OFFSET], CARD_SIZE, u8(0xff));
 	m_impl->card_present |= 1 << slot;
+}
+
+void U110Core::clearCardData(unsigned slot)
+{
+	if (slot >= kNumCardSlots)
+		return;
+	std::fill_n(&m_impl->pcmrom[slot * CARD_STRIDE + CARD_OFFSET], CARD_SIZE, u8(0xff));
 }
 
 LoadResult U110Core::loadCard(unsigned slot, const uint8_t *data, size_t len)
@@ -768,7 +772,10 @@ LoadResult U110Core::loadCard(unsigned slot, const uint8_t *data, size_t len)
 		return LoadResult::NoSuchSlot;
 	if (!data)
 	{
+		// Not a running machine: this is the boot and session-restore path, so there is
+		// nothing sounding to protect and the bytes go now.
 		ejectCard(slot);
+		clearCardData(slot);
 		return LoadResult::Ok;
 	}
 	std::vector<u8> prepared;
