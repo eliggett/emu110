@@ -1216,6 +1216,43 @@ note does not exceed; past every split, take the twelfth sample. A drum tone exp
 to split the keyboard between the two partials — see `R8-CONVERSION.md` §3.2, which needed
 this record laid out exactly in order to write one.
 
+#### The `"TABLE"` record at logical `0x3760` — a drum tone will not sound without it `[C]`
+
+There is a **101st tone record**, at logical `0x3760`, whose ten-byte name field reads
+`"TABLE     "`. `0x3760` is `0x1000 + 0x50 * 126` — index 126, far past the 99 a program
+change can reach, so nothing can select it as a tone.
+
+It is present on exactly the images that carry **drum or percussion** tones and absent from
+the melodic ones:
+
+| image | `0x3760` name | splits at `0x3770` |
+|---|---|---|
+| `waverom0` (holds tone 99 `DRUMS`) | `TABLE` | `1F 2B 31 37 3F 47 4B FF FF FF FF` |
+| SN-U110-02 Latin / FX Percussion | `TABLE` | same |
+| SN-U110-08 Synthesizers | `TABLE` | same |
+| SN-U110-10 Rock Drums | `TABLE` | same |
+| the other twelve SN-U110 cards | blank / `0xFF` | — |
+
+The **split points are identical on all four** — MIDI 31, 43, 49, 55, 63, 71, 75 — and only
+the twelve sample indices differ per card. The record is otherwise shaped like any tone
+record: header `00 00 2A 00 00 00`, partial 1 populated, partial 2 all `0xFF`.
+
+`[C]` **A tone whose type byte is `0x80` — the drum type — will not play without it.** This
+was found the hard way, by building a card from scratch that mounted correctly, loaded its
+tone record into work RAM correctly, and had its 24 sample slots built correctly by the
+firmware, and yet produced **no voice-enable write at all** on almost every key. Bisecting
+the whole 512 KB image against a working card narrowed the entire difference to the
+**sixteen bytes at `0x3770`**; supplying them made every key speak. Writing the record with
+its zones pointed at real samples makes those samples sound on *every* key at a uniform
+level, drowning the selected tone; pointing them at a silent sample leaves the tone audible.
+
+`[I]` **What the firmware does with it is not known.** It is not indexed by the sample
+reference note (tested: moving the silence sample's reference note from 126 to 0, 1 and 60
+changes nothing), and it is not reached by the tone-list scan, which stops at the first
+blank name long before record 126. The routine that reads a fixed `0x3760` has not been
+found. It is enough, for now, that a converted drum card must carry the record —
+`R8-CONVERSION.md` §5 does.
+
 ### 6.7 How a patch part selects a card tone
 
 `0x7D56` resolves the reference:

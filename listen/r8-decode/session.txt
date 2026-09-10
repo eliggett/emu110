@@ -23,3 +23,22 @@ against 68 Hz.  13_909_CHH is noise in both blocks, as a hi-hat should be.  17_R
 no B block at all.
 
 Source dumps live outside the repo, in ~/Downloads/roland_sn-u-stuff_for-elliott/ .
+
+--- via-card/ -------------------------------------------------------------------------
+
+The same R-8 samples again, but this time played BY THE MACHINE: converted into a U-110
+card with tools/r8_to_u110.py, mounted in slot 1, and rendered through the emulator's own
+audio path (tools in plugin/tools/, harness in the session scratchpad).  So unlike the
+files above -- which are the ROM bytes decoded directly by Python -- these went through the
+real firmware, the real tone-generator device and the real output stage.
+
+    sn-r8-10_tone0_chromatic.wav   SN-R8-10 "Dance", tone R8-10 SET1, notes 36..58
+    sn-r8-10_tone1_chromatic.wav   the same card's second tone, notes 36..40
+    sn-r8-09_tone0_chromatic.wav   SN-R8-09 "Power Drums USA", tone R8-09 SET1
+
+One note per 1 second, chromatically, velocity 110, on a single-part patch (preset 1
+"Ac.Piano", whose parts 2-6 are disabled) so nothing but the card is sounding.
+
+Not every key speaks, and that is partly expected -- a U-110 drum tone leaves keys
+unassigned -- but the gaps here are not yet all accounted for.  Pitch is whatever the
+reference-note table gives; for a drum map that is not meaningful and has not been tuned.

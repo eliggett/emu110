@@ -298,27 +298,47 @@ The U-110 is a keyboard sampler and the R-8 is a drum machine, so some things do
 
 ## 5. The conversion plan
 
-### Phase 1 — layered, no audio processing at all
+### Phase 1 — built, and it plays.  `tools/r8_to_u110.py`
 
-One U-110 tone per **11** R-8 instruments, both layers, sample bytes copied verbatim:
+**Not** the layered design this section first proposed. That was: partial 1 takes the A
+blocks, partial 2 the B blocks, identical splits in both so note *k* selects the same zone
+in each and the two sound together. It is a nice idea and **the machine will not play it**;
+what it produced is in §6. What works is to copy `ROCK DRUMS` literally (§3.2):
 
-- partial 1: splits = the 11 chosen keys, samples = the 11 **A** blocks + silence
-- partial 2: the **same** 11 splits, samples = the 11 **B** blocks + silence
+- the two partials are a **key split**, not a layer — partial 1 takes 11 keys and partial 2
+  the next 11, each muting itself over the other's range with a shared silent sample;
+- sample index runs are **consecutive** — 0..11 in partial 1, 11..22 in partial 2;
+- partial 2's first split equals partial 1's last;
+- the card carries the **`"TABLE"` record at logical `0x3760`**, without which a drum tone
+  is silent on almost every key (`ROM-ANALYSIS.md` §6.6). Its zones point at the silence
+  sample so it satisfies the firmware and contributes nothing.
 
-Identical splits in both partials means note *k* selects the same zone in each, so A and B
-sound together — the U-110's DUAL/V-MIX machinery doing what the R-8 did. 26 instruments
-becomes 3 tones (11 + 11 + 4). Reference note = the key, fine tune `0x40`, loop mode `1`,
-segment `1`. Partial parameters copied from `ROCK DRUMS`.
+22 keys per tone, block A only, sample bytes copied verbatim — no re-encoding, so what
+plays is what the R-8 played. A 26-instrument card becomes 2 tones. Reference notes are
+taken from `ROCK DRUMS`' own table rather than computed, for the reason in §6.
 
-Risk is close to zero: no sample is re-encoded, so if it mounts, it plays what the R-8
-played. Validate by mounting in Voltaire 110 and playing — the emulator runs the real
-firmware, so the firmware is the test.
+Loop mode `1`, loop length 4, segment `1`, byte 7 `0x40`, byte 9 (the fine tune) `0x40`,
+partial parameters and the tone type byte `0x80` all copied from `ROCK DRUMS`.
 
-### Phase 2 — pre-mix, for 22 instruments per tone
+**Measured, on the emulator running the real firmware** (`plugin/tools/card_check.cpp`, and
+`listen/r8-decode/via-card/`): all six SN-R8 cards convert; each mounts, is accepted, and
+its tones read back and play. SN-R8-10 speaks on 17 of 23 keys, SN-R8-09 on 11 of 23. Every
+key that speaks plays its own sample at its own level. The remaining gaps are §6.
 
-Phase 1 spends both partials on one key, which caps a tone at 11 sounds. Mixing A+B into a
-single sample at conversion time frees partial 2 for the key split of §3.2 and doubles that
-to 22, at the cost of a fixed layer balance.
+One card overflows: an R-8 card can hold more sample data than a U-110 card has room for,
+because the U-110 reserves its first 16 KB for tables and each sample costs one extra
+interpolation byte. SN-R8-09 needs 550 KB of the 496 KB available, so the converter drops
+from the end and says which — two toms, leaving 24 of 26 instruments and 99.2% full.
+
+### Phase 2 — pre-mix, to get block B back
+
+Phase 1 carries block A only, so every two-layer R-8 sound loses its other half: a 909 kick
+keeps its click and loses its boom, a snare keeps its noise and loses its shell tone (§2.2).
+That is the single biggest audible gap, and 17 of SN-R8-10's 26 instruments are affected.
+
+The fix is to sum A and B into one sample at conversion time, which fits phase 1's layout
+unchanged — one sample per key — at the cost of a fixed layer balance. It also *saves*
+space: one stream of `max(len A, len B)` replaces two.
 
 This needs a **re-encoder**, the only real signal processing in the project: integrate both
 blocks, sum, re-differentiate, and requantise each delta to an 8-bit float code. Because the
@@ -326,7 +346,8 @@ player integrates, quantisation error accumulates — so choose each code greedi
 the *running reconstruction* rather than the instantaneous delta (a DPCM encoder with error
 feedback). Must be checked by measuring drift over the whole sample, not by eye.
 
-It also *saves* space: one mixed stream of `max(len A, len B)` replaces two.
+(Space is not the constraint it was: phase 1 uses 56% of SN-R8-10's card, and pre-mixing
+would drop that further.)
 
 ### Phase 3 — the rest
 
@@ -340,6 +361,49 @@ It also *saves* space: one mixed stream of `max(len A, len B)` replaces two.
   so IDs up to 31 exist while the catalogue only reaches ~15. A converted card should claim
   an unused ID rather than shadow a real one — but that the firmware accepts an ID above 15
   is an assumption, and is worth one test in the emulator before relying on it.
+
+---
+
+## 5.5 What phase 1 cost, and the two things still unexplained
+
+Both are recorded because the way they were found is the useful part.
+
+### The `"TABLE"` record — solved, mechanism unknown
+
+A card built from scratch mounted, was accepted, had its tone record loaded into work RAM
+correctly and its 24 sample slots built correctly by the firmware — and produced **no
+voice-enable write to the chip at all** on almost every key. Every field was cleared one at
+a time against a card known to play: start address (relocated to a dozen addresses, all
+fine), length, loop mode, loop length, bytes 7 and 9, the reference note, the tone record,
+the card ID, the fill value, the split layout. All fine. The fault was not in any of them.
+
+What found it was giving up on reasoning and **bisecting the 512 KB image** against the
+working card, byte range by byte range, until the difference was sixteen bytes at logical
+`0x3770` — partial 1 of a tone record at index 126 whose name reads `"TABLE"`. Supplying it
+made every key speak. `ROM-ANALYSIS.md` §6.6 has the structure and the four images that
+carry it; what the firmware does with it is still open.
+
+**The lesson is about method, not about the U-110.** Nine of the ten hypotheses tested
+before the bisect were about fields I had authored, because those were the things I knew I
+had guessed at. The defect was in a field I did not know existed, and no amount of
+single-variable testing over the fields I *had* written could reach it. A whole-image
+bisect against a known-good example costs about twenty runs and finds anything; it should
+have been the second move, not the twentieth.
+
+### The reference note — worked around, not understood
+
+`[I]` Setting a sample's reference note to the key it sits on — the obvious thing, and
+right for a melodic multisample — makes the firmware refuse to start a voice on *some*
+keys. Which keys depends on the **(sample, reference note) pair** and not on the value:
+reference note 48 works on one sample and is silent on another, and a constant 60 across
+the board fails on exactly the same keys as key-tracking does. The step register the
+firmware computes for a converted card also comes out about 4.2x lower than a real card's
+for the same nominal `note == ref`, which is unexplained and may be the same puzzle.
+
+The converter therefore reuses `ROCK DRUMS`' own 23 reference notes verbatim. That is
+unsatisfying and it is also cheap: a drum map is not played as a melody, so the absolute
+tuning of a kit piece carries no information. It does mean per-pad tuning (§4) waits until
+this is understood.
 
 ---
 
