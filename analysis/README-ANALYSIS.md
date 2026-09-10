@@ -26,3 +26,5 @@
 
 5. EFFECTS.md: Chorus and tremolo, decoded from the firmware and the ROM tables. Both are LFOs run on two extra slots of the same envelope ramp generator the voices use, and no factory patch enables either -- which is why no recording we had contained them. The capture in listen/hardware/effects then settled all three of its open questions -- including one that came out against the prediction: the LFO is a symmetric triangle, not the sawtooth the voice ramp law implied. 
 
+6. R8-SYSTEM-DESIGN.md: Analysis of the Roland R-8 / R-8M rhythm composer wave ROM card architecture (SN-R8 series, specifically SN-R8-10 Dance) and comparison against the U-110's tone records and sample tables. Documents the shared MB87419 bus scrambling and float sample encoding alongside the incompatible tone list formats.
+
