@@ -271,6 +271,12 @@ is why one pair of firmware tables serves both.
 Card presence is sensed on CPU `PORT1` bits 0-3, **active low**; `PORT1` is initialised to
 all-ones at `0x4378` (the quasi-bidirectional input idiom) and a set bit means "no card".
 
+Those four pins are the machine's whole channel for a card arriving or leaving, and the
+firmware polls them every service pass: a card may be changed **while the unit is
+running**, and the parts using it are re-resolved and the display refreshed on the spot.
+Boot is the same code with a "treat everything as newly inserted" flag. The sequence is
+`ROM-ANALYSIS.md` §6.9, which also settles what `PORT1` bit 4 is.
+
 `[I]` The cartridge connector's address pins appear to be *labelled* in the reverse order
 from the wave ROM's — e.g. wave `A0` against cartridge `A19`. Since one firmware routine
 reads the ID header from both card and internal ROM successfully, the addressing must be
@@ -985,6 +991,6 @@ divisor 6, giving `12 MHz / (64 x 6)` = **31250 baud** exactly.
 | 1 | ~~Wave ROM address bits A14-A18~~ | **SOLVED** via MAME (§4.2, §4.6). The full 19-bit permutation is known. |
 | 2 | What the three series-resistored lines between IC15 and IC16 carry | Series resistors suggest edge-rate control on something fast — a clock and strobes `[I]`. Not blocking |
 | 3 | Exact `/CS1`, `/CS2`, `/CS4`, `/CS5` assignments | The firmware never touches them; harmless, but the map is incomplete. `/CS6` is resolved: it covers `0x1F00-0x1FFF`, the output control chip |
-| 4 | What `PORT1` bit 4 drives | Set and cleared around card operations (`0x6AFE`, `0xB759`, `0xC0EC`) with no obvious purpose. Still open under emulation — the machine mounts cards correctly with it ignored |
+| 4 | ~~What `PORT1` bit 4 drives~~ | **SOLVED** `[C]` — nothing. It is a **tone-generator busy flag** the firmware keeps in the port register: cleared entering the start-a-note routine (`0xC0EC`), set once the voice queues drain (`0x6AFE`) and after the LSI init spin (`0xB759`), read back with `jbs port1,4` at `0x6AF1`. `ROM-ANALYSIS.md` §6.9. Not harmless while it was open: all three writes are read-modify-write instructions on the port carrying the card-presence pins, which is how a defect in the emulated CPU's port model hid there |
 | 5 | ~~Field meaning of the eight output-routing bytes~~ | **SOLVED** `[C]` — each byte is a 6-bit output mask (bit k → output k+1); all eight are block-copied from the 50-entry preset table at `0xA8B6` by the routine at `0xB721`, indexed by patch header byte `+0x0E`. See §5.1 |
 | 6 | Which LCD controller the panel actually uses | Unidentified, and no CGROM dump exists. The emulator substitutes a synthesised font purely for legibility |

@@ -107,7 +107,7 @@ does with each.
 | `PORT2` bit 6 | pin 33, P2.6 | **MIDI activity LED** | `ORB PORT2,#0x40` / `ANDB PORT2,#0xBF` at `0x4107`,`0x410C`,`0x8788`,`0x878D` |
 | `PORT2` bit 7 | pin 38 → IC8 pin 74 | **BANK SELECT** — swaps EPROM/SRAM at `0xE000-0xFFFF`, see §2.1 | `0x4390`, `0x8479`, `0x847F`, `0x8572` |
 | `PORT1` bits 0-3 | — | **cartridge presence**, active low | `ANDB R30,PORT1,0x9042[slot]`, §6.3 |
-| `PORT1` bit 4 | — | output; set/cleared around card operations `[I]` | `0x6AFE`, `0xB759`, `0xC0EC` |
+| `PORT1` bit 4 | — | **tone-generator busy flag**, kept in the port register: cleared when a note starts, set when the voice queues drain. §6.9 | `0xC0EC` clears, `0x6AFE` and `0xB759` set, `0x6AF1` reads it back |
 | HSO software timers 0/1/2 | `HSO_COMMAND`(06)=`0x18`/`0x19`/`0x1A`, `HSO_TIME`(04) | all periodic ticks | `0x408E`, `0x40A0`, `0x4145` |
 | `TIMER1` | (0A) | time base for the above | scheduled as `ADD HSO_TIME,TIMER1,#n` |
 | A/D converter | `AD_COMMAND`(02), `AD_RESULT_HI`(03) | **battery voltage**, channel 0, **polled**. Accepts `AD_RESULT_HI` in **`0x85`-`0xCB`**; outside that it sets the flag behind `Check Battery!` | `LDB AD_COMMAND,#0x08` (ch 0 + GO) then `LDB R30,AD_RESULT_HI` at `0x44D7`/`0x44E0` and `0x880D`/`0x8816`; window from `CMPB #0xCB`/`JH` and `CMPB #0x84`/`JNH` at `0x44E3`-`0x44EB` |
@@ -1001,6 +1001,9 @@ bit means a cartridge is present. `PORT1` is initialised to all-ones at `0x4378`
 Unpopulated slot lines therefore read high and are simply skipped — which is why the
 firmware can scan four slots on a machine with fewer physical ports.
 
+What the firmware does with those bits -- poll them every service pass and mount or
+dismount a card on the edge -- is §6.9.
+
 ### 6.4 The two permutation tables — **RESOLVED** `[C]` `[S]`
 
 `0x7CB5` reads the 48-byte ID header through two tables:
@@ -1284,7 +1287,111 @@ the firmware's point of view they *are* cards that happen to be permanently fitt
 counterpart in the U-110. Presumably it serves a device the U-220 has and the U-110 does
 not. Not investigated.
 
-### 6.9 What this means for modification
+### 6.9 Changing cards while the machine runs `[C]` `[S]` + confirmed in emulation
+
+Yes. There is a purpose-built hot-swap poller, and **boot is a special case of it**.
+
+The poller runs `0x6E37`-`0x6EF0`, edge-triggered against a snapshot kept in RAM `0x2747`:
+
+```asm
+6E37  ldb  3b, 2747        ; the PREVIOUS pass's PORT1 read
+6E3C  ldb  3a, port1       ; what the slots say now
+6E3F  jbc  b8, 3, 6e47     ; unless the rescan flag is set...
+6E42  ldb  3b, 3a          ;   ...previous := ~current, so that every occupied
+6E45  notb 3b              ;      slot looks newly inserted
+6E47  stb  3a, 2747        ; the snapshot for next time
+6E4C  clr  3c              ; slot := 0
+6E4E  andb 30, 3b, 9042[3c]   ; was it there?  (0 = present; §6.3)
+6E54  je   6ec8               ;   yes -> removal check
+6E56  andb 30, 3a, 9042[3c]   ; is it there?
+6E5C  je   6e60               ;   newly present -> mount
+6E5E  sjmp 6ee7               ;   unchanged -> next slot
+```
+
+Three branches per slot, then `incb 3c` / `cmpb 3c,#04` and round again:
+
+- **Mount** (`0x6E60`): two `lcall 8FE2` first -- each is a `ldb 50,#14` busy loop, a
+  connector settle delay -- then `lcall C5AD` with `#FF` to stop sounding voices,
+  `scall 6EF2` to set up the 48-byte header read through `0x7CB5`, and a 16-byte compare
+  against the `0x93A2` signature (§6.5). A match caches the ID at `0x2743[slot]`.
+- **Mount failure** (`0x6E91`): `"  Illegal CARD"` -- the string sits inline at `0x6EB9`,
+  which is why a linear disassembly of this routine appears to run off the rails there --
+  `0xFF` stored as the slot's ID, and `lcall 8FF0` to hold the message on the LCD.
+- **Removal** (`0x6ED0`): `lcall C5AD`, the reload helpers below, then `stb 0, 2743[3c]`.
+  The ID is cleared to **zero**, not `0xFF`; see correction #18.
+
+Both edges then call the same helpers, and those are what make this a feature rather than
+mere detection:
+
+- `0x6F06` / `0x6F2B` / `0x6F50` each walk the six parts of the active patch
+  (`0x2814 + 16*n`, `cmpb 3e,#06`), mask the part's 5-bit group selector with `#1F`
+  (§6.7), and for every part naming *this* slot's ID call `0xC5AD` or `0x80D3`. `0x80D3`
+  is §6.7's resolver: either copy the 80-byte tone record out of the card into
+  `0x2880 + 0x50*part`, or copy `" No Card! "` from `0x8109`.
+- `0x6F50`, the removal variant, saves the cached ID, zeroes it, calls `0x80D3` so each
+  affected part re-resolves as *absent*, and puts the ID back -- three instructions to
+  reuse one resolver for both directions.
+- `0x6FB1` reads `0x2748` and, if what the LCD is showing belongs to the slot that just
+  changed (bit 3 set, high nibble == slot index), calls `0x7D72` to redraw it.
+
+So pulling a card mid-performance stops the voices on the parts that used it and drops
+them to `" No Card! "`; pushing one in reloads their tone records and refreshes the
+display. No reset, no menu visit.
+
+**Boot is the same code.** The only place the rescan flag `B8.3` is set is initialisation
+at `0x45DE`, immediately after the write-protect check and the default-patch copy;
+`0x6FCE` clears it at the end of the pass, and both edges skip the `0xD683` display call
+while it is set. There is no separate mount path -- boot is the hot-swap path told to
+treat every occupied slot as a fresh insertion, with the display refresh suppressed
+because there is nothing on screen yet.
+
+The poller sits in the fall-through chain after the MIDI handler, and every early exit
+from that handler (`0x6D66`, `0x6D6B`, `0x6D72`, `0x6D85`, `0x6D8C`, `0x6DAC`, `0x6DB8`)
+jumps to `0x6E37`. It runs every service pass regardless of what MIDI did.
+
+#### Measured in emulation
+
+`plugin/tools/u110_panel.cpp` has `card SLOT FILE` and `eject SLOT`, which change what a
+slot contains while the machine runs and touch nothing but the presence bit.
+
+| | |
+|---|---|
+| insertion noticed | **320-330 ms** |
+| removal noticed | **under 20 ms** |
+| four slots at once | `0x2743` reads `01 05 0B 0F` |
+| a program ROM offered as a card | refused, `0xFF` cached, LCD shows `  Illegal CARD` |
+
+The asymmetry is the mount's own work: two settle delays, 48 header bytes and up to six
+80-byte tone records, every byte of it through the borrowed voice-0 ROM port (§6.1).
+
+**A slot's bytes may not be changed without toggling presence.** Rewriting the image
+underneath a mounted card leaves the firmware serving the old card's ID indefinitely --
+measured over 600 ms -- because the poller compares against its snapshot and sees nothing
+move. A swap is eject, settle, insert.
+
+The owner's manual treats live changes as ordinary rather than merely survivable: for
+`Illegal Card` it says *"Immediately remove it, then insert a proper memory card"*, and
+elsewhere tells the user to insert the card the display names.
+
+#### `PORT1` bit 4 -- open question #4, answered `[C]`
+
+It is **not** driven around card operations. `0xC0EC` clears it (`andb port1,#ef`) at the
+head of the start-a-note routine -- the one that indexes the per-part tone record with
+`mulub 5e,50,#50` / `ldb 5c,288a[5e]`; `0x6AFE` sets it (`orb port1,#10`) once both voice
+queues (`74`, `76`) read zero, and `0xB759` sets it after the LSI initialisation spin.
+`0x6AF1` reads it back with `jbs port1,4`. It is a **tone-generator busy/idle flag kept in
+the port register**.
+
+That matters beyond bookkeeping, because all three writes are **read-modify-write**
+instructions on a port whose low nibble is the card-presence pins. MAME's
+`i8x9x::port1_r()` returned `m_in_p1_cb() & port1`, so each one read the pins, took the
+presence bits with it, and wrote them back into the output latch. After the first note
+played, every slot holding a card at that moment read "present" for ever and the poller
+never saw a card leave. Emulation only, and fixed in
+`mame/src/devices/cpu/mcs96/i8x9x.cpp`; the general form of the fix -- a read-modify-write
+reads the **latch**, which is what MAME's MCS-51 core already does -- is recorded there.
+
+### 6.10 What this means for modification
 
 - **Reading a card from patched code is straightforward** — call `0x7B74` to select the
   bank and `0x7BB2` / `0x7B07` to read. Both are clean, self-contained subroutines.
@@ -1641,6 +1748,7 @@ stress-tested and which have not.
 | 30 | "Sample format is linear 8-bit two's complement PCM" (#23, §3) | **Wrong** — it is an **8-bit float**, sign + 3-bit exponent + 4-bit mantissa, applied to the magnitude of the two's complement byte | Prompted by a reader looking at a plot of sample 212 and saying it was not a trapezoid at all but "a sine that needs to be decoded differently", noting the steps bunch together near the peaks. They were right. The decisive move was realising the target was *known*: the firmware plays this sample as a pure sine, so the transfer curve could be **read off** instead of guessed — decoded/ideal holds constant to 2.5% over a 14:1 range, against 32% for linear. Four rounds of this section were each half-right, and the reason they never converged is the same entanglement #11 and #21 both recorded and neither escaped: MAME's decoder combined a **correct** float table with an **incorrect** accumulator in one expression, so #23 tested the pair, found it worse than linear, and discarded both halves. **When a compound hypothesis fails, the failure does not distribute over its parts.** #24 then rejected "companded" — a *true* description — because it fitted mu-law and power curves to hardware harmonics rather than testing the one table already sitting in the source tree. The whole answer was one character: `+=` should have been `=`. |
 | 31 | "Voice volume (regs `06`/`07`) is a linear 16-bit multiplier" (MAME's `smp_data * chn.volume`) | **Wrong** — reg 07 is **logarithmic, 16 units per octave**, and the two bytes are independent fields | Found by disassembling the writer rather than fitting curves. The firmware builds the value at `0x69F0`-`0x6A59` and stores it with a single `st 44, 140c`, but `6A27: ldb 45, 42` loads the high byte from a **different register**: the low byte (reg 06) is a 7-bit level clamped to 1..0x7F, the high byte (reg 07) is a separate log-domain level. The scale comes from the firmware's own table at `0xAEC6`, which reads 143, 159, 175, 191, 207, 223, 239, 255 at indices 1, 2, 4, 8, 16, 32, 64, 128 — **every doubling of amplitude adds exactly 16**, so 16 units per octave = 0.3763 dB per unit. Notes use a **voice pair** whose two partials are layered by velocity (at velocity 40 the second partial's reg 07 is `0x30` against the first's `0xC2`) and sum. Read linearly a velocity sweep spanning **21.3 dB** on hardware collapsed to **5.3 dB**; decoded this way the emulator now spans **20.1 dB**, within **1.3 dB** of hardware at every measured velocity. Two lessons: velocity touches **only** regs 06/07 — sample address, rate, loop and end are byte-identical, so measuring what does *not* change localised the field immediately; and after three failed attempts to fit a curve through three data points, **disassembling the code that writes the register took minutes and gave the exact scale**, the same shortcut that was available (and missed) for the `0x1F00` routing table. `[I]` The role of the low byte, and a residual ~1.3 dB, remain open. |
 | 32 | The flute's 443 Hz reading is "because that patch has chorus" (§ Tuning) | **Wrong** — it is the **tone's own detune**; that patch has no effect at all | Reached for the effect because the patch *stores* chorus parameters, without checking whether anything reads them. Nothing does: the enable bits live in a config byte selected by the OUTPUT MODE (`0xA726 + 8*index`, bit 1 tremolo, bit 3 chorus), and every one of the 64 factory patches picks a mode whose bits are clear. **Stored settings are not applied settings** — the same shape of error as #29's register that did not exist. The recordings were the tell and I had them: mono to a correlation of 1.00000, which is what mode 22 `M31` "centred" means, and a chorus that produced a doublet would have had to be doing so in mono. See `analysis/EFFECTS.md`. |
+| 33 | "`PORT1` bit 4 is set/cleared around card operations" `[I]` (§2 register table, and the driver's own comment) | **Wrong** — it is a **tone-generator busy flag** | The three writes were found by grepping for writes to the port and reading their *addresses* against the card sections; two of the three sit in voice code, which one screen of disassembly around each would have shown. Same shortcut missed as #29 and #31: **disassemble the code that writes the register.** What makes this one worth a row is that the parked `[I]` turned out to be load-bearing. All three writes are read-modify-write instructions on the port whose low nibble is the card-presence pins, and MAME's `port1_r()` returned `in & latch`, so from the first note played the presence bits were latched low and card *removal* stopped being detected. The defect was invisible for as long as nobody swapped a card while a note sounded — which is to say, for as long as nobody used the feature §6.9 documents. An open question is not the same as a harmless one. |
 
 Claims that **survived** contact with the schematic and service notes, having originally
 been derived from the ROM image alone: the MCS-96 identification, the `0x2000-0x20FF` ROM
