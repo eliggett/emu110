@@ -39,6 +39,9 @@
 #include <string>
 #include <vector>
 
+#include <dirent.h>
+#include <sys/stat.h>
+
 START_NAMESPACE_DISTRHO
 
 // Kept in step with the plugin by hand; there are only a few and they are checked by the
@@ -66,6 +69,18 @@ struct PanelBlob
     uint8_t part_flags[6];          ///< (b & 0xE0) == 0xC0: the part is switched off
     uint8_t part_chan[6];           ///< MIDI receive channel in the low nibble
     uint8_t card_id[4];             ///< the firmware's own verdict per slot; see the DSP
+};
+
+/// A card image the plugin found on its ROM search path, or one sitting in a slot.
+///
+/// `number` is the catalogue ID the image claims -- 8 for an SN-U110-08 -- which is how a
+/// patch names it and therefore why the same card cannot usefully be in two slots at once.
+struct CardImage
+{
+    unsigned    number = 0;
+    std::string label;          ///< what the image calls itself, e.g. "SN-U110-09 0.27"
+    std::string path;
+    bool        present = false;    ///< for a slot: is anything in it
 };
 
 /// One media's worth of tones: the internal wave ROM, or a mounted card.
@@ -102,6 +117,18 @@ public:
         // And for the RESET menu.
         if (std::getenv("VOLTAIRE_RESET") != nullptr)
             m_menu = Menu::Reset;
+
+        // And the cartridge page, which has three levels: VOLTAIRE_CART=1 opens the
+        // slots, =pick the list for slot 1, =file the browser.
+        if (const char *c = std::getenv("VOLTAIRE_CART"))
+        {
+            m_menu = Menu::Cart;
+            m_cartSlot = 0;
+            if (sameName(c, "pick"))
+                m_menu = Menu::CartPick;
+            else if (sameName(c, "file"))
+            { cartListDir("."); m_menu = Menu::CartFile; }
+        }
 
         // The credits are one string with newlines in it, because that is what a text
         // file is; split once here rather than on every frame.
@@ -304,6 +331,53 @@ protected:
             return;
         }
 
+        // What images exist and what is in each slot.  "A n<tab>label<tab>path" offers
+        // one, "S slot n<tab>label<tab>path" says what a slot holds.  The FIRMWARE's
+        // opinion of each slot is not in here -- that arrives with the panel, because it
+        // changes on its own a third of a second after a card goes in.
+        if (std::strcmp(key, "cardlist") == 0)
+        {
+            m_cardAvail.clear();
+            for (int i = 0; i < 4; i ++)
+                m_cardSlots[i] = CardImage();
+
+            for (const char *p = value; *p != '\0'; )
+            {
+                const char *const nl = std::strchr(p, '\n');
+                const std::string line(p, nl != nullptr ? size_t(nl - p) : std::strlen(p));
+                p = nl != nullptr ? nl + 1 : p + line.size();
+
+                const size_t t1 = line.find('\t');
+                const size_t t2 = t1 == std::string::npos
+                        ? std::string::npos : line.find('\t', t1 + 1);
+                if (t1 == std::string::npos || t2 == std::string::npos)
+                    continue;
+
+                CardImage c;
+                c.present = true;
+                c.label = line.substr(t1 + 1, t2 - t1 - 1);
+                c.path  = line.substr(t2 + 1);
+
+                if (line[0] == 'A')
+                {
+                    c.number = unsigned(std::atoi(line.c_str() + 2));
+                    m_cardAvail.push_back(std::move(c));
+                }
+                else if (line[0] == 'S')
+                {
+                    const int slot = std::atoi(line.c_str() + 2);
+                    if (slot < 0 || slot >= 4)
+                        continue;
+                    const size_t sp = line.find(' ', 4);
+                    c.number = sp == std::string::npos
+                            ? 0u : unsigned(std::atoi(line.c_str() + sp + 1));
+                    m_cardSlots[slot] = std::move(c);
+                }
+            }
+            m_dirty = true;
+            return;
+        }
+
         if (std::strcmp(key, "panel") != 0)
             return;
         PanelBlob blob;
@@ -344,6 +418,7 @@ protected:
         std::memcpy(m_partTone, blob.part_tone, sizeof(m_partTone));
         std::memcpy(m_partFlags, blob.part_flags, sizeof(m_partFlags));
         std::memcpy(m_partChan, blob.part_chan, sizeof(m_partChan));
+        std::memcpy(m_cardVerdict, blob.card_id, sizeof(m_cardVerdict));
         m_dirty = true;
     }
 
@@ -530,6 +605,12 @@ protected:
             drawAboutBox();
         else if (m_menu == Menu::Reset)
             drawResetMenu();
+        else if (m_menu == Menu::Cart)
+            drawCartMenu();
+        else if (m_menu == Menu::CartPick)
+            drawCartPick();
+        else if (m_menu == Menu::CartFile)
+            drawCartFile();
         else
             drawDiveTooltip();
 
@@ -581,6 +662,88 @@ protected:
                 m_menu = Menu::None;
                 repaint();
             }
+            return true;
+        }
+
+        if (m_menu == Menu::Cart || m_menu == Menu::CartPick || m_menu == Menu::CartFile)
+        {
+            if (!ev.press)
+                return true;
+            const int hit = cartHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            if (hit < 0)
+            {
+                // A click in the dark closes, as everywhere else.
+                closeCurrentMenu();
+                repaint();
+                return true;
+            }
+
+            if (m_menu == Menu::Cart)
+            {
+                m_cartSlot = hit;
+                m_cartScroll = 0;
+                m_menuHover = -1;
+                m_menu = Menu::CartPick;
+            }
+            else if (m_menu == Menu::CartPick)
+            {
+                const int total = cartPickCount();
+                if (m_cartSlot < 0)
+                    m_menu = Menu::Cart;
+                else if (hit == 0)
+                {
+                    cartSet(m_cartSlot, std::string());
+                    m_menu = Menu::Cart;
+                }
+                else if (hit == total - 1)
+                {
+                    // Start where the cards are: the directory the plugin found the
+                    // mounted one in, or this slot's own image if it has one.
+                    std::string start = m_cartDir;
+                    if (start.empty())
+                    {
+                        const std::string &ref = m_cardSlots[m_cartSlot].present
+                                ? m_cardSlots[m_cartSlot].path
+                                : (m_cardAvail.empty() ? std::string()
+                                                       : m_cardAvail.front().path);
+                        const size_t at = ref.find_last_of('/');
+                        start = at == std::string::npos ? std::string(".")
+                                                        : ref.substr(0, at);
+                    }
+                    cartListDir(start);
+                    m_menuHover = -1;
+                    m_menu = Menu::CartFile;
+                }
+                else if (size_t(hit - 1) < m_cardAvail.size() && m_cartSlot >= 0)
+                {
+                    cartSet(m_cartSlot, m_cardAvail[size_t(hit - 1)].path);
+                    m_menu = Menu::Cart;
+                }
+            }
+            else if (size_t(hit) < m_cartFiles.size())
+            {
+                const CardImage &e = m_cartFiles[size_t(hit)];
+                if (e.number)                       // a folder
+                {
+                    if (e.label == "../")
+                    {
+                        const size_t at = m_cartDir.find_last_of('/');
+                        cartListDir(at == 0 ? std::string("/")
+                                   : at == std::string::npos ? m_cartDir
+                                   : m_cartDir.substr(0, at));
+                    }
+                    else
+                        cartListDir(e.path);
+                    m_menuHover = -1;
+                }
+                else
+                {
+                    cartSet(m_cartSlot, e.path);
+                    m_menu = Menu::Cart;
+                }
+            }
+            m_menuHover = -1;
+            repaint();
             return true;
         }
 
@@ -1013,13 +1176,14 @@ protected:
                     }
                     if (i == voltaire::panel::BUT_CART)
                     {
-                        // The same page the LCD opens, and deliberately the same code:
-                        // what the cards are and whether the machine can see them is one
-                        // question with one answer, and two pages that drifted apart
-                        // would be worse than one page reached two ways.
-                        askForDiag();
-                        m_menu = Menu::Diag;
-                        m_diagScroll = 0;
+                        // Rescanned on open rather than watched, like the preset library:
+                        // somebody may have just dropped an image into the ROM directory,
+                        // and nothing else would ever notice.
+                        setState("cardscan", "1");
+                        m_menu = Menu::Cart;
+                        m_cartSlot = -1;
+                        m_cartScroll = 0;
+                        m_menuHover = -1;
                         repaint();
                         return true;
                     }
@@ -1116,6 +1280,13 @@ protected:
             { m_menuHover = hit; m_hoverBankZone = zone; repaint(); }
             return true;
         }
+        if (m_menu == Menu::Cart || m_menu == Menu::CartPick || m_menu == Menu::CartFile)
+        {
+            const int hit = cartHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            if (hit != m_menuHover)
+            { m_menuHover = hit; repaint(); }
+            return true;
+        }
         if (m_menu == Menu::BankPick || m_menu == Menu::PresetActions
                 || m_menu == Menu::DeleteConfirm || m_menu == Menu::OverwriteConfirm)
         {
@@ -1201,6 +1372,18 @@ protected:
             const int last = int(libraryView().size()) - kLibCells;
             if (m_libScroll > last) m_libScroll = last;
             if (m_libScroll < 0)    m_libScroll = 0;
+            repaint();
+            return true;
+        }
+        if (m_menu == Menu::CartPick || m_menu == Menu::CartFile)
+        {
+            const int total = m_menu == Menu::CartPick ? cartPickCount()
+                                                       : int(m_cartFiles.size());
+            m_cartScroll -= int(ev.delta.getY() * 3.0f);
+            const int last = total - cartVisibleRows(kCartListRows);
+            if (m_cartScroll > last) m_cartScroll = last;
+            if (m_cartScroll < 0)    m_cartScroll = 0;
+            m_menuHover = -1;
             repaint();
             return true;
         }
@@ -2034,6 +2217,370 @@ private:
         text(L.x + L.rowH * 0.7f, L.y + L.h - L.rowH * 0.7f,
              "the machine takes about five seconds to come up   |   Escape closes this",
              nullptr);
+    }
+
+    // ---- the cartridge page ---------------------------------------------------------
+    //
+    // Four slots, four lists.  A slot shows what image is in it and what the MACHINE
+    // decided about that image, which are different questions: a file can be in a slot and
+    // refused, and until the firmware has read it -- about a third of a second -- it is in
+    // the slot and not yet mounted.  Showing the plugin's bookkeeping alone would say
+    // "SN-U110-11" over a slot the machine is playing nothing from.
+
+    /// One geometry for all three cartridge overlays, so the box does not move under the
+    /// pointer when a list opens inside it.
+    struct CartLayout { float x, y, w, h, rowH, top, cell; int rows; };
+
+    CartLayout cartLayout(int rows, float cellRows) const
+    {
+        CartLayout L;
+        const float pad = std::floor(float(getHeight()) * 0.04f) + 4.0f;
+        const float boxRows = 2.4f + cellRows * float(rows) + 1.2f;
+
+        const float room = (float(getHeight()) - pad * 2.0f) / boxRows;
+        L.rowH = std::min(overlayRowH(), room);
+        L.cell = L.rowH * cellRows;
+        L.rows = rows;
+
+        L.w = float(getWidth()) - pad * 2.0f;
+        const float wmax = L.rowH * 50.0f;
+        if (L.w > wmax)
+            L.w = wmax;
+        L.h = L.rowH * boxRows;
+        L.x = std::floor((float(getWidth()) - L.w) * 0.5f);
+        L.y = std::floor((float(getHeight()) - L.h) * 0.5f);
+        if (L.y < pad)
+            L.y = pad;
+        L.top = L.y + L.rowH * 2.4f;
+        return L;
+    }
+
+    /// How many rows a list overlay can show at once, given the window.
+    int cartVisibleRows(float cellRows) const
+    {
+        const float pad = std::floor(float(getHeight()) * 0.04f) + 4.0f;
+        const float rowH = overlayRowH();
+        const int n = int((float(getHeight()) - pad * 2.0f - rowH * 3.6f) / (rowH * cellRows));
+        return n < 3 ? 3 : n;
+    }
+
+    static constexpr float kCartSlotRows = 2.3f;    ///< a slot, with its filename under it
+    static constexpr float kCartListRows = 1.55f;   ///< a line in a list
+
+    int cartPickCount() const
+    {
+        return 1 + int(m_cardAvail.size()) + 1;     // (empty) + the images + Other...
+    }
+
+    /// Which row of the open overlay a point is on, or -1.
+    int cartHit(float px, float py) const
+    {
+        const bool slots = m_menu == Menu::Cart;
+        const float cellRows = slots ? kCartSlotRows : kCartListRows;
+        const int total = slots ? 4
+                : m_menu == Menu::CartPick ? cartPickCount() : int(m_cartFiles.size());
+        const int shown = slots ? 4 : std::min(total - m_cartScroll, cartVisibleRows(cellRows));
+        const CartLayout L = cartLayout(shown < 1 ? 1 : shown, cellRows);
+        if (px < L.x || px > L.x + L.w || py < L.top)
+            return -1;
+        const int i = int((py - L.top) / L.cell);
+        if (i < 0 || i >= shown)
+            return -1;
+        return slots ? i : i + m_cartScroll;
+    }
+
+    /// What the machine says about a slot, and what colour to say it in.
+    const char *cartVerdict(int slot, Color &c) const
+    {
+        const uint8_t v = m_cardVerdict[slot];
+        if (v == 0xff)
+        { c = Color(255, 120, 100); return "Illegal CARD -- the machine refused it"; }
+        if (v != 0x00)
+        { c = Color(120, 220, 140); return "mounted"; }
+        if (m_cardSlots[slot].present)
+        { c = Color(230, 200, 110); return "reading..."; }
+        c = Color(150, 156, 166);
+        return "empty";
+    }
+
+    void drawCartOverlayFrame(const CartLayout &L, const char *title)
+    {
+        beginPath();
+        rect(0, 0, getWidth(), getHeight());
+        fillColor(Color(0, 0, 0, 0.72f));
+        fill();
+
+        beginPath();
+        roundedRect(L.x, L.y, L.w, L.h, L.rowH * 0.4f);
+        fillColor(Color(22, 24, 28));
+        fill();
+        strokeColor(Color(96, 102, 112));
+        strokeWidth(1.0f);
+        stroke();
+
+        drawCloseButton(L.x, L.y, L.w, L.rowH);
+
+        fontFace(m_font);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        fontSize(L.rowH * 0.95f);
+        fillColor(Color(255, 180, 90));
+        text(L.x + L.rowH * 0.7f, L.y + L.rowH * 1.2f, title, nullptr);
+    }
+
+    void drawCartHover(const CartLayout &L, int row)
+    {
+        beginPath();
+        roundedRect(L.x + L.rowH * 0.4f, L.top + float(row) * L.cell,
+                    L.w - L.rowH * 0.8f, L.cell - L.rowH * 0.15f, L.rowH * 0.25f);
+        fillColor(Color(0, 163, 224, 0.30f));
+        fill();
+    }
+
+    /// The four slots.
+    void drawCartMenu()
+    {
+        const CartLayout L = cartLayout(4, kCartSlotRows);
+        drawCartOverlayFrame(L, "CARTRIDGE SLOTS");
+
+        for (int i = 0; i < 4; i ++)
+        {
+            const float top = L.top + float(i) * L.cell;
+            if (i == m_menuHover)
+                drawCartHover(L, i);
+
+            char name[24];
+            std::snprintf(name, sizeof(name), "Slot %d", i + 1);
+            fontSize(L.rowH * 0.9f);
+            fillColor(Color(168, 174, 184));
+            text(L.x + L.rowH * 0.9f, top + L.rowH * 0.8f, name, nullptr);
+
+            const bool has = m_cardSlots[i].present;
+            fillColor(has ? Color(225, 228, 232) : Color(140, 146, 156));
+            text(L.x + L.rowH * 4.2f, top + L.rowH * 0.8f,
+                 has ? (m_cardSlots[i].label.empty() ? m_cardSlots[i].path.c_str()
+                                                     : m_cardSlots[i].label.c_str())
+                     : "(empty)", nullptr);
+
+            Color vc;
+            const char *const v = cartVerdict(i, vc);
+            fontSize(L.rowH * 0.72f);
+            fillColor(vc);
+            textAlign(ALIGN_RIGHT | ALIGN_MIDDLE);
+            text(L.x + L.w - L.rowH * 2.0f, top + L.rowH * 0.8f, v, nullptr);
+            textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+
+            // The filename, under the name the image gives itself: two images can call
+            // themselves the same thing and only the path says which one this is.
+            if (has)
+            {
+                fillColor(Color(120, 126, 136));
+                text(L.x + L.rowH * 4.2f, top + L.rowH * 1.65f,
+                     baseNameOf(m_cardSlots[i].path).c_str(), nullptr);
+            }
+
+            // Drawn, not typed: the fallback font is whatever the system offers when
+            // DejaVu is not compiled in, and a missing glyph is a blank or a box.
+            {
+                const float cx = L.x + L.w - L.rowH * 1.0f;
+                const float cy = top + L.rowH * 0.8f;
+                const float r  = L.rowH * 0.26f;
+                beginPath();
+                moveTo(cx - r, cy - r * 0.5f);
+                lineTo(cx + r, cy - r * 0.5f);
+                lineTo(cx, cy + r * 0.7f);
+                closePath();
+                fillColor(Color(150, 156, 166));
+                fill();
+            }
+        }
+
+        fontSize(L.rowH * 0.72f);
+        fillColor(Color(140, 146, 156));
+        text(L.x + L.rowH * 0.7f, L.y + L.h - L.rowH * 0.7f,
+             "a card can be changed while the machine plays   |   Escape closes this",
+             nullptr);
+    }
+
+    /// What one slot could hold.
+    void drawCartPick()
+    {
+        if (m_cartSlot < 0 || m_cartSlot >= 4)
+        { m_menu = Menu::Cart; drawCartMenu(); return; }
+        const int total = cartPickCount();
+        const int shown = std::min(total - m_cartScroll, cartVisibleRows(kCartListRows));
+        const CartLayout L = cartLayout(shown < 1 ? 1 : shown, kCartListRows);
+
+        char title[48];
+        std::snprintf(title, sizeof(title), "SLOT %d", m_cartSlot + 1);
+        drawCartOverlayFrame(L, title);
+
+        for (int r = 0; r < shown; r ++)
+        {
+            const int i = r + m_cartScroll;
+            const float top = L.top + float(r) * L.cell;
+            if (i == m_menuHover)
+                drawCartHover(L, r);
+
+            fontSize(L.rowH * 0.85f);
+            if (i == 0)
+            {
+                fillColor(Color(180, 186, 196));
+                text(L.x + L.rowH * 0.9f, top + L.cell * 0.5f, "(empty)", nullptr);
+                continue;
+            }
+            if (i == total - 1)
+            {
+                fillColor(Color(150, 200, 255));
+                text(L.x + L.rowH * 0.9f, top + L.cell * 0.5f,
+                     "Other...   a card image from anywhere on this computer", nullptr);
+                continue;
+            }
+
+            const CardImage &c = m_cardAvail[size_t(i - 1)];
+            const bool here = m_cardSlots[m_cartSlot].present
+                    && m_cardSlots[m_cartSlot].path == c.path;
+            fillColor(here ? Color(120, 220, 140) : Color(225, 228, 232));
+            text(L.x + L.rowH * 0.9f, top + L.cell * 0.5f,
+                 c.label.empty() ? baseNameOf(c.path).c_str() : c.label.c_str(), nullptr);
+
+            // Where it is now, if it is somewhere.  A card lives in one slot: choosing it
+            // here takes it out of the other one, and saying so beforehand is the
+            // difference between a feature and a surprise.
+            int in = -1;
+            for (int k = 0; k < 4; k ++)
+                if (m_cardSlots[k].present && m_cardSlots[k].path == c.path)
+                    in = k;
+            fontSize(L.rowH * 0.7f);
+            textAlign(ALIGN_RIGHT | ALIGN_MIDDLE);
+            if (in == m_cartSlot)
+            { fillColor(Color(120, 220, 140)); text(L.x + L.w - L.rowH * 0.9f,
+                                                    top + L.cell * 0.5f, "in this slot", nullptr); }
+            else if (in >= 0)
+            {
+                char msg[48];
+                std::snprintf(msg, sizeof(msg), "moves out of slot %d", in + 1);
+                fillColor(Color(230, 200, 110));
+                text(L.x + L.w - L.rowH * 0.9f, top + L.cell * 0.5f, msg, nullptr);
+            }
+            else
+            {
+                fillColor(Color(120, 126, 136));
+                text(L.x + L.w - L.rowH * 0.9f, top + L.cell * 0.5f,
+                     baseNameOf(c.path).c_str(), nullptr);
+            }
+            textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+        }
+
+        fontSize(L.rowH * 0.72f);
+        fillColor(Color(140, 146, 156));
+        text(L.x + L.rowH * 0.7f, L.y + L.h - L.rowH * 0.7f,
+             total > shown
+                ? "scroll for more   |   Escape goes back to the slots"
+                : "Escape goes back to the slots", nullptr);
+    }
+
+    /// "Other..." -- a plain list of a directory.
+    ///
+    /// Built in rather than asked of the host, because a host file dialog is an optional
+    /// LV2 feature and this must not be the one thing that works in some DAWs and not
+    /// others.  It lists everything: what is and is not a card image is the machine's
+    /// judgement, and the slot reports it.
+    void drawCartFile()
+    {
+        const int total = int(m_cartFiles.size());
+        const int shown = std::min(total - m_cartScroll, cartVisibleRows(kCartListRows));
+        const CartLayout L = cartLayout(shown < 1 ? 1 : shown, kCartListRows);
+
+        drawCartOverlayFrame(L, "CHOOSE A CARD IMAGE");
+
+        // The directory being listed, elided from the LEFT: the end of a path is the part
+        // that says where you are.
+        fontSize(L.rowH * 0.7f);
+        fillColor(Color(150, 156, 166));
+        textAlign(ALIGN_RIGHT | ALIGN_MIDDLE);
+        text(L.x + L.w - L.rowH * 2.2f, L.y + L.rowH * 1.2f, m_cartDir.c_str(), nullptr);
+        textAlign(ALIGN_LEFT | ALIGN_MIDDLE);
+
+        for (int r = 0; r < shown; r ++)
+        {
+            const int i = r + m_cartScroll;
+            const float top = L.top + float(r) * L.cell;
+            if (i == m_menuHover)
+                drawCartHover(L, r);
+            const CardImage &e = m_cartFiles[size_t(i)];
+            fontSize(L.rowH * 0.85f);
+            fillColor(e.number ? Color(150, 200, 255) : Color(225, 228, 232));
+            text(L.x + L.rowH * 0.9f, top + L.cell * 0.5f, e.label.c_str(), nullptr);
+        }
+
+        fontSize(L.rowH * 0.72f);
+        fillColor(Color(140, 146, 156));
+        text(L.x + L.rowH * 0.7f, L.y + L.h - L.rowH * 0.7f,
+             "any file may be offered; the machine decides   |   Escape goes back",
+             nullptr);
+    }
+
+    static std::string baseNameOf(const std::string &path)
+    {
+        const size_t at = path.find_last_of('/');
+        return at == std::string::npos ? path : path.substr(at + 1);
+    }
+
+    /// Read a directory for the browser.  Folders first, then files, both by name.
+    void cartListDir(const std::string &dir)
+    {
+        m_cartDir = dir.empty() ? std::string("/") : dir;
+        m_cartFiles.clear();
+        m_cartScroll = 0;
+
+        std::vector<CardImage> dirs, files;
+        if (DIR *const d = ::opendir(m_cartDir.c_str()))
+        {
+            while (const dirent *const e = ::readdir(d))
+            {
+                const std::string name = e->d_name;
+                if (name == ".")
+                    continue;
+                if (name == ".." && m_cartDir == "/")
+                    continue;
+                if (name != ".." && !name.empty() && name[0] == '.')
+                    continue;               // dotfiles are noise here
+
+                struct stat st;
+                const std::string full = m_cartDir == "/" ? "/" + name
+                                                          : m_cartDir + "/" + name;
+                if (::stat(full.c_str(), &st) != 0)
+                    continue;
+
+                CardImage c;
+                c.path = full;
+                if (S_ISDIR(st.st_mode))
+                { c.number = 1; c.label = name + "/"; dirs.push_back(std::move(c)); }
+                else if (S_ISREG(st.st_mode))
+                { c.label = name; files.push_back(std::move(c)); }
+            }
+            ::closedir(d);
+        }
+        const auto byName = [](const CardImage &a, const CardImage &b)
+            { return a.label < b.label; };
+        std::sort(dirs.begin(), dirs.end(), byName);
+        std::sort(files.begin(), files.end(), byName);
+        m_cartFiles = std::move(dirs);
+        m_cartFiles.insert(m_cartFiles.end(), files.begin(), files.end());
+    }
+
+    /// Put a card in a slot, or "-" to empty it.  The DSP does the rest, in the machine's
+    /// own time; what comes back is the verdict on the panel.
+    void cartSet(int slot, const std::string &path)
+    {
+        char msg[1200];
+        std::snprintf(msg, sizeof(msg), "%d %s", slot, path.empty() ? "-" : path.c_str());
+        setState("cardset", msg);
+        // Nothing is remembered about the request.  What happens next is the machine's
+        // business and the slot's verdict says it: "reading..." while the plugin has an
+        // image the firmware has not read yet, then "mounted" or "Illegal CARD".  A note
+        // kept here would be a second answer to the same question, and the one that goes
+        // stale.
     }
 
     /// What to do with a panel that needs two fingers.
@@ -3117,7 +3664,15 @@ private:
     /// What Escape does, so the X does the same thing rather than a second version of it.
     void closeCurrentMenu()
     {
-        if (m_menu == Menu::BankPick || m_menu == Menu::PresetActions
+        if (m_menu == Menu::CartPick || m_menu == Menu::CartFile)
+        {
+            // Back to the slots, not out: somebody who opened the wrong slot's list
+            // wants the other slot, not the panel.
+            m_menu = Menu::Cart;
+            m_menuHover = -1;
+            m_cartScroll = 0;
+        }
+        else if (m_menu == Menu::BankPick || m_menu == Menu::PresetActions
                 || m_menu == Menu::DeleteConfirm || m_menu == Menu::OverwriteConfirm)
             backToLibrary();
         else
@@ -5275,8 +5830,27 @@ private:
 
     enum class Menu { None, Patch, Tone, Value, Diag, About, Reset,
                       WriteConfirm, BankPick, PresetActions, DeleteConfirm,
-                      OverwriteConfirm };
+                      OverwriteConfirm,
+                      // The cartridge page: the four slots, the list of what one slot
+                      // could hold, and the file browser behind "Other...".
+                      Cart, CartPick, CartFile };
     Menu m_menu = Menu::None;
+
+    // ---- the cartridge page.
+    //
+    // Three sources, and they are deliberately different channels.  What images EXIST and
+    // which one is in which slot comes from the plugin's "cardlist", which changes only
+    // when somebody changes it.  What the MACHINE makes of each slot rides the panel blob,
+    // because it changes on its own: a card is mounted about a third of a second after it
+    // goes in, and may be refused.  And what is in a directory the browser is looking at
+    // is read here, by this UI, because that is a question about this computer's disk.
+    std::vector<CardImage> m_cardAvail;
+    CardImage m_cardSlots[4];
+    uint8_t   m_cardVerdict[4] = { 0, 0, 0, 0 };   ///< 0 empty, 0xFF refused, else the ID
+    int m_cartSlot = -1;                ///< which slot CartPick / CartFile is for
+    int m_cartScroll = 0;
+    std::string m_cartDir;              ///< where the file browser is looking
+    std::vector<CardImage> m_cartFiles; ///< label = display name; number = 1 for a folder
 
     /// Which slot the WRITE about to be confirmed would overwrite, or -1.
     int m_writeTarget = -1;
