@@ -398,58 +398,43 @@ feedback). Must be checked by measuring drift over the whole sample, not by eye.
 
 ---
 
-## 5.5 What phase 1 cost, and the two things still unexplained
+## 5.5 The drum key map — what phase 1 and 2 were both missing
 
-Both are recorded because the way they were found is the useful part.
+Both earlier phases left the same defect recorded here as unexplained: the card mounted, the
+tones loaded, but only some keys spoke and the reference note seemed to decide which, in a
+way that depended on the (sample, reference note) pair rather than the value.
 
-### The `"TABLE"` record — solved, mechanism unknown
+**It is solved, and the model above was wrong at the root.** A U-110 drum tone never
+compares the MIDI note against its split points. It looks the note up in a 128-byte key map
+first, and the byte it finds replaces the note for zone selection *and* for pitch. Without a
+valid map the firmware was reading whatever bytes happened to follow our 8-byte silence
+sample and using them as the note — so which zone and which pitch a key produced was
+arbitrary, and changing a reference note just changed which garbage value selected which
+zone. Nothing about the reference note was ever pair-dependent.
 
-A card built from scratch mounted, was accepted, had its tone record loaded into work RAM
-correctly and its 24 sample slots built correctly by the firmware — and produced **no
-voice-enable write to the chip at all** on almost every key. Every field was cleared one at
-a time against a card known to play: start address (relocated to a dozen addresses, all
-fine), length, loop mode, loop length, bytes 7 and 9, the reference note, the tone record,
-the card ID, the fill value, the split layout. All fine. The fault was not in any of them.
+The map lives in a sample named by the `"TABLE"` record at logical `0x3760`, one of eight
+selected by bits 4-6 of the tone type byte. The full account — the disassembly, the pitch
+convention it implies, and a second hardware rule found alongside it (a sample may not cross
+a `0x40000` boundary) — is in **[`R8-DRUM-TONES.md`](R8-DRUM-TONES.md)**.
 
-What found it was giving up on reasoning and **bisecting the 512 KB image** against the
-working card, byte range by byte range, until the difference was sixteen bytes at logical
-`0x3770` — partial 1 of a tone record at index 126 whose name reads `"TABLE"`. Supplying it
-made every key speak. `ROM-ANALYSIS.md` §6.6 has the structure and the four images that
-carry it; what the firmware does with it is still open.
+**Result.** All 22 keys of a kit now speak, in order, each at its own natural pitch, with
+silence outside the map, on all six R-8 cards. `tools/r8_to_u110.py` writes a drum map per
+tone, gives each tone its own type byte (`0x80`, `0x90`, …) so each gets its own map, sets
+every sample's reference note equal to its mapped value, and pads allocations away from the
+`0x40000` boundary.
 
-**The lesson is about method, not about the U-110.** Nine of the ten hypotheses tested
-before the bisect were about fields I had authored, because those were the things I knew I
-had guessed at. The defect was in a field I did not know existed, and no amount of
-single-variable testing over the fields I *had* written could reach it. A whole-image
-bisect against a known-good example costs about twenty runs and finds anything; it should
-have been the second move, not the twentieth.
+### The method lesson, for the third time
 
-### Key coverage — unchanged by phase 2, and still the open problem
+Ten sample-record and tone-record fields were cleared one at a time against a card known to
+play before a whole-image bisect found the sixteen bytes that mattered. Then **one xref on
+the constant those bytes live at** (`add 54, #377b`, the only occurrence in the ROM)
+explained the entire mechanism in one screen of disassembly.
 
-Pre-mixing changes what each key *sounds like*, not *which keys sound*. SN-R8-10's first
-tone speaks on 16 of its 23 keys pre-mixed against 17 carrying block A alone — the same
-picture, and the difference is only which samples happen to fall on the right side of the
-reference-note problem below. Correlating the rendered keys against each other shows 15
-distinct sounds among the 16 that speak, so one pair is doubled and the rest are genuinely
-different instruments.
-
-Some of that is expected — a U-110 drum tone leaves keys unassigned, and a drum map is not
-a scale — but not all of it is accounted for, and it is the next thing to fix.
-
-### The reference note — worked around, not understood
-
-`[I]` Setting a sample's reference note to the key it sits on — the obvious thing, and
-right for a melodic multisample — makes the firmware refuse to start a voice on *some*
-keys. Which keys depends on the **(sample, reference note) pair** and not on the value:
-reference note 48 works on one sample and is silent on another, and a constant 60 across
-the board fails on exactly the same keys as key-tracking does. The step register the
-firmware computes for a converted card also comes out about 4.2x lower than a real card's
-for the same nominal `note == ref`, which is unexplained and may be the same puzzle.
-
-The converter therefore reuses `ROCK DRUMS`' own 23 reference notes verbatim. That is
-unsatisfying and it is also cheap: a drum map is not played as a melody, so the absolute
-tuning of a kit piece carries no information. It does mean per-pad tuning (§4) waits until
-this is understood.
+Single-variable testing can only reach fields you already know exist. The defect was in a
+structure I did not know was there, and no amount of it would ever have found it.
+`ROM-ANALYSIS.md` corrections #29, #31 and #33 all end with "disassemble the code that
+writes the register"; this is the same lesson for the fourth time, with "reads" in place of
+"writes".
 
 ---
 

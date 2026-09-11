@@ -1246,12 +1246,30 @@ the whole 512 KB image against a working card narrowed the entire difference to 
 its zones pointed at real samples makes those samples sound on *every* key at a uniform
 level, drowning the selected tone; pointing them at a silent sample leaves the tone audible.
 
-`[I]` **What the firmware does with it is not known.** It is not indexed by the sample
-reference note (tested: moving the silence sample's reference note from 126 to 0, 1 and 60
-changes nothing), and it is not reached by the tone-list scan, which stops at the first
-blank name long before record 126. The routine that reads a fixed `0x3760` has not been
-found. It is enough, for now, that a converted drum card must carry the record —
-`R8-CONVERSION.md` §5 does.
+`[C]` **What it is for — solved by disassembly.** Each entry names a sample whose 128
+bytes are a **key map**, and a drum tone does not compare the MIDI note against its split
+points at all. `0x7BFE`, on every note-on:
+
+```asm
+7C06: ldbze 54, 288a[54]    ; the loaded tone's TYPE byte (record +0x0A)
+7C0B: jbs   54, 7, 7c10     ; bit 7 set -> drum
+7C18: shrb  54, #04         ;   type >> 4
+7C1B: andb  54, #07         ;   bits 4-6 pick one of eight maps
+7C1E: add   54, #377b       ;   -> TABLE's sample-index array
+7C42: scall 7b07            ;   read the index, then its start address
+7C7C: add   58, 0050        ;   start + the MIDI NOTE
+7C8E: scall 7b07            ;   read one byte there
+7C9D: ldb   51, 0054        ;   and it REPLACES the note
+```
+
+So `mapped = card[start_of(TABLE[(type >> 4) & 7]) + note]`, and everything downstream —
+zone, hence sample, and pitch — uses `mapped`. `0x80` marks a key unassigned, which is why
+a factory drum tone speaks on 35 keys of 128. The tuning convention follows: a kit piece
+plays at its stored rate when the **mapped value equals the sample's reference note**, and
+a tom set is one sample at mapped values 50/55/60, i.e. −5/0/+5 semitones.
+
+Full account, including what it took to find and what the R-8 says about drum pitch, in
+[`R8-DRUM-TONES.md`](R8-DRUM-TONES.md).
 
 ### 6.7 How a patch part selects a card tone
 

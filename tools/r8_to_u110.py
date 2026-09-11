@@ -51,24 +51,11 @@ ROCK_DRUMS_P2     = bytes([0x7F, 0x7F, 0x7F, 0x7F, 0x00, 0x4C, 0x7F, 0x4C, 0x20]
 
 BLANK_TONE_HEADER = bytes([0x00, 0x00, 0x40, 0x00, 0x02, 0x00])
 
-# --- the "TABLE" record --------------------------------------------------------------
+# --- the "TABLE" record ---------------------------------------------------------------
 #
-# A tone record at logical 0x3760 -- index 126, well past the 99 the machine can select --
-# whose name field literally reads "TABLE".  A DRUM tone (header byte +0x0A = 0x80) will
-# not sound without it: with 0xFF there the firmware refuses to start a voice on almost
-# every key, and writing this record is what makes a converted card play.  Found by
-# bisecting a working card against ours one byte range at a time; the whole difference came
-# down to the sixteen bytes at 0x3770.
-#
-# It is present on exactly the images that carry drum or percussion tones -- SN-U110-02
-# (Latin/FX Percussion), -08, -10 (Rock Drums) and internal waverom0, which holds tone 99
-# "DRUMS" -- and absent from the twelve melodic cards.  The split points are the SAME on
-# all four (31, 43, 49, 55, 63, 71, 75); only the sample indices differ per card.
-#
-# What the firmware DOES with it is not yet known.  Pointing its indices at real samples
-# makes those samples sound on every key at a uniform level, drowning the selected tone;
-# pointing them at a silent sample leaves the tone audible, which is what we want.  So this
-# is written to satisfy the firmware and contribute nothing.  See R8-CONVERSION.md.
+# The tone record at logical 0x3760 -- index 126, past anything a program change can reach
+# -- whose name field reads "TABLE".  Its partial-1 sample indices are the eight drum maps
+# described above.  A drum tone is silent on almost every key without it.
 TABLE_NAME    = b'TABLE     '
 TABLE_HEADER  = bytes([0x00, 0x00, 0x2A, 0x00, 0x00, 0x00])
 TABLE_SPLITS  = bytes([0x1F, 0x2B, 0x31, 0x37, 0x3F, 0x47, 0x4B, 0xFF, 0xFF, 0xFF, 0xFF])
@@ -78,6 +65,38 @@ TABLE_RECORD  = 126
 
 SILENCE_BYTES = 8                         # the real one is 8 bytes of nothing, ref 126
 SILENCE_REF   = 0x7E
+
+# --- how a U-110 drum tone actually maps keys -----------------------------------------
+#
+# A tone whose type byte (record +0x0A) has bit 7 set is a DRUM tone, and the firmware
+# does NOT compare the MIDI note against the tone's split points.  It looks the note up in
+# a 128-byte table first (routine 0x7BFE, ROM-ANALYSIS.md section 6.6):
+#
+#     mapped = card[ start_of( TABLE[(type >> 4) & 7] ) + note ]
+#
+# and everything downstream -- which zone, hence which sample, and the pitch -- uses
+# `mapped` in place of the note.  0x80 means the key is unassigned and stays silent, which
+# is why a factory drum tone speaks on so few keys.
+#
+# TABLE is the tone record at logical 0x3760, and its twelve partial-1 sample indices are
+# eight usable entries: one drum map per tone type 0x80, 0x90 ... 0xF0.  Each names a
+# sample whose 128 bytes are the map rather than audio.  SN-U110-10 defines three maps,
+# SN-U110-02 and waverom0 eight each.
+#
+# The mapped value is a note number, so the natural-rate pitch for a kit piece is
+# `mapped == the sample's reference note`, and that is what the factory cards do: 17 of
+# SN-U110-10's 35 assigned keys sit exactly there.  The deviations are deliberate tuning --
+# sample 12 appears at mapped values 50, 55 and 60 on three keys, which is a three-tom set
+# at -5, 0 and +5 semitones, and the kick appears at 5, 18, 20 and 23.  This converter
+# writes `mapped == reference note` for every key, i.e. every drum at its own natural
+# pitch, and `--spread` adds the R-8's own tuning on top.
+MAP_BYTES    = 128      # the map is exactly 128 bytes, one per MIDI note
+MAP_UNUSED   = 0x80     # "this key is not assigned"
+MAP_REF      = 72       # the reference note the factory maps carry; never played as audio
+TONE_TYPE    = 0x80     # bit 7 = drum; bits 4-6 pick the TABLE entry
+MAX_DRUM_MAPS = 8       # bits 4-6, so eight tones per card at most
+BANK_PAD_ALLOWANCE = 1 << 16   # slack for the 0x40000 no-crossing rule below
+
 
 # The reference notes SN-U110-10 "ROCK DRUMS" gives its 23 samples, in tone order:
 # eleven for partial 1, the silence, eleven for partial 2.
@@ -236,7 +255,8 @@ def build(card, args):
         ntone = (len(insts) + 2 * per_partial_ - 1) // (2 * per_partial_)
         need = sum((mixed[k].size if mixed is not None else i[1]['end'] - i[1]['start']) + 1
                    for k, i in enumerate(insts))
-        need += ntone * (SILENCE_BYTES + 1)              # one silence per tone
+        need += ntone * (SILENCE_BYTES + 1 + MAP_BYTES + 1)   # a silence and a map per tone
+        need += ntone * BANK_PAD_ALLOWANCE                    # boundary padding, see _place
         if need <= room:
             break
         dropped_for_room.append(insts.pop()[0]['name'])
@@ -256,39 +276,57 @@ def build(card, args):
     per_partial = min(args.keys_per_partial, MAX_KEYS)
     per_tone = 2 * per_partial
 
-    def _ref(slot):
-        """The reference note for the slot-th sample of a tone.  See ROCK_DRUMS_REFS."""
-        return ROCK_DRUMS_REFS[slot] if slot < len(ROCK_DRUMS_REFS) else SILENCE_REF
+    # The MAPPED values, which are what the tone's splits are compared against and what
+    # sets the pitch -- not the MIDI keys.  Partial 1 takes a run of `per_partial`, then a
+    # gap of one so partial 2's first split can sit in it, then partial 2's run.
+    def _mapped(slot):
+        return args.map_base + (slot if slot < per_partial else slot + 1)
 
-    # --- one tone at a time, each with its own sample records
-    samples = []            # dicts: src span or None for silence, ref note, key
+    # --- one tone at a time, each with its own sample records and its own drum map
+    samples = []            # dicts: data / src, reference note, length
     tones = []
-    for ti in range((len(insts) + per_tone - 1) // per_tone):
+    ntones = (len(insts) + per_tone - 1) // per_tone
+    if ntones > MAX_DRUM_MAPS:
+        print("  only %d drum maps exist (tone type bits 4-6); keeping the first %d tones"
+              % (MAX_DRUM_MAPS, MAX_DRUM_MAPS), file=sys.stderr)
+        ntones = MAX_DRUM_MAPS
+        insts = insts[:ntones * per_tone]
+    for ti in range(ntones):
         group = insts[ti * per_tone:(ti + 1) * per_tone]
         first = len(samples)
-        lo = group[:per_partial]
-        hi = group[per_partial:]
+        lo, hi = group[:per_partial], group[per_partial:]
         keys = []
         for n, (t, A, _B, _w) in enumerate(lo):
             key = args.base_note + n
-            keys.append((t, key))
             data, length = _payload(ti * per_tone + n, A)
-            samples.append(dict(src=(A['start'], A['end']), data=data, ref=_ref(n),
-                                length=length))
-        # pad partial 1 out to a full run so the index arithmetic stays uniform
-        while len(samples) - first < per_partial:
+            # reference note == mapped value, so the drum plays at its own stored rate
+            keys.append((t, key, _mapped(n)))
+            samples.append(dict(src=(A['start'], A['end']), data=data,
+                                ref=_mapped(n), length=length))
+        while len(samples) - first < per_partial:      # pad so the index runs stay uniform
             samples.append(dict(src=None, data=None, ref=SILENCE_REF, length=SILENCE_BYTES))
         silence = len(samples)
         samples.append(dict(src=None, data=None, ref=SILENCE_REF, length=SILENCE_BYTES))
         for n, (t, A, _B, _w) in enumerate(hi):
-            key = args.base_note + per_partial + 1 + n
-            keys.append((t, key))
+            key = args.base_note + per_partial + n
             data, length = _payload(ti * per_tone + per_partial + n, A)
+            keys.append((t, key, _mapped(per_partial + n)))
             samples.append(dict(src=(A['start'], A['end']), data=data,
-                                ref=_ref(per_partial + 1 + n), length=length))
+                                ref=_mapped(per_partial + n), length=length))
         while len(samples) - silence - 1 < per_partial:
             samples.append(dict(src=None, data=None, ref=SILENCE_REF, length=SILENCE_BYTES))
-        tones.append(dict(index=ti, first=first, silence=silence, keys=keys))
+
+        # The drum map: 128 bytes, one per MIDI note, holding the mapped value for the keys
+        # this tone assigns and MAP_UNUSED everywhere else.  It is stored as a sample and
+        # read as data, never played (routine 0x7BFE).
+        kmap = bytearray([MAP_UNUSED]) * MAP_BYTES
+        for (_t, key, mv) in keys:
+            if 0 <= key < MAP_BYTES:
+                kmap[key] = mv & 0x7F
+        mapidx = len(samples)
+        samples.append(dict(src=None, data=np.frombuffer(bytes(kmap), dtype=np.uint8),
+                            ref=MAP_REF, length=MAP_BYTES))
+        tones.append(dict(index=ti, first=first, silence=silence, keys=keys, map=mapidx))
 
     if len(samples) > SAMPLE_RECORDS:
         raise SystemExit("needs %d sample records, the table holds %d"
@@ -301,8 +339,22 @@ def build(card, args):
 
     # --- sample data.  One byte past each sample is copied too: the chip fetches it to
     # interpolate against, which is the "+1" the third-party card decodes note.
+    # A sample may not cross a 0x40000 boundary.  The chip's phase accumulator supplies
+    # only address bits 0-17; bit 18 comes from the bank register, which is written once at
+    # voice start (ROM-ANALYSIS.md section 6.2), so a sample straddling the boundary wraps
+    # back on itself instead of carrying.  Not a guess: ZERO of the 1172 samples across all
+    # fifteen factory SN-U110 cards cross one.  Ours did, once -- a 53 KB reverb clap at
+    # 0x33632 -- and it played as a runaway ramp 10x too loud.
+    BANK_SPAN = 1 << 18
+
+    def _place(at, n):
+        if (at >> 18) != ((at + n) >> 18):
+            at = ((at >> 18) + 1) << 18
+        return at
+
     at = DATA_BASE
     for s in samples:
+        at = _place(at, s['length'])       # the +1 interpolation byte may share the next bank
         s['start'] = at
         if s.get('data') is not None:
             # Generated bytes: one extra zero-delta byte so the chip's interpolation fetch
@@ -338,15 +390,21 @@ def build(card, args):
         raise SystemExit("needs %d tone records, the table holds %d"
                          % (len(tones), TONE_RECORDS))
     for T in tones:
-        p1_lo = args.base_note
-        splits1 = [p1_lo + k for k in range(per_partial)]
-        splits2 = [splits1[-1] + k for k in range(per_partial)]
+        # The splits are compared against the MAPPED value, not the key.  Partial 1's run
+        # is map_base .. map_base+10; partial 2's first split sits in the one-value gap
+        # after it, so a mapped value at or below that lands on partial 2's silence.
+        splits1 = [_mapped(k) for k in range(per_partial)]
+        splits2 = [_mapped(per_partial - 1) + 1] + [_mapped(per_partial + k)
+                                                    for k in range(per_partial - 1)]
         idx1 = list(range(T['first'], T['first'] + per_partial)) + [T['silence']]
         idx2 = [T['silence']] + list(range(T['silence'] + 1, T['silence'] + 1 + per_partial))
         name = args.tone_name % dict(part=card['part'], n=T['index'] + 1)
         rec = bytearray(0x50)
         rec[0:10] = ("%-10.10s" % name).encode('ascii', 'replace')
-        rec[0x0A:0x10] = ROCK_DRUMS_HEADER
+        # bit 7 marks a drum tone; bits 4-6 pick which of the eight drum maps it uses, so
+        # each tone on the card gets its own -- exactly as ROCK DRUMS (0x80) and ELEC DRUMS
+        # (0x90) do on SN-U110-10.
+        rec[0x0A:0x10] = bytes([TONE_TYPE | (T['index'] << 4)]) + ROCK_DRUMS_HEADER[1:]
         for base, splits, idx, params in ((0x10, splits1, idx1, ROCK_DRUMS_P1),
                                           (0x30, splits2, idx2, ROCK_DRUMS_P2)):
             rec[base:base + 11] = bytes(x & 0x7F for x in splits)
@@ -373,7 +431,11 @@ def build(card, args):
     tbl[0:10] = TABLE_NAME
     tbl[0x0A:0x10] = TABLE_HEADER
     tbl[0x10:0x1B] = TABLE_SPLITS
-    tbl[0x1B:0x27] = bytes([tones[0]['silence']] * 8 + [0xFF] * 4)
+    # entry k is read by a tone whose type byte is 0x80 | (k << 4), so entry k names tone
+    # k's own drum map.  Spare entries point at the last map rather than 0xFF, which the
+    # firmware would read as an unusable sample index.
+    entries = [tones[min(k, len(tones) - 1)]['map'] for k in range(MAX_DRUM_MAPS)]
+    tbl[0x1B:0x27] = bytes(entries + [0xFF] * 4)
     tbl[0x27:0x30] = TABLE_P1PAR
     tbl[0x30:0x3B] = b'\xFF' * 11
     tbl[0x3B:0x47] = b'\xFF' * 12
@@ -444,6 +506,9 @@ def main():
     ap.add_argument('--tone-name', default='R8-%(part)02d SET%(n)d',
                     help='10-char tone name template')
     ap.add_argument('--base-note', type=int, default=36, help='MIDI note of the first key (36 = C2)')
+    ap.add_argument('--map-base', type=int, default=36,
+                    help='first MAPPED value; each sample\'s reference note is set to its '
+                         'own mapped value, so every drum plays at its stored rate')
     ap.add_argument('--keys-per-partial', type=int, default=MAX_KEYS,
                     help='keys on each partial; 11 is the most a partial can hold')
     ap.add_argument('--max-instruments', type=int, default=0, help='0 = all that fit')
@@ -502,10 +567,10 @@ def main():
     print("  sample data %d bytes of %d free (%.1f%%)"
           % (used, DATA_END - DATA_BASE, 100.0 * used / (DATA_END - DATA_BASE)))
     for T in tones:
-        keys = [k for (_t, k) in T['keys']]
-        print("  tone %d  notes %d..%d: %s"
-              % (T['index'], min(keys), max(keys),
-                 ' '.join('%s@%d' % (t['name'], k) for (t, k) in T['keys'])))
+        keys = [k for (_t, k, _m) in T['keys']]
+        print("  tone %d (type %#04x, drum map = sample %d)  notes %d..%d"
+              % (T['index'], TONE_TYPE | (T['index'] << 4), T['map'], min(keys), max(keys)))
+        print("     " + ' '.join('%s@%d' % (t['name'], k) for (t, k, _m) in T['keys']))
     if dropped:
         print("  block B not carried over:")
         for t, why in dropped:

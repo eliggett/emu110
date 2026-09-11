@@ -26,28 +26,23 @@ Source dumps live outside the repo, in ~/Downloads/roland_sn-u-stuff_for-elliott
 
 --- via-card/ -------------------------------------------------------------------------
 
-The same R-8 samples again, but this time played BY THE MACHINE: converted into a U-110
-card with tools/r8_to_u110.py, mounted in slot 1, and rendered through the emulator's own
-audio path (tools in plugin/tools/, harness in the session scratchpad).  So unlike the
-files above -- which are the ROM bytes decoded directly by Python -- these went through the
-real firmware, the real tone-generator device and the real output stage.
+The same R-8 samples played BY THE MACHINE: converted into a U-110 card with
+tools/r8_to_u110.py, mounted in slot 1, rendered through the emulator's own audio path.
+Unlike the files above -- Python decoding ROM bytes directly -- these went through the real
+firmware, the real tone generator and the real output stage.
 
-    sn-r8-10_tone0_chromatic.wav   SN-R8-10 "Dance", tone R8-10 SET1, notes 36..58
-    sn-r8-10_tone1_chromatic.wav   the same card's second tone, notes 36..40
-    sn-r8-09_tone0_chromatic.wav   SN-R8-09 "Power Drums USA", tone R8-09 SET1
+    sn-r8-10_kit1.wav    SN-R8-10 "Dance", tone R8-10 SET1, notes 36..57
+    sn-r8-10_kit2.wav    the same card's second tone
+    sn-r8-09_kit1.wav    SN-R8-09 "Power Drums USA"
+    sn-r8-11_kit1.wav    SN-R8-11 "Metallic Percussion"
 
-One note per 1 second, chromatically, velocity 110, on a single-part patch (preset 1
-"Ac.Piano", whose parts 2-6 are disabled) so nothing but the card is sounding.
+One note per second, chromatically, velocity 110, on a single-part patch (preset 1
+"Ac.Piano", parts 2-6 disabled) so nothing but the card is sounding.
 
-Not every key speaks, and that is partly expected -- a U-110 drum tone leaves keys
-unassigned -- but the gaps here are not yet all accounted for.  Pitch is whatever the
-reference-note table gives; for a drum map that is not meaningful and has not been tuned.
+All 22 keys of a kit speak, in order, each at its own natural pitch, and the keys outside
+the map are silent -- which is what a U-110 drum tone should do.  Both R-8 sample blocks
+are summed onto each key, so a kick keeps its boom and a snare its shell tone.
 
-*_premixed.wav are phase 2: each R-8 tone's two sample blocks SUMMED onto one key and
-re-encoded into the U-110's delta format, so a kick keeps its boom and a snare its shell
-tone.  The *_chromatic.wav files beside them are phase 1, block A only, for comparison.
-Read back off the finished card the sum is accurate to 34-63 dB (median 47), the worst
-cases being the hi-hats, where a 4-bit mantissa on broadband noise is the limit.
-
-Which keys speak is NOT improved by phase 2 and is still wrong: 16 of 23 on SN-R8-10, 15 of
-them distinct.  See analysis/R8-CONVERSION.md section 5.5.
+This needed the drum key map: a U-110 drum tone does not compare the MIDI note against its
+split points at all, it looks the note up in a 128-byte table first.  See
+analysis/R8-DRUM-TONES.md.
