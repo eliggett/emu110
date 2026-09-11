@@ -330,15 +330,50 @@ because the U-110 reserves its first 16 KB for tables and each sample costs one 
 interpolation byte. SN-R8-09 needs 550 KB of the 496 KB available, so the converter drops
 from the end and says which — two toms, leaving 24 of 26 instruments and 99.2% full.
 
-### Phase 2 — pre-mix, to get block B back
+### Phase 2 — built.  Both layers, summed and re-encoded.  `--premix`, on by default
 
-Phase 1 carries block A only, so every two-layer R-8 sound loses its other half: a 909 kick
-keeps its click and loses its boom, a snare keeps its noise and loses its shell tone (§2.2).
-That is the single biggest audible gap, and 17 of SN-R8-10's 26 instruments are affected.
+Phase 1 carried block A only, so every two-layer R-8 sound lost its other half: a 909 kick
+kept its click and lost its boom, a snare kept its noise and lost its shell tone (§2.2).
+17 of SN-R8-10's 26 instruments were affected. Phase 2 sums the two and re-encodes, which
+fits phase 1's layout unchanged — still one sample per key.
 
-The fix is to sum A and B into one sample at conversion time, which fits phase 1's layout
-unchanged — one sample per key — at the cost of a fixed layer balance. It also *saves*
-space: one stream of `max(len A, len B)` replaces two.
+**The encoder** (`rc.encode_float8_delta`) is the only real signal processing in the
+project. The player integrates — the accumulator starts at the first decoded byte and every
+byte after adds to it — so quantising each difference independently lets error accumulate
+without bound. This is a DPCM encoder with error feedback: at each step it aims at the
+**absolute** target from wherever the reconstruction actually is, so every quantisation
+error is corrected by the next sample instead of being carried forward. The nearest code is
+a lookup rather than arithmetic, because the decoder's steps are a float's — fine near zero
+and coarse near full scale.
+
+It is exact on data that came from the format: re-encoding a decoded R-8 block reproduces
+the original bytes with zero error, which is the first thing to check and the cheapest.
+
+**Scaling.** Two summed blocks overflow the format in two different ways — the sum can
+exceed the largest representable *level*, and, less obviously, it can ask for a *step*
+larger than the largest the 8-bit float can encode, which is what makes a summed hi-hat
+saturate. The converter takes the smaller of the two bounds and applies **one global scale
+to the whole card**, never a per-instrument one: per-instrument normalising would maximise
+each hit while silently rewriting the kit's internal balance, and the U-110 sample record
+has no level field to put that back (byte 9 is the fine tune, §3.1). The scale comes out
+near 0.5 on every card — about 6 dB below a factory card. That costs level, not accuracy:
+the format is a float, so halving the signal halves the step sizes too.
+
+**Measured, reading the bytes back off the finished card** and comparing against the
+intended sum, for all 22 instruments of SN-R8-10's first tone:
+
+| | SNR |
+|---|---|
+| best (`78_K`, `78_COW`, `909SIDE`) | 61–63 dB |
+| median | 46.8 dB |
+| worst (`909_CHH`, `909_OHH`, `78_CHH`, `78_OHH`) | 33.9–35.0 dB |
+
+The worst cases are all hi-hats, which is what a 4-bit mantissa on broadband noise gives;
+error is bounded at 32 counts and the drift is exactly zero everywhere. Space goes from 56%
+to 60% of the card — one stream of `max(len A, len B)` replaces two, so pre-mixing is
+nearly free.
+
+`--no-premix` restores the phase 1 behaviour for comparison.
 
 This needs a **re-encoder**, the only real signal processing in the project: integrate both
 blocks, sum, re-differentiate, and requantise each delta to an 8-bit float code. Because the
@@ -346,8 +381,7 @@ player integrates, quantisation error accumulates — so choose each code greedi
 the *running reconstruction* rather than the instantaneous delta (a DPCM encoder with error
 feedback). Must be checked by measuring drift over the whole sample, not by eye.
 
-(Space is not the constraint it was: phase 1 uses 56% of SN-R8-10's card, and pre-mixing
-would drop that further.)
+
 
 ### Phase 3 — the rest
 
@@ -389,6 +423,18 @@ had guessed at. The defect was in a field I did not know existed, and no amount 
 single-variable testing over the fields I *had* written could reach it. A whole-image
 bisect against a known-good example costs about twenty runs and finds anything; it should
 have been the second move, not the twentieth.
+
+### Key coverage — unchanged by phase 2, and still the open problem
+
+Pre-mixing changes what each key *sounds like*, not *which keys sound*. SN-R8-10's first
+tone speaks on 16 of its 23 keys pre-mixed against 17 carrying block A alone — the same
+picture, and the difference is only which samples happen to fall on the right side of the
+reference-note problem below. Correlating the rendered keys against each other shows 15
+distinct sounds among the 16 that speak, so one pair is doubled and the rest are genuinely
+different instruments.
+
+Some of that is expected — a U-110 drum tone leaves keys unassigned, and a drum map is not
+a scale — but not all of it is accounted for, and it is the next thing to fix.
 
 ### The reference note — worked around, not understood
 

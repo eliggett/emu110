@@ -213,3 +213,55 @@ def write_wav(path, x, rate=ENGINE_RATE, peak=0.89):
     w = _wave.open(path, 'wb')
     w.setnchannels(1); w.setsampwidth(2); w.setframerate(int(rate))
     w.writeframes((d * 32767).astype('<i2').tobytes()); w.close()
+
+
+# --- writing sample data back ----------------------------------------------------------
+
+_DEC_TABLE = np.array([decode_float8(np.array([b], dtype=np.uint8))[0] for b in range(256)],
+                      dtype=np.int32)
+
+def _nearest_code_table():
+    """For every reachable residual, the byte whose decoded delta is closest to it.
+
+    The decoder spans -2048..+1984 unevenly -- it is a float, so the steps are fine near
+    zero and coarse near full scale -- which is exactly why this is a lookup rather than
+    arithmetic.  Residuals are clamped into that span; a residual larger than the biggest
+    step simply takes the biggest step and the remainder is carried to the next sample by
+    the caller, which is the whole point of tracking the reconstruction.
+    """
+    lo, hi = -4096, 4096
+    r = np.arange(lo, hi, dtype=np.int32)
+    # |decode(code) - residual| for every code, then argmin.  256 x 8192 is small.
+    err = np.abs(_DEC_TABLE[None, :] - r[:, None])
+    return err.argmin(axis=1).astype(np.uint8), lo
+
+_NEAREST, _NEAREST_LO = _nearest_code_table()
+
+
+def encode_float8_delta(target):
+    """Quantise a waveform into the 8-bit float DELTA bytes the chip expects.
+
+    The player integrates -- acc starts at the first decoded byte and every byte after adds
+    to it (roland_lp.cpp) -- so a naive "quantise each difference" encoder lets error
+    accumulate without bound.  This one is a DPCM encoder with error feedback: at each step
+    it aims at the ABSOLUTE target from wherever the reconstruction actually is, so every
+    quantisation error is corrected by the next sample instead of being carried forward.
+
+    `target` must already fit the decoder's range (about +/-1984); scale before calling.
+    Returns (bytes, reconstruction).
+    """
+    t = np.rint(np.asarray(target, dtype=np.float64)).astype(np.int32)
+    n = t.size
+    out = np.zeros(n, dtype=np.uint8)
+    recon = np.zeros(n, dtype=np.int32)
+    acc = 0
+    for i in range(n):
+        # acc is what the chip will hold after the previous byte; aim at t[i] from there.
+        resid = int(t[i]) - acc
+        if resid < -4096: resid = -4096
+        elif resid > 4095: resid = 4095
+        code = _NEAREST[resid - _NEAREST_LO]
+        acc += int(_DEC_TABLE[code])
+        out[i] = code
+        recon[i] = acc
+    return out, recon

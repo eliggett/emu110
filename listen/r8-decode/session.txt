@@ -42,3 +42,12 @@ One note per 1 second, chromatically, velocity 110, on a single-part patch (pres
 Not every key speaks, and that is partly expected -- a U-110 drum tone leaves keys
 unassigned -- but the gaps here are not yet all accounted for.  Pitch is whatever the
 reference-note table gives; for a drum map that is not meaningful and has not been tuned.
+
+*_premixed.wav are phase 2: each R-8 tone's two sample blocks SUMMED onto one key and
+re-encoded into the U-110's delta format, so a kick keeps its boom and a snare its shell
+tone.  The *_chromatic.wav files beside them are phase 1, block A only, for comparison.
+Read back off the finished card the sum is accurate to 34-63 dB (median 47), the worst
+cases being the hi-hats, where a 4-bit mantissa on broadband noise is the limit.
+
+Which keys speak is NOT improved by phase 2 and is still wrong: 16 of 23 on SN-R8-10, 15 of
+them distinct.  See analysis/R8-CONVERSION.md section 5.5.

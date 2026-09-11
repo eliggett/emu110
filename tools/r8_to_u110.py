@@ -152,6 +152,47 @@ def r8_blocks(card, min_layer_bytes, stub_repeats):
     return out
 
 
+MAX_STEP = 1984         # the largest delta the 8-bit float can represent
+MAX_AMP  = 1984         # and the largest level
+
+
+def premix(card, insts):
+    """Sum each instrument's two sample blocks into one waveform, phase 2 of section 5.
+
+    The R-8 sounds block A and block B together -- a kick's click and its boom, a snare's
+    noise and its shell tone -- so carrying only A, as phase 1 does, loses half of every
+    two-layer sound.  Summing them here puts both back on one key, at the cost of a fixed
+    balance between the layers (the R-8's own per-block levels are in w6..w8 and are not
+    decoded).
+
+    Returns (waveforms, scale).  A SINGLE scale is applied to every instrument on the card,
+    never a per-instrument one: per-instrument normalising would maximise each hit but
+    silently rewrite the kit's internal balance, and the U-110 sample record has no level
+    field to put that back (byte 9 is the fine tune).  The scale is the smaller of what the
+    LEVEL allows and what the SLEW allows -- two summed samples can ask for a step larger
+    than the format's biggest, which is what makes a summed hi-hat saturate -- and comes out
+    near 0.5, i.e. about 6 dB below a factory card.
+    """
+    waves = []
+    for (t, A, B, _why) in insts:
+        a = rc.integrate(card['image'], A['start'], A['end'])
+        b = (rc.integrate(card['image'], B['start'], B['end'])
+             if B is not None else np.zeros(0))
+        n = max(len(a), len(b))
+        m = np.zeros(n)
+        m[:len(a)] += a
+        m[:len(b)] += b
+        waves.append(m)
+    scale = 1.0
+    for m in waves:
+        if m.size < 2:
+            continue
+        scale = min(scale, MAX_AMP / max(np.abs(m).max(), 1e-9))
+        d = np.diff(np.concatenate(([0.0], m)))
+        scale = min(scale, MAX_STEP / max(np.abs(d).max(), 1e-9))
+    return [m * scale for m in waves], scale
+
+
 def build(card, args):
     """Author the logical image, then scramble it and drop the plain header on top.
 
@@ -181,6 +222,8 @@ def build(card, args):
     if args.max_instruments:
         insts = insts[:args.max_instruments]
 
+    mixed, mix_scale = (premix(card, insts) if args.premix else (None, 1.0))
+
     # A 512K R-8 card can hold more sample data than a 512K U-110 card has room for, because
     # the U-110 reserves the first 16K for its tables and we spend a byte per sample on the
     # interpolation point.  SN-R8-09 needs 550K of the 496K available.  Drop from the end
@@ -191,14 +234,24 @@ def build(card, args):
     while insts:
         per_partial_ = min(args.keys_per_partial, MAX_KEYS)
         ntone = (len(insts) + 2 * per_partial_ - 1) // (2 * per_partial_)
-        need = sum(i[1]['end'] - i[1]['start'] + 1 for i in insts)
+        need = sum((mixed[k].size if mixed is not None else i[1]['end'] - i[1]['start']) + 1
+                   for k, i in enumerate(insts))
         need += ntone * (SILENCE_BYTES + 1)              # one silence per tone
         if need <= room:
             break
         dropped_for_room.append(insts.pop()[0]['name'])
+        if mixed is not None:
+            mixed.pop()
     if dropped_for_room:
         print("  no room for %d instrument(s), dropped: %s"
               % (len(dropped_for_room), ' '.join(reversed(dropped_for_room))), file=sys.stderr)
+
+    def _payload(n, A):
+        """The bytes for instrument n: either its mixed waveform or block A verbatim."""
+        if mixed is None:
+            return None, A['end'] - A['start']       # copied from the source image
+        code, _ = rc.encode_float8_delta(mixed[n])
+        return code, code.size
 
     per_partial = min(args.keys_per_partial, MAX_KEYS)
     per_tone = 2 * per_partial
@@ -219,20 +272,22 @@ def build(card, args):
         for n, (t, A, _B, _w) in enumerate(lo):
             key = args.base_note + n
             keys.append((t, key))
-            samples.append(dict(src=(A['start'], A['end']), ref=_ref(n),
-                                length=A['end'] - A['start']))
+            data, length = _payload(ti * per_tone + n, A)
+            samples.append(dict(src=(A['start'], A['end']), data=data, ref=_ref(n),
+                                length=length))
         # pad partial 1 out to a full run so the index arithmetic stays uniform
         while len(samples) - first < per_partial:
-            samples.append(dict(src=None, ref=SILENCE_REF, length=SILENCE_BYTES))
+            samples.append(dict(src=None, data=None, ref=SILENCE_REF, length=SILENCE_BYTES))
         silence = len(samples)
-        samples.append(dict(src=None, ref=SILENCE_REF, length=SILENCE_BYTES))
+        samples.append(dict(src=None, data=None, ref=SILENCE_REF, length=SILENCE_BYTES))
         for n, (t, A, _B, _w) in enumerate(hi):
             key = args.base_note + per_partial + 1 + n
             keys.append((t, key))
-            samples.append(dict(src=(A['start'], A['end']), ref=_ref(per_partial + 1 + n),
-                                length=A['end'] - A['start']))
+            data, length = _payload(ti * per_tone + per_partial + n, A)
+            samples.append(dict(src=(A['start'], A['end']), data=data,
+                                ref=_ref(per_partial + 1 + n), length=length))
         while len(samples) - silence - 1 < per_partial:
-            samples.append(dict(src=None, ref=SILENCE_REF, length=SILENCE_BYTES))
+            samples.append(dict(src=None, data=None, ref=SILENCE_REF, length=SILENCE_BYTES))
         tones.append(dict(index=ti, first=first, silence=silence, keys=keys))
 
     if len(samples) > SAMPLE_RECORDS:
@@ -249,7 +304,12 @@ def build(card, args):
     at = DATA_BASE
     for s in samples:
         s['start'] = at
-        if s['src'] is not None:
+        if s.get('data') is not None:
+            # Generated bytes: one extra zero-delta byte so the chip's interpolation fetch
+            # past the end lands on the same value rather than stepping.
+            logical[at:at + s['length']] = s['data']
+            logical[at + s['length']] = 0x00
+        elif s['src'] is not None:
             a, b = s['src']
             logical[at:at + s['length'] + 1] = card['image'][a:b + 1]
         at += s['length'] + 1
@@ -387,6 +447,10 @@ def main():
     ap.add_argument('--keys-per-partial', type=int, default=MAX_KEYS,
                     help='keys on each partial; 11 is the most a partial can hold')
     ap.add_argument('--max-instruments', type=int, default=0, help='0 = all that fit')
+    ap.add_argument('--premix', dest='premix', action='store_true', default=True,
+                    help='sum each R-8 tone\'s two sample blocks into one key (default)')
+    ap.add_argument('--no-premix', dest='premix', action='store_false',
+                    help='carry block A only, as phase 1 did')
     ap.add_argument('--min-layer-bytes', type=int, default=64,
                     help='floor against degenerate block-B spans; the stub test is the real one')
     ap.add_argument('--stub-repeats', type=int, default=3,
@@ -427,10 +491,13 @@ def main():
     print("SN-R8-%02d %r  ->  %s" % (card['part'], card['label'], a.out))
     print("  card id %d (0x%02X), label %r" % (a.card_id, a.card_id, a.label))
     dropped = []
-    print("  %d instruments, %d sample records, %d tones  (block A only in phase 1; %d "
-          "instruments also carry a live block B, unused for now)"
-          % (len(insts), len(samples), len(tones),
-             sum(1 for (_t, _A, B, _w) in insts if B is not None)))
+    live_b = sum(1 for (_t, _A, B, _w) in insts if B is not None)
+    print("  %d instruments, %d sample records, %d tones"
+          % (len(insts), len(samples), len(tones)))
+    print("  %s" % ("blocks A and B summed onto one key for the %d instruments that have "
+                    "both" % live_b if a.premix
+                    else "block A only; %d instruments have a live block B, not carried"
+                         % live_b))
     used = sum(s['length'] + 1 for s in samples)
     print("  sample data %d bytes of %d free (%.1f%%)"
           % (used, DATA_END - DATA_BASE, 100.0 * used / (DATA_END - DATA_BASE)))
