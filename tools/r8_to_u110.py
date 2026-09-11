@@ -648,6 +648,26 @@ def select(insts, picks):
     return chosen
 
 
+def card_number_from_name(name):
+    """The plugin's own rule, from Voltaire110Plugin.cpp cardNumberFromName().
+
+    Separators are thrown away, then "snu110" followed by exactly two digits names the
+    card.  Kept in step with that function deliberately: a card image the scan cannot name
+    is invisible however good it is.
+    """
+    flat = ''.join(c.lower() for c in name if c not in '-_ .')
+    tag, at = 'snu110', 0
+    while True:
+        at = flat.find(tag, at)
+        if at < 0:
+            return None
+        d = at + len(tag)
+        if (d + 1 < len(flat) and flat[d].isdigit() and flat[d + 1].isdigit()
+                and not (d + 2 < len(flat) and flat[d + 2].isdigit())):
+            return int(flat[d:d + 2])
+        at += 1
+
+
 def read_kit(path):
     """A kit file: one entry per line, `#` starts a comment, blank lines ignored."""
     out = []
@@ -751,6 +771,17 @@ def main():
 
     img, samples, tones, insts = build(insts, a)
     open(a.out, 'wb').write(img)
+
+    # The plugin finds cards by NAME, not by content: Voltaire110Plugin.cpp's
+    # cardNumberFromName() strips - _ space and . and then looks for "snu110" followed by
+    # exactly two digits.  A file it cannot parse is never offered in the card list, however
+    # valid the image is -- so say so here rather than let it look like a silent failure or,
+    # worse, like an older card at the same slot is the new one.
+    if card_number_from_name(os.path.basename(a.out)) is None:
+        print("warning: %r has no `sn-u110-NN` in it, so the plugin's card scan will not\n"
+              "         offer it.  Rename it, e.g. sn-u110-%02d_%s"
+              % (os.path.basename(a.out), a.card_id,
+                 os.path.basename(a.out).lstrip('0123456789-_ ')), file=sys.stderr)
 
     print("%s  ->  %s"
           % (' + '.join('SN-R8-%02d' % p for p in parts), a.out))

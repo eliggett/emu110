@@ -508,6 +508,13 @@ at every fade length because it genuinely swells toward its end, and a gated sou
 `tools/r8_extract.py` fades too, so the direct decodes in `listen/r8-decode/` match what a
 converted card does.
 
+**One trap worth knowing when checking whether a fix landed.** The plugin finds cards by
+**name**, not by content: `cardNumberFromName()` strips separators and looks for `snu110`
+followed by exactly two digits. `examplekit.bin` parses to nothing and is never offered in
+the card list, however good the image is — so a rebuilt card under such a name is not what
+you are hearing, and an older card at the same slot may be. The converter now warns when
+the output name cannot be parsed.
+
 ### Still open
 
 - **The R-8 MK II's 3 MB of internal waves.** They decode perfectly (§1) but have no
