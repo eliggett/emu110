@@ -95,7 +95,8 @@ MAP_UNUSED   = 0x80     # "this key is not assigned"
 MAP_REF      = 72       # the reference note the factory maps carry; never played as audio
 TONE_TYPE    = 0x80     # bit 7 = drum; bits 4-6 pick the TABLE entry
 MAX_DRUM_MAPS = 8       # bits 4-6, so eight tones per card at most
-BANK_PAD_ALLOWANCE = 1 << 16   # slack for the 0x40000 no-crossing rule below
+# Worst case, one 0x40000 boundary wastes almost a whole sample's length; 512 KB
+# holds one such boundary above DATA_BASE, so one sample's slack is enough.
 
 
 # The reference notes SN-U110-10 "ROCK DRUMS" gives its 23 samples, in tone order:
@@ -137,13 +138,17 @@ def r8_blocks(card, min_layer_bytes, stub_repeats):
     against degenerate spans.
     """
     taken = []
+    exact = set()          # spans already accepted, so a REPEAT is sharing, not overlapping
     def overlaps(s, e):
+        if (s, e) in exact:
+            return False
         return any(max(0, min(e, y) - max(s, x)) > 0 for x, y in taken)
 
     for t in card['tones']:
         A = t['blocks'][0]
         if 0 < A['end'] - A['start'] <= rc.BANK_SIZE:
             taken.append((A['start'], A['end']))
+            exact.add((A['start'], A['end']))
 
     lengths = {}
     for t in card['tones']:
@@ -167,6 +172,7 @@ def r8_blocks(card, min_layer_bytes, stub_repeats):
         if why is None:
             keep = B
             taken.append((B['start'], B['end']))
+            exact.add((B['start'], B['end']))
         out.append((t, A, keep, why))
     return out
 
@@ -253,10 +259,15 @@ def build(card, args):
     while insts:
         per_partial_ = min(args.keys_per_partial, MAX_KEYS)
         ntone = (len(insts) + 2 * per_partial_ - 1) // (2 * per_partial_)
-        need = sum((mixed[k].size if mixed is not None else i[1]['end'] - i[1]['start']) + 1
-                   for k, i in enumerate(insts))
+        uniq = {}
+        for k, (t, A, B, _w) in enumerate(insts):
+            uniq[(A['start'], A['end'],
+                  B['start'] if B is not None else None,
+                  B['end'] if B is not None else None)] = \
+                (mixed[k].size if mixed is not None else A['end'] - A['start'])
+        need = sum(v + 1 for v in uniq.values())
         need += ntone * (SILENCE_BYTES + 1 + MAP_BYTES + 1)   # a silence and a map per tone
-        need += ntone * BANK_PAD_ALLOWANCE                    # boundary padding, see _place
+        need += max(uniq.values(), default=0)                 # boundary padding, see _place
         if need <= room:
             break
         dropped_for_room.append(insts.pop()[0]['name'])
@@ -266,24 +277,43 @@ def build(card, args):
         print("  no room for %d instrument(s), dropped: %s"
               % (len(dropped_for_room), ' '.join(reversed(dropped_for_room))), file=sys.stderr)
 
-    def _payload(n, A):
-        """The bytes for instrument n: either its mixed waveform or block A verbatim."""
+    # Instruments that resolve to identical bytes are stored ONCE.  R-8 cards carry the same
+    # drum under several names -- ATAK_T1/ATAK_T2 and HOLO_T1/HOLO_T2 on SN-R8-09, and
+    # CRSH_C6/CRSH_C7/SPLA_C3 on SN-R8-11 -- differing only in the envelope words, which are
+    # not decoded (R8-DRUM-TONES.md section 4).  Sharing the bytes buys the space back and,
+    # more usefully, lets the copies be PITCHED apart instead of sounding identical: the
+    # group takes one reference note and each key's mapped value sits a few semitones off
+    # it, which is exactly how a factory tom set is built.
+    payload_cache = {}
+
+    def _payload(n, A, B):
+        """(bytes, length, group key) for instrument n."""
+        gkey = (A['start'], A['end'],
+                B['start'] if B is not None else None,
+                B['end'] if B is not None else None)
+        if gkey in payload_cache:
+            return payload_cache[gkey] + (gkey,)
         if mixed is None:
-            return None, A['end'] - A['start']       # copied from the source image
-        code, _ = rc.encode_float8_delta(mixed[n])
-        return code, code.size
+            out = (None, A['end'] - A['start'])
+        else:
+            code, _ = rc.encode_float8_delta(mixed[n])
+            out = (code, code.size)
+        payload_cache[gkey] = out
+        return out + (gkey,)
 
     per_partial = min(args.keys_per_partial, MAX_KEYS)
     per_tone = 2 * per_partial
 
     # The MAPPED values, which are what the tone's splits are compared against and what
     # sets the pitch -- not the MIDI keys.  Partial 1 takes a run of `per_partial`, then a
-    # gap of one so partial 2's first split can sit in it, then partial 2's run.
+    # gap of one so partial 2's first split can sit in it, then partial 2's run.  They only
+    # have to ASCEND, so a repeated sample can be spaced further along and sound higher.
     def _mapped(slot):
         return args.map_base + (slot if slot < per_partial else slot + 1)
 
     # --- one tone at a time, each with its own sample records and its own drum map
     samples = []            # dicts: data / src, reference note, length
+    group_ref = {}          # payload -> the reference note its first key set
     tones = []
     ntones = (len(insts) + per_tone - 1) // per_tone
     if ntones > MAX_DRUM_MAPS:
@@ -296,23 +326,29 @@ def build(card, args):
         first = len(samples)
         lo, hi = group[:per_partial], group[per_partial:]
         keys = []
-        for n, (t, A, _B, _w) in enumerate(lo):
+        for n, (t, A, B, _w) in enumerate(lo):
             key = args.base_note + n
-            data, length = _payload(ti * per_tone + n, A)
-            # reference note == mapped value, so the drum plays at its own stored rate
-            keys.append((t, key, _mapped(n)))
-            samples.append(dict(src=(A['start'], A['end']), data=data,
-                                ref=_mapped(n), length=length))
+            data, length, gkey = _payload(ti * per_tone + n, A, B)
+            mv = _mapped(n)
+            # Reference note == mapped value, so a drum plays at its own stored rate -- the
+            # convention the factory cards use.  A repeat of an earlier sample keeps THAT
+            # sample's reference note instead, so its own mapped value pitches it up.
+            ref = group_ref.setdefault(gkey, mv)
+            keys.append((t, key, mv, mv - ref))
+            samples.append(dict(src=(A['start'], A['end']), data=data, group=gkey,
+                                ref=ref, length=length))
         while len(samples) - first < per_partial:      # pad so the index runs stay uniform
             samples.append(dict(src=None, data=None, ref=SILENCE_REF, length=SILENCE_BYTES))
         silence = len(samples)
         samples.append(dict(src=None, data=None, ref=SILENCE_REF, length=SILENCE_BYTES))
-        for n, (t, A, _B, _w) in enumerate(hi):
+        for n, (t, A, B, _w) in enumerate(hi):
             key = args.base_note + per_partial + n
-            data, length = _payload(ti * per_tone + per_partial + n, A)
-            keys.append((t, key, _mapped(per_partial + n)))
-            samples.append(dict(src=(A['start'], A['end']), data=data,
-                                ref=_mapped(per_partial + n), length=length))
+            data, length, gkey = _payload(ti * per_tone + per_partial + n, A, B)
+            mv = _mapped(per_partial + n)
+            ref = group_ref.setdefault(gkey, mv)
+            keys.append((t, key, mv, mv - ref))
+            samples.append(dict(src=(A['start'], A['end']), data=data, group=gkey,
+                                ref=ref, length=length))
         while len(samples) - silence - 1 < per_partial:
             samples.append(dict(src=None, data=None, ref=SILENCE_REF, length=SILENCE_BYTES))
 
@@ -320,7 +356,7 @@ def build(card, args):
         # this tone assigns and MAP_UNUSED everywhere else.  It is stored as a sample and
         # read as data, never played (routine 0x7BFE).
         kmap = bytearray([MAP_UNUSED]) * MAP_BYTES
-        for (_t, key, mv) in keys:
+        for (_t, key, mv, _d) in keys:
             if 0 <= key < MAP_BYTES:
                 kmap[key] = mv & 0x7F
         mapidx = len(samples)
@@ -331,7 +367,16 @@ def build(card, args):
     if len(samples) > SAMPLE_RECORDS:
         raise SystemExit("needs %d sample records, the table holds %d"
                          % (len(samples), SAMPLE_RECORDS))
-    need = sum(s['length'] + 1 for s in samples)
+    # Count each payload once: repeats share their bytes (see payload_cache).
+    _seen, need = set(), 0
+    for s in samples:
+        g = s.get('group')
+        if g is not None:
+            if g in _seen:
+                continue
+            _seen.add(g)
+        need += s['length'] + 1
+    need += max((s['length'] for s in samples), default=0)     # 0x40000 boundary slack
     if DATA_BASE + need > DATA_END:
         raise SystemExit("samples need %d bytes, the card has %d free above %#x -- "
                          "use --max-instruments to drop some"
@@ -353,9 +398,16 @@ def build(card, args):
         return at
 
     at = DATA_BASE
+    placed = {}                            # payload -> where its bytes went, so repeats share
     for s in samples:
+        g = s.get('group')
+        if g is not None and g in placed:
+            s['start'] = placed[g]
+            continue
         at = _place(at, s['length'])       # the +1 interpolation byte may share the next bank
         s['start'] = at
+        if g is not None:
+            placed[g] = at
         if s.get('data') is not None:
             # Generated bytes: one extra zero-delta byte so the chip's interpolation fetch
             # past the end lands on the same value rather than stepping.
@@ -563,14 +615,15 @@ def main():
                     "both" % live_b if a.premix
                     else "block A only; %d instruments have a live block B, not carried"
                          % live_b))
-    used = sum(s['length'] + 1 for s in samples)
+    used = max((s['start'] + s['length'] + 1 for s in samples), default=DATA_BASE) - DATA_BASE
     print("  sample data %d bytes of %d free (%.1f%%)"
           % (used, DATA_END - DATA_BASE, 100.0 * used / (DATA_END - DATA_BASE)))
     for T in tones:
-        keys = [k for (_t, k, _m) in T['keys']]
+        keys = [k for (_t, k, _m, _d) in T['keys']]
         print("  tone %d (type %#04x, drum map = sample %d)  notes %d..%d"
               % (T['index'], TONE_TYPE | (T['index'] << 4), T['map'], min(keys), max(keys)))
-        print("     " + ' '.join('%s@%d' % (t['name'], k) for (t, k, _m) in T['keys']))
+        print("     " + ' '.join('%s@%d%s' % (t['name'], k, '' if d == 0 else '%+d' % d)
+                                  for (t, k, _m, d) in T['keys']))
     if dropped:
         print("  block B not carried over:")
         for t, why in dropped:

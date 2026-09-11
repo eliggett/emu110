@@ -383,18 +383,65 @@ feedback). Must be checked by measuring drift over the whole sample, not by eye.
 
 
 
-### Phase 3 — the rest
+### Phase 3 — built: shared samples, and per-key tuning
 
-- **Per-key tuning** from `w5`, as above.
-- **The R-8 MK II internal ROMs**: 3 MB that decode perfectly (§1) but whose sample
-  directory is not in the wave ROM. It is in `R8MK2_prog.bin` — there are 6-byte records of
-  shape `8F xx xx 08` around `0x19B1A` that share the cards' `0x8F` marker and are the
-  obvious place to start.
-- **§2.3**, from the MK II card-tone loader.
-- **Card ID choice.** The part record's group selector is 5 bits (`ROM-ANALYSIS.md` §6.7),
-  so IDs up to 31 exist while the catalogue only reaches ~15. A converted card should claim
-  an unused ID rather than shadow a real one — but that the firmware accepts an ID above 15
-  is an assumption, and is worth one test in the emulator before relying on it.
+Two things, and they turn out to be the same thing.
+
+**R-8 cards carry the same drum under several names.** `ATAK_T1`/`ATAK_T2` and
+`HOLO_T1`/`HOLO_T2` on SN-R8-09, `CRSH_C6`/`CRSH_C7`/`SPLA_C3` on SN-R8-11 — byte-identical
+spans, differing only in the envelope words `w6..w8`, which are not decoded
+(`R8-DRUM-TONES.md` §4). The converter now stores such a payload **once**.
+
+**And the copies are pitched apart rather than duplicated.** §3 of `R8-DRUM-TONES.md`
+established the mechanism: the mapped value is a note number, so a sample plays at its
+stored rate when the mapped value equals its reference note, and offsetting one from the
+other tunes it. A group that shares bytes therefore takes **one** reference note — the first
+member's — and every later member's own mapped value pitches it up. That is exactly how a
+factory tom set is built (sample 12 at mapped 50/55/60, i.e. −5/0/+5).
+
+Measured end to end on SN-R8-11, by duration, which is immune to the output filter:
+
+| key | instrument | expected | measured |
+|---|---|---|---|
+| 43 | `CRSH_C7`, shares `CRSH_C6` | +1 semitone | **+0.99** |
+| 48 | `SPLA_C3`, shares `CRSH_C6` | +7 semitones | **+6.87** |
+
+**Fixing a bug this exposed.** The block-B geometry test (§2.3) rejected a B block whose
+span *exactly* matched one already accepted, as an overlap. An exact repeat is sharing, not
+overlapping. Correcting it recovered layers as well as space: SN-R8-09 went from 13 live B
+blocks to 16, SN-R8-11 from 5 to 8.
+
+**What it bought.** Instruments no longer dropped for space:
+
+| card | before | after |
+|---|---|---|
+| SN-R8-04 Electronic | dropped | **26 of 26**, 73% full |
+| SN-R8-06 Ethnic | 4 dropped | **25 of 26**, 88% full |
+| SN-R8-07 Mallet | — | **26 of 26**, 72% full |
+| SN-R8-09 Power Drums | 5 dropped | **25 of 26**, 94% full |
+| SN-R8-10 Dance | — | **26 of 26**, 60% full |
+| SN-R8-11 Metallic | — | **26 of 26**, 73% full |
+
+All six mount, pass every check, and speak on all 22 keys of their first kit.
+
+### Still open
+
+- **The R-8 MK II's 3 MB of internal waves.** They decode perfectly (§1) but their sample
+  directory is not in the wave ROM, and it is not in `R8MK2_prog.bin` in any form found so
+  far: the 26-name table at `0x19A6C` is followed by 26 **six-byte** records that carry no
+  addresses, so they cannot be a sample directory. Reaching those sounds means reverse
+  engineering a second machine's firmware.
+
+  A shortcut was tried and **failed**, which is worth recording so it is not tried again:
+  since each sample's deltas sum to zero (§1), the running accumulator should return to the
+  same value at every sample boundary, which would segment the ROM without any directory.
+  Validated against a card whose boundaries are known, it found 8487 candidate positions for
+  72 real boundaries and hit only 26% of them — the zero-sum holds per sample but is neither
+  exact enough nor selective enough to segment with.
+
+- **§2.3**, which B blocks are live, is still geometry rather than a decoded flag.
+- **`w5`'s scale** (`R8-DRUM-TONES.md` §4), and with it whether the two layers of a mixed
+  sound share a playback rate.
 
 ---
 

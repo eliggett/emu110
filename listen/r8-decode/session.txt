@@ -31,10 +31,11 @@ tools/r8_to_u110.py, mounted in slot 1, rendered through the emulator's own audi
 Unlike the files above -- Python decoding ROM bytes directly -- these went through the real
 firmware, the real tone generator and the real output stage.
 
-    sn-r8-10_kit1.wav    SN-R8-10 "Dance", tone R8-10 SET1, notes 36..57
-    sn-r8-10_kit2.wav    the same card's second tone
+    sn-r8-10_kit1.wav    SN-R8-10 "Dance", notes 36..57
     sn-r8-09_kit1.wav    SN-R8-09 "Power Drums USA"
-    sn-r8-11_kit1.wav    SN-R8-11 "Metallic Percussion"
+    sn-r8-11_kit1.wav    SN-R8-11 "Metallic Percussion" -- keys 43 and 48 are the same
+                         crash as key 42, pitched +1 and +7 semitones
+    sn-r8-07_kit1.wav    SN-R8-07 "Mallet"
 
 One note per second, chromatically, velocity 110, on a single-part patch (preset 1
 "Ac.Piano", parts 2-6 disabled) so nothing but the card is sounding.
