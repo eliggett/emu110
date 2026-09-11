@@ -424,20 +424,47 @@ blocks to 16, SN-R8-11 from 5 to 8.
 
 All six mount, pass every check, and speak on all 22 keys of their first kit.
 
+### Phase 4 — built: custom kits across cards
+
+`tools/r8_to_u110.py` takes any number of SN-R8 cards and a **kit**, and writes one U-110
+card. A kit entry is `[card:]name[+n|-n]`:
+
+```
+# mykit.txt -- three cards, 22 keys
+10:909_K      10:909_S      10:909SIDE    10:909_CHH
+10:909_OHH    09:REAL_S     09:SHARP_S    09:GATE_S
+11:CLSD_H2    11:OPEN_H2    11:RIDE_C2
+# one tom, four pitches, from a single sample
+09:ATAK_T1-5  09:ATAK_T1    09:ATAK_T1+4  09:ATAK_T1+8
+10:78_COW     10:78_TAMB    11:COWBEL3    11:CHIME
+10:RVB_CLP    11:HAND_C1    10:303BASS
+```
+
+```
+r8_to_u110.py *.bin --list                       # what the cards offer
+r8_to_u110.py *.bin --kit mykit.txt -o out.bin   # build it
+r8_to_u110.py out.bin --verify                   # read it back
+```
+
+Listing an instrument more than once at different offsets builds a **tuned set out of one
+drum** — the factory idiom from §3 of `R8-DRUM-TONES.md`, now available deliberately. The
+sample is stored **once** however many keys it lands on; only the reference notes differ.
+Verified on the card's own tables: the four `ATAK_T1` keys above all point at `0x30DF0`
+with reference notes 53, 49, 46, 43, i.e. exactly −5 / 0 / +4 / +8.
+
+Keys are assigned in the order listed, so the kit file *is* the key map. With no `--pick` or
+`--kit` the first card's instruments are used in order, which is the whole-card conversion
+phases 1-3 already did — all six cards still convert and still speak on all 22 keys.
+
+The example kit is `tools/r8_kit_example.txt`; the render is
+`listen/r8-decode/via-card/custom_kit.wav`.
+
 ### Still open
 
-- **The R-8 MK II's 3 MB of internal waves.** They decode perfectly (§1) but their sample
-  directory is not in the wave ROM, and it is not in `R8MK2_prog.bin` in any form found so
-  far: the 26-name table at `0x19A6C` is followed by 26 **six-byte** records that carry no
-  addresses, so they cannot be a sample directory. Reaching those sounds means reverse
-  engineering a second machine's firmware.
-
-  A shortcut was tried and **failed**, which is worth recording so it is not tried again:
-  since each sample's deltas sum to zero (§1), the running accumulator should return to the
-  same value at every sample boundary, which would segment the ROM without any directory.
-  Validated against a card whose boundaries are known, it found 8487 candidate positions for
-  72 real boundaries and hit only 26% of them — the zero-sum holds per sample but is neither
-  exact enough nor selective enough to segment with.
+- **The R-8 MK II's 3 MB of internal waves.** They decode perfectly (§1) but have no
+  directory anywhere we can find, so nothing says where one sample ends and the next
+  begins. Fully documented, including every search that came up empty and why the
+  directory-free shortcut fails, in **[`R8-MKII-INTERNAL.md`](R8-MKII-INTERNAL.md)**.
 
 - **§2.3**, which B blocks are live, is still geometry rather than a decoded flag.
 - **`w5`'s scale** (`R8-DRUM-TONES.md` §4), and with it whether the two layers of a mixed

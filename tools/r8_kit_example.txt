@@ -1,0 +1,8 @@
+# A kit assembled from three SN-R8 cards.  "card:name+semitones".
+10:909_K      10:909_S      10:909SIDE    10:909_CHH
+10:909_OHH    09:REAL_S     09:SHARP_S    09:GATE_S
+11:CLSD_H2    11:OPEN_H2    11:RIDE_C2
+# one tom, four pitches -- the factory idiom, from a single sample
+09:ATAK_T1-5  09:ATAK_T1    09:ATAK_T1+4  09:ATAK_T1+8
+10:78_COW     10:78_TAMB    11:COWBEL3    11:CHIME
+10:RVB_CLP    11:HAND_C1    10:303BASS

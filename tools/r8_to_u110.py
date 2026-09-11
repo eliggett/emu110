@@ -1,29 +1,32 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Elliott H. Liggett
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""R-8 SPECIFIC.  Build a U-110 PCM card out of a Roland SN-R8 card's samples.
+"""R-8 SPECIFIC.  Build a U-110 PCM card out of Roland SN-R8 cards.
 
-Phase 1 of analysis/R8-CONVERSION.md section 5, and deliberately the boring phase: NO
-sample is re-encoded.  R-8 and U-110 PCM data are the same 8-bit float delta format on the
-same wiring (section 1 of that document), so every sample byte is copied verbatim and the
-only things this tool authors are the tables around them.  If the card mounts, it plays
-what the R-8 played.
+Convert one card whole, or assemble your own kit from several.  No sample is transcoded:
+the R-8 and the U-110 store PCM identically (analysis/R8-CONVERSION.md section 1), so the
+bytes are carried across and only the tables around them are authored.
 
-Each R-8 tone carries two sample blocks that the machine SUMS -- a snare's noise in one and
-its shell tone in the other -- so each becomes one U-110 key with block A on partial 1 and
-block B on partial 2, both partials given identical key splits so the two sound together.
-That costs both partials per key, which caps a U-110 tone at 11 keys, so a 26-instrument
-R-8 card becomes three U-110 tones.  Phase 2 lifts that to 22 by pre-mixing.
+    r8_to_u110.py SN-R8-10_Dance.bin -o roms/sn-u110-26_r8-10.bin
+    r8_to_u110.py *.bin --list
+    r8_to_u110.py *.bin --kit mykit.txt -o roms/sn-u110-30_mykit.bin
+    r8_to_u110.py roms/sn-u110-30_mykit.bin --verify
 
-    python3 tools/r8_to_u110.py SN-R8-10_Dance.bin -o roms/sn-u110-26_r8-10_dance.bin
-    python3 tools/r8_to_u110.py SN-R8-10_Dance.bin -o out.bin --card-id 26 --base-note 36
-    python3 tools/r8_to_u110.py out.bin --verify          # re-read a card this made
+A kit entry is `[card:]name[+n|-n]` -- `909_K`, `10:909_S`, `09:ATAK_T1+5`.  Listing the
+same instrument more than once at different offsets builds a tuned set out of one drum,
+which is how the factory cards make their toms, and the sample is stored only once however
+many keys it lands on.  A kit file holds one entry per line with `#` for comments.
+
+Each R-8 tone carries TWO sample blocks that the machine sounds together -- a kick's click
+and its boom, a snare's noise and its shell tone -- and both are summed onto the key
+(`--no-premix` keeps only the first).  A U-110 drum tone takes 22 keys, so a 26-instrument
+card becomes two tones.
 
 The output filename matters: the plugin finds cards by looking for `snu110NN` in the name
-with separators stripped (Voltaire110Plugin.cpp, cardNumberFromName), so keep the
-`sn-u110-NN` in it and let the rest of the name say where it came from.
+with separators stripped (Voltaire110Plugin.cpp, cardNumberFromName), so keep `sn-u110-NN`
+in it and let the rest of the name say what the card is.
 """
-import argparse, os, sys
+import argparse, os, re, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import roland_card as rc
@@ -181,7 +184,7 @@ MAX_STEP = 1984         # the largest delta the 8-bit float can represent
 MAX_AMP  = 1984         # and the largest level
 
 
-def premix(card, insts):
+def premix(insts):
     """Sum each instrument's two sample blocks into one waveform, phase 2 of section 5.
 
     The R-8 sounds block A and block B together -- a kick's click and its boom, a snare's
@@ -200,9 +203,9 @@ def premix(card, insts):
     """
     waves = []
     for (t, A, B, _why) in insts:
-        a = rc.integrate(card['image'], A['start'], A['end'])
-        b = (rc.integrate(card['image'], B['start'], B['end'])
-             if B is not None else np.zeros(0))
+        img = t['img']
+        a = rc.integrate(img, A['start'], A['end'])
+        b = (rc.integrate(img, B['start'], B['end']) if B is not None else np.zeros(0))
         n = max(len(a), len(b))
         m = np.zeros(n)
         m[:len(a)] += a
@@ -218,7 +221,7 @@ def premix(card, insts):
     return [m * scale for m in waves], scale
 
 
-def build(card, args):
+def build(insts_in, args):
     """Author the logical image, then scramble it and drop the plain header on top.
 
     The layout copies SN-U110-10 "ROCK DRUMS" exactly, because that is the one arrangement
@@ -242,12 +245,11 @@ def build(card, args):
     # than silence.  0x00 and 0x80 both decode to zero and real cards pad with 0x80.
     logical[DATA_BASE:] = 0x00
 
-    insts = r8_blocks(card, args.min_layer_bytes, args.stub_repeats)
-    insts = [i for i in insts if i[1] is not None]
+    insts = list(insts_in)
     if args.max_instruments:
         insts = insts[:args.max_instruments]
 
-    mixed, mix_scale = (premix(card, insts) if args.premix else (None, 1.0))
+    mixed, mix_scale = (premix(insts) if args.premix else (None, 1.0))
 
     # A 512K R-8 card can hold more sample data than a 512K U-110 card has room for, because
     # the U-110 reserves the first 16K for its tables and we spend a byte per sample on the
@@ -261,7 +263,7 @@ def build(card, args):
         ntone = (len(insts) + 2 * per_partial_ - 1) // (2 * per_partial_)
         uniq = {}
         for k, (t, A, B, _w) in enumerate(insts):
-            uniq[(A['start'], A['end'],
+            uniq[(id(t['img']), A['start'], A['end'],
                   B['start'] if B is not None else None,
                   B['end'] if B is not None else None)] = \
                 (mixed[k].size if mixed is not None else A['end'] - A['start'])
@@ -286,9 +288,9 @@ def build(card, args):
     # it, which is exactly how a factory tom set is built.
     payload_cache = {}
 
-    def _payload(n, A, B):
+    def _payload(n, t, A, B):
         """(bytes, length, group key) for instrument n."""
-        gkey = (A['start'], A['end'],
+        gkey = (id(t['img']), A['start'], A['end'],
                 B['start'] if B is not None else None,
                 B['end'] if B is not None else None)
         if gkey in payload_cache:
@@ -328,14 +330,15 @@ def build(card, args):
         keys = []
         for n, (t, A, B, _w) in enumerate(lo):
             key = args.base_note + n
-            data, length, gkey = _payload(ti * per_tone + n, A, B)
+            data, length, gkey = _payload(ti * per_tone + n, t, A, B)
             mv = _mapped(n)
             # Reference note == mapped value, so a drum plays at its own stored rate -- the
             # convention the factory cards use.  A repeat of an earlier sample keeps THAT
             # sample's reference note instead, so its own mapped value pitches it up.
-            ref = group_ref.setdefault(gkey, mv)
+            ref = (mv - t.get('pitch', 0)) if t.get('pitch') \
+                  else group_ref.setdefault(gkey, mv)
             keys.append((t, key, mv, mv - ref))
-            samples.append(dict(src=(A['start'], A['end']), data=data, group=gkey,
+            samples.append(dict(src=(t['img'], A['start'], A['end']), data=data, group=gkey,
                                 ref=ref, length=length))
         while len(samples) - first < per_partial:      # pad so the index runs stay uniform
             samples.append(dict(src=None, data=None, ref=SILENCE_REF, length=SILENCE_BYTES))
@@ -343,11 +346,12 @@ def build(card, args):
         samples.append(dict(src=None, data=None, ref=SILENCE_REF, length=SILENCE_BYTES))
         for n, (t, A, B, _w) in enumerate(hi):
             key = args.base_note + per_partial + n
-            data, length, gkey = _payload(ti * per_tone + per_partial + n, A, B)
+            data, length, gkey = _payload(ti * per_tone + per_partial + n, t, A, B)
             mv = _mapped(per_partial + n)
-            ref = group_ref.setdefault(gkey, mv)
+            ref = (mv - t.get('pitch', 0)) if t.get('pitch') \
+                  else group_ref.setdefault(gkey, mv)
             keys.append((t, key, mv, mv - ref))
-            samples.append(dict(src=(A['start'], A['end']), data=data, group=gkey,
+            samples.append(dict(src=(t['img'], A['start'], A['end']), data=data, group=gkey,
                                 ref=ref, length=length))
         while len(samples) - silence - 1 < per_partial:
             samples.append(dict(src=None, data=None, ref=SILENCE_REF, length=SILENCE_BYTES))
@@ -414,8 +418,8 @@ def build(card, args):
             logical[at:at + s['length']] = s['data']
             logical[at + s['length']] = 0x00
         elif s['src'] is not None:
-            a, b = s['src']
-            logical[at:at + s['length'] + 1] = card['image'][a:b + 1]
+            img, a, b = s['src']
+            logical[at:at + s['length'] + 1] = img[a:b + 1]
         at += s['length'] + 1
 
     for i, s in enumerate(samples):
@@ -450,7 +454,7 @@ def build(card, args):
                                                     for k in range(per_partial - 1)]
         idx1 = list(range(T['first'], T['first'] + per_partial)) + [T['silence']]
         idx2 = [T['silence']] + list(range(T['silence'] + 1, T['silence'] + 1 + per_partial))
-        name = args.tone_name % dict(part=card['part'], n=T['index'] + 1)
+        name = args.tone_name % dict(part=args.part_for_name, n=T['index'] + 1)
         rec = bytearray(0x50)
         rec[0:10] = ("%-10.10s" % name).encode('ascii', 'replace')
         # bit 7 marks a drum tone; bits 4-6 pick which of the eight drum maps it uses, so
@@ -545,9 +549,103 @@ def describe(path, base_note):
     return 0
 
 
+
+def load_r8(paths, min_layer_bytes, stub_repeats):
+    """Every usable instrument on every card given, in card then catalogue order.
+
+    Each instrument keeps a reference to the image it came from, so one U-110 card can be
+    built from several R-8 cards.  The block-A/block-B geometry tests (section 2.3) are
+    per-card, because they reason about how a card tiles its own sample area.
+    """
+    out = []
+    for path in paths:
+        logical, phys = rc.load_bank(path)
+        if rc.identify(phys) != 'r8':
+            raise SystemExit("%s: not an SN-R8 card (magic says %r)"
+                             % (path, rc.identify(phys)))
+        card = rc.r8_card(logical, phys)
+        for (t, A, B, why) in r8_blocks(card, min_layer_bytes, stub_repeats):
+            if A is None:
+                continue
+            t['img'] = logical
+            t['part'] = card['part']
+            t['pitch'] = 0
+            out.append((t, A, B, why))
+    return out
+
+
+def parse_pick(spec):
+    """One kit entry: `[card:]name[+n|-n]`.
+
+    `909_K`            the first instrument of that name on any card given
+    `10:909_K`         from SN-R8-10 specifically
+    `909_T+5`          five semitones up -- the same sample can be listed more than once at
+                       different offsets, which is how a tom set is built out of one drum
+    """
+    spec = spec.strip()
+    pitch = 0
+    m = re.search(r'([+-]\d+)$', spec)
+    if m:
+        pitch = int(m.group(1))
+        spec = spec[:m.start()].strip()
+    part = None
+    if ':' in spec:
+        p, spec = spec.split(':', 1)
+        part = int(p)
+    return part, spec.strip().upper(), pitch
+
+
+def select(insts, picks):
+    """Resolve kit entries against the loaded instruments, in the order asked for."""
+    chosen, missing = [], []
+    for spec in picks:
+        part, name, pitch = parse_pick(spec)
+        hit = None
+        for (t, A, B, why) in insts:
+            if t['name'].strip().upper() != name:
+                continue
+            if part is not None and t['part'] != part:
+                continue
+            hit = (t, A, B, why)
+            break
+        if hit is None:
+            missing.append(spec)
+            continue
+        # A repeat at a different pitch needs its own tone dict, or the two entries would
+        # share one `pitch` field; the heavy sample data is shared by the payload cache.
+        t = dict(hit[0])
+        t['pitch'] = pitch
+        chosen.append((t, hit[1], hit[2], hit[3]))
+    if missing:
+        raise SystemExit("no such instrument: " + ', '.join(missing)
+                         + "\n(use --list to see what the given cards offer)")
+    return chosen
+
+
+def read_kit(path):
+    """A kit file: one entry per line, `#` starts a comment, blank lines ignored."""
+    out = []
+    for line in open(path):
+        line = line.split('#', 1)[0].strip()
+        if line:
+            out.extend(x for x in re.split(r'[,\s]+', line) if x)
+    return out
+
+
 def main():
-    ap = argparse.ArgumentParser(description="Convert a Roland SN-R8 card into a U-110 card")
-    ap.add_argument('card', help='an SN-R8 card dump (.bin), or a converted card with --verify')
+    ap = argparse.ArgumentParser(
+        description="Build a U-110 PCM card out of Roland SN-R8 cards",
+        epilog="With no --pick or --kit the first card's instruments are used in order, "
+               "which is the whole-card conversion.  Give several cards and a kit to "
+               "assemble your own: r8_to_u110.py *.bin --kit mykit.txt -o card.bin")
+    ap.add_argument('card', nargs='+',
+                    help='one or more SN-R8 card dumps, or one converted card with --verify')
+    ap.add_argument('--list', action='store_true',
+                    help='print the instruments the given cards offer, and stop')
+    ap.add_argument('--pick', default=None,
+                    help='kit entries, comma separated: "909_K,10:78_S,909_T+5"')
+    ap.add_argument('--kit', default=None,
+                    help='a file of kit entries, one per line, # for comments')
     ap.add_argument('-o', '--out', help='where to write the U-110 card image')
     ap.add_argument('--verify', action='store_true', help='read the named card back and stop')
     ap.add_argument('--card-id', type=int, default=None,
@@ -582,30 +680,50 @@ def main():
     a = ap.parse_args()
 
     if a.verify:
-        return describe(a.card, a.base_note)
-    if not a.out:
-        ap.error("-o/--out is required unless --verify")
+        return describe(a.card[0], a.base_note)
 
-    logical, phys = rc.load_bank(a.card)
-    if rc.identify(phys) != 'r8':
-        print("%s: not an SN-R8 card (magic says %r)" % (a.card, rc.identify(phys)),
-              file=sys.stderr)
-        return 1
-    card = rc.r8_card(logical, phys)
-    card['image'] = logical
+    insts = load_r8(a.card, a.min_layer_bytes, a.stub_repeats)
+    if a.list:
+        print("%d instruments on %d card(s):" % (len(insts), len(a.card)))
+        part = None
+        for (t, A, B, _w) in insts:
+            if t['part'] != part:
+                part = t['part']
+                print("  SN-R8-%02d" % part)
+            print("    %-9s %6d bytes%s" % (t['name'], A['end'] - A['start'],
+                                            '  + layer B' if B is not None else ''))
+        return 0
+
+    if not a.out:
+        ap.error("-o/--out is required unless --verify or --list")
+
+    picks = read_kit(a.kit) if a.kit else (
+            [x for x in re.split(r'[,\s]+', a.pick) if x] if a.pick else None)
+    if picks:
+        insts = select(insts, picks)
+    else:
+        first = insts[0][0]['part'] if insts else 0
+        insts = [i for i in insts if i[0]['part'] == first]
+    if not insts:
+        raise SystemExit("nothing to put on the card")
+
+    parts = sorted({t['part'] for (t, _A, _B, _w) in insts})
+    a.part_for_name = parts[0]
     if a.card_id is None:
-        a.card_id = 16 + card['part']
+        a.card_id = 16 + parts[0]
     if not 1 <= a.card_id <= 31:
         print("warning: card id %d is outside the 5 bits a patch part can name (1..31); "
               "the machine will mount it but no patch can select it" % a.card_id,
               file=sys.stderr)
     if a.label is None:
-        a.label = "SN-R8-%02d   0.01" % card['part']
+        a.label = ("SN-R8-%02d   0.01" % parts[0] if len(parts) == 1
+                   else "R8 KIT     0.01")
 
-    img, samples, tones, insts = build(card, a)
+    img, samples, tones, insts = build(insts, a)
     open(a.out, 'wb').write(img)
 
-    print("SN-R8-%02d %r  ->  %s" % (card['part'], card['label'], a.out))
+    print("%s  ->  %s"
+          % (' + '.join('SN-R8-%02d' % p for p in parts), a.out))
     print("  card id %d (0x%02X), label %r" % (a.card_id, a.card_id, a.label))
     dropped = []
     live_b = sum(1 for (_t, _A, B, _w) in insts if B is not None)

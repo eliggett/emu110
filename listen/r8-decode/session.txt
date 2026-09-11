@@ -36,6 +36,9 @@ firmware, the real tone generator and the real output stage.
     sn-r8-11_kit1.wav    SN-R8-11 "Metallic Percussion" -- keys 43 and 48 are the same
                          crash as key 42, pitched +1 and +7 semitones
     sn-r8-07_kit1.wav    SN-R8-07 "Mallet"
+    custom_kit.wav       a kit assembled from THREE cards (tools/r8_kit_example.txt),
+                         including one ATAK_T1 tom on four keys at -5/0/+4/+8 semitones,
+                         stored as a single sample
 
 One note per second, chromatically, velocity 110, on a single-part patch (preset 1
 "Ac.Piano", parts 2-6 disabled) so nothing but the card is sounding.
