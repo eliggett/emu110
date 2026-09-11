@@ -184,7 +184,7 @@ MAX_STEP = 1984         # the largest delta the 8-bit float can represent
 MAX_AMP  = 1984         # and the largest level
 
 
-def premix(insts):
+def premix(insts, fade_ms):
     """Sum each instrument's two sample blocks into one waveform, phase 2 of section 5.
 
     The R-8 sounds block A and block B together -- a kick's click and its boom, a snare's
@@ -201,6 +201,26 @@ def premix(insts):
     than the format's biggest, which is what makes a summed hi-hat saturate -- and comes out
     near 0.5, i.e. about 6 dB below a factory card.
     """
+    # A short fade to true silence at the end of every sample.
+    #
+    # When a one-shot reaches its end the firmware slams the envelope to zero at the
+    # MAXIMUM rate -- traced: register 06 = 0x80 (the most negative ramp) with register 07 =
+    # 0x00 -- which closes it in about 0.85 ms.  Whatever the waveform is doing at that
+    # instant is cut off square, and the U-110's de-emphasis (a one-pole at 20 Hz with 182x
+    # makeup, roland_u110.cpp) turns the resulting low-frequency step into a thump several
+    # times louder than the decaying tail it interrupts.
+    #
+    # Factory U-110 samples do not do this because they were authored to reach silence by
+    # their last byte.  R-8 samples were not: the R-8 closes its own envelope over the top.
+    # Measured on SN-R8-11, the last 3 ms of a rendered CLSD_H2 came out 3.7x the body level
+    # with the bytes copied verbatim and 10.4x pre-mixed -- so this is inherited from the
+    # source, not caused by the re-encoding.
+    #
+    # Fading the tail ourselves costs a few milliseconds of decay that was inaudible anyway
+    # and leaves the envelope slam nothing to cut.  It also guarantees the waveform ends at
+    # exactly zero, which a few R-8 samples otherwise do not (OPEN_H2 ends at +88).
+    fade_n = max(0, int(round(fade_ms * 1e-3 * rc.ENGINE_RATE)))
+
     waves = []
     for (t, A, B, _why) in insts:
         img = t['img']
@@ -210,6 +230,12 @@ def premix(insts):
         m = np.zeros(n)
         m[:len(a)] += a
         m[:len(b)] += b
+        if fade_n and m.size > 4:
+            k = min(fade_n, m.size)
+            # raised cosine: starts at unity slope zero, so it does not put a corner of its
+            # own where it begins
+            m[-k:] *= 0.5 * (1.0 + np.cos(np.pi * np.arange(k) / max(k - 1, 1)))
+            m[-1] = 0.0
         waves.append(m)
     scale = 1.0
     for m in waves:
@@ -249,7 +275,7 @@ def build(insts_in, args):
     if args.max_instruments:
         insts = insts[:args.max_instruments]
 
-    mixed, mix_scale = (premix(insts) if args.premix else (None, 1.0))
+    mixed, mix_scale = (premix(insts, args.fade_ms) if args.premix else (None, 1.0))
 
     # A 512K R-8 card can hold more sample data than a 512K U-110 card has room for, because
     # the U-110 reserves the first 16K for its tables and we spend a byte per sample on the
@@ -662,6 +688,10 @@ def main():
     ap.add_argument('--keys-per-partial', type=int, default=MAX_KEYS,
                     help='keys on each partial; 11 is the most a partial can hold')
     ap.add_argument('--max-instruments', type=int, default=0, help='0 = all that fit')
+    ap.add_argument('--fade-ms', type=float, default=6.0,
+                    help='fade the last N ms of every sample to silence (default 6).  The '
+                         'firmware cuts a finished one-shot with a 0.85 ms envelope slam, '
+                         'and R-8 samples still have tail left when it happens; 0 disables')
     ap.add_argument('--premix', dest='premix', action='store_true', default=True,
                     help='sum each R-8 tone\'s two sample blocks into one key (default)')
     ap.add_argument('--no-premix', dest='premix', action='store_false',

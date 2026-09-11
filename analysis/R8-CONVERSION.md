@@ -459,6 +459,55 @@ phases 1-3 already did — all six cards still convert and still speak on all 22
 The example kit is `tools/r8_kit_example.txt`; the render is
 `listen/r8-decode/via-card/custom_kit.wav`.
 
+## 5.6 The click at the end of a sound `[C]`
+
+Reported by ear — cymbals fading out and then *clicking* before silence, on the converted
+cards and on the direct decodes alike. Real, and it is not a zero crossing problem in the
+way it first looks.
+
+**What happens.** When a one-shot reaches its end the firmware slams the envelope shut at
+the **maximum** rate. Traced on the register bus at the moment a sample runs out:
+
+```
+TG 12.335264 v01 reg 06 = 80    ; envelope RATE, signed -- 0x80 is the most negative there is
+TG 12.335264 v01 reg 07 = 00    ; envelope TARGET = zero
+```
+
+That closes the voice in about 0.85 ms, and whatever the waveform is doing at that instant
+is cut off square. The U-110 then puts the result through its de-emphasis — a one-pole at
+20 Hz with **182x** makeup (`roland_u110.cpp`) — which turns the low-frequency step into a
+thump several times louder than the decaying tail it interrupted. Measured on a rendered
+`CLSD_H2`, the last 3 ms came out **10x** the level of the body.
+
+**Whose fault it is.** Not the pre-mix and not the re-encoder: building the same card with
+`--no-premix`, where the R-8's bytes are copied across untouched, still gives **3.7x**. It
+is inherited from the source. Factory U-110 samples do not do it because they were authored
+to reach silence by their last byte; R-8 samples were not, because the R-8 closes its own
+envelope over the top and never needs them to.
+
+**The fix — `--fade-ms`, default 6.** A raised-cosine fade over the last few milliseconds,
+applied to the summed waveform before it is encoded. It costs a few milliseconds of decay
+that was inaudible anyway, leaves the envelope slam nothing to cut, and guarantees the
+waveform ends at exactly zero — which some R-8 samples otherwise do not (`OPEN_H2` ends at
++88, `OPEN_H3` at +375).
+
+Measured as the ratio of the last 3 ms to the body, across a whole card:
+
+| fade | worst on SN-R8-11 | worst on SN-R8-10 | median |
+|---|---|---|---|
+| none | **10.0x** | 10.0x | — |
+| 2 ms | 1.0x | — | — |
+| **6 ms (default)** | **0.7x** | **2.7x** | **0.4x** |
+| 20 ms | 0.6x | 2.7x | 0.2x |
+
+Two ms already removes it; 6 is comfortably past the knee and still inaudible. Beyond that
+nothing improves, because what is left is the source's own shape — `HOUSE_S` sits at 2.7x
+at every fade length because it genuinely swells toward its end, and a gated sound like
+`GATE_S` is *meant* to stop dead. `--fade-ms 0` restores the untouched waveform.
+
+`tools/r8_extract.py` fades too, so the direct decodes in `listen/r8-decode/` match what a
+converted card does.
+
 ### Still open
 
 - **The R-8 MK II's 3 MB of internal waves.** They decode perfectly (§1) but have no

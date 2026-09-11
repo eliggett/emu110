@@ -29,15 +29,24 @@ def layers(logical, tone):
     return out
 
 
-def mix(a, b):
+def mix(a, b, fade_ms=6.0):
     """A + B, zero-padded to the longer.  Both layers are stored at full scale, so this
-    sums them as the chip's mixer would with equal voice levels."""
+    sums them as the chip's mixer would with equal voice levels.
+
+    The last few milliseconds are faded to silence.  R-8 samples do not reach silence by
+    their last byte -- the R-8 closes its own envelope over the top -- so a raw decode ends
+    with a step, which is an audible click both here and on a converted card.  See
+    R8-CONVERSION.md section 5.6.  Pass fade_ms=0 for the untouched waveform."""
     n = max(len(a), len(b))
     if n == 0:
         return np.zeros(0)
     out = np.zeros(n)
     out[:len(a)] += a
     out[:len(b)] += b
+    k = min(int(round(fade_ms * 1e-3 * rc.ENGINE_RATE)), n)
+    if k > 1:
+        out[-k:] *= 0.5 * (1.0 + np.cos(np.pi * np.arange(k) / (k - 1)))
+        out[-1] = 0.0
     return out
 
 
@@ -48,6 +57,8 @@ def main():
     ap.add_argument('--all', action='store_true', help='write every tone')
     ap.add_argument('-o', '--outdir', default='listen/r8-decode')
     ap.add_argument('--layers', action='store_true', help='also write the A and B layers')
+    ap.add_argument('--fade-ms', type=float, default=6.0,
+                    help='fade the last N ms to silence (default 6); 0 for the raw waveform')
     a = ap.parse_args()
 
     logical, phys = rc.load_bank(a.card)
@@ -78,14 +89,14 @@ def main():
         A, B = layers(logical, t)
         stem = "%s/%02d_%s" % (a.outdir.rstrip('/'), t['index'],
                                t['name'].replace('/', '-').replace(' ', '_') or 'unnamed')
-        M = mix(A, B)
+        M = mix(A, B, a.fade_ms)
         if len(M) == 0:
             print("  %2d %-9s  nothing to decode" % (t['index'], t['name'])); continue
         rc.write_wav(stem + '.wav', M)
         made = ['%s.wav' % os.path.basename(stem)]
         if a.layers:
-            if len(A): rc.write_wav(stem + '_A.wav', A); made.append('_A')
-            if len(B): rc.write_wav(stem + '_B.wav', B); made.append('_B')
+            if len(A): rc.write_wav(stem + '_A.wav', mix(A, np.zeros(0), a.fade_ms)); made.append('_A')
+            if len(B): rc.write_wav(stem + '_B.wav', mix(B, np.zeros(0), a.fade_ms)); made.append('_B')
         print("  %2d %-9s  A %6d + B %6d -> %6d frames (%5.0f ms)  %s"
               % (t['index'], t['name'], len(A), len(B), len(M),
                  1000.0 * len(M) / rc.ENGINE_RATE, ' '.join(made)))
