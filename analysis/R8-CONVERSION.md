@@ -456,6 +456,19 @@ Keys are assigned in the order listed, so the kit file *is* the key map. With no
 `--kit` the first card's instruments are used in order, which is the whole-card conversion
 phases 1-3 already did — all six cards still convert and still speak on all 22 keys.
 
+**Keys run on across tones.** A tone holds 22 keys (§3.2), so a 26-instrument card spills
+into a second one, and the second continues where the first stopped rather than restarting
+underneath it: SN-R8-10 lays `SET1` over notes 36-57 and `SET2` over 58-61. That keeps one
+continuous map across a card even though the machine needs two tones to hold it, which
+matters because a part plays one tone — you assign `SET1` and `SET2` to different parts and
+their key ranges do not collide.
+
+The MAPPED values still restart per tone, and should: each tone carries its own splits and
+its own drum map, so keeping the mapped run low is what lets every reference note equal its
+mapped value and every drum play at its own stored rate (§3 of `R8-DRUM-TONES.md`).
+`--keys-restart` returns to stacking every tone at `--base-note`, and a kit whose keys would
+pass MIDI 127 is reported rather than silently truncated.
+
 The example kit is `tools/r8_kit_example.txt`; the render is
 `listen/r8-decode/via-card/custom_kit.wav`.
 

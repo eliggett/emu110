@@ -349,13 +349,19 @@ def build(insts_in, args):
               % (MAX_DRUM_MAPS, MAX_DRUM_MAPS), file=sys.stderr)
         ntones = MAX_DRUM_MAPS
         insts = insts[:ntones * per_tone]
+    # Keys run on from one tone to the next, so a kit that spills into SET2 continues where
+    # SET1 stopped rather than restarting under it.  The MAPPED values do restart per tone,
+    # and should: each tone carries its own splits and its own drum map, so keeping the
+    # mapped run low keeps every reference note equal to it and every drum at its own rate.
+    key_cursor = args.base_note
     for ti in range(ntones):
         group = insts[ti * per_tone:(ti + 1) * per_tone]
         first = len(samples)
+        key_lo = args.base_note if args.keys_restart else key_cursor
         lo, hi = group[:per_partial], group[per_partial:]
         keys = []
         for n, (t, A, B, _w) in enumerate(lo):
-            key = args.base_note + n
+            key = key_lo + n
             data, length, gkey = _payload(ti * per_tone + n, t, A, B)
             mv = _mapped(n)
             # Reference note == mapped value, so a drum plays at its own stored rate -- the
@@ -371,7 +377,7 @@ def build(insts_in, args):
         silence = len(samples)
         samples.append(dict(src=None, data=None, ref=SILENCE_REF, length=SILENCE_BYTES))
         for n, (t, A, B, _w) in enumerate(hi):
-            key = args.base_note + per_partial + n
+            key = key_lo + per_partial + n
             data, length, gkey = _payload(ti * per_tone + per_partial + n, t, A, B)
             mv = _mapped(per_partial + n)
             ref = (mv - t.get('pitch', 0)) if t.get('pitch') \
@@ -386,9 +392,17 @@ def build(insts_in, args):
         # this tone assigns and MAP_UNUSED everywhere else.  It is stored as a sample and
         # read as data, never played (routine 0x7BFE).
         kmap = bytearray([MAP_UNUSED]) * MAP_BYTES
-        for (_t, key, mv, _d) in keys:
+        over = []
+        for (t_, key, mv, _d) in keys:
             if 0 <= key < MAP_BYTES:
                 kmap[key] = mv & 0x7F
+            else:
+                over.append(t_['name'])
+        if over:
+            print("warning: %d key(s) past MIDI 127 and unreachable: %s\n"
+                  "         lower --base-note, or --keys-restart to stack the tones instead"
+                  % (len(over), ' '.join(over)), file=sys.stderr)
+        key_cursor = max(k for (_t, k, _m, _d) in keys) + 1
         mapidx = len(samples)
         samples.append(dict(src=None, data=np.frombuffer(bytes(kmap), dtype=np.uint8),
                             ref=MAP_REF, length=MAP_BYTES))
@@ -702,6 +716,9 @@ def main():
     ap.add_argument('--tone-name', default='R8-%(part)02d SET%(n)d',
                     help='10-char tone name template')
     ap.add_argument('--base-note', type=int, default=36, help='MIDI note of the first key (36 = C2)')
+    ap.add_argument('--keys-restart', action='store_true',
+                    help='start every tone at --base-note instead of running the keys on '
+                         'from the previous tone')
     ap.add_argument('--map-base', type=int, default=36,
                     help='first MAPPED value; each sample\'s reference note is set to its '
                          'own mapped value, so every drum plays at its stored rate')

@@ -31,11 +31,11 @@ tools/r8_to_u110.py, mounted in slot 1, rendered through the emulator's own audi
 Unlike the files above -- Python decoding ROM bytes directly -- these went through the real
 firmware, the real tone generator and the real output stage.
 
-    sn-r8-10_kit1.wav    SN-R8-10 "Dance", notes 36..57
-    sn-r8-09_kit1.wav    SN-R8-09 "Power Drums USA"
-    sn-r8-11_kit1.wav    SN-R8-11 "Metallic Percussion" -- keys 43 and 48 are the same
+    sn-r8-10_kit.wav     SN-R8-10 "Dance", notes 36..57 (SET1) and 58..61 (SET2)
+    sn-r8-09_kit.wav     SN-R8-09 "Power Drums USA"
+    sn-r8-11_kit.wav     SN-R8-11 "Metallic Percussion" -- keys 43 and 48 are the same
                          crash as key 42, pitched +1 and +7 semitones
-    sn-r8-07_kit1.wav    SN-R8-07 "Mallet"
+    sn-r8-07_kit.wav     SN-R8-07 "Mallet"
     custom_kit.wav       a kit assembled from THREE cards (tools/r8_kit_example.txt),
                          including one ATAK_T1 tom on four keys at -5/0/+4/+8 semitones,
                          stored as a single sample
