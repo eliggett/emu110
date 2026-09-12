@@ -132,10 +132,28 @@ a card that is entirely cymbals and metal, i.e. the material that must be stored
 rate. Cards whose content is lower-bandwidth carry larger values: SN-R8-09 is `0x0280` on
 almost everything.
 
-`[I]` **This is a storage-rate field, not a tuning field, and its scale is not established.**
-Read as `w5/0x100` the values imply ratios up to 38x, which are not musical intervals. Read
-against the U-110's own unity step (`0x4000`, measured) they imply playback 64x too slow.
-Neither is credible, so the mapping from `w5` to a rate is still unknown.
+`[C]` **`w5` is not the playback step, and the earlier reading of it was wrong.** Two pieces
+of evidence, either of which is fatal:
+
+- **Some blocks carry `w5 = 0x0000` and contain real audio.** On SN-R8-07, `GENDER`'s block A
+  is 16,360 samples peaking at 1997 with an rms of 165, and `SARON`'s is 24,192 samples
+  peaking at 2006 — both with `w5` exactly zero. A step of zero does not advance the phase
+  accumulator, so under the step reading neither could make a sound at all.
+- **Read as a rate, the values are not rates.** `w5/0x100` gives ratios up to 38x, and
+  against the U-110's measured unity step (`0x4000`) the same values imply playback 64x too
+  slow. Neither is credible.
+
+So the word's meaning is **unknown**. Only `w1` (start) and `w3` (end) of the nine were ever
+verified, by the way the blocks tile the card; the rest were assigned by position against the
+MB87419's register order and should be treated as guesses.
+
+**This lifts a doubt rather than adding one.** The pre-mix in `R8-CONVERSION.md` §5 sums the
+two blocks sample-for-sample, and while `w5` looked like a rate its frequent disagreement
+between the two blocks — 113 of 129 live pairs differ, some by 76x — suggested the sum was
+being taken at the wrong relative rate. It was not evidence of that, because `w5` is not a
+rate. What positive evidence exists points the other way: the paired lengths are often equal
+to within a few bytes (`BOING_S` 9396/9396, `DANCE_S` 10744/10744, `909_CHH` 6532/6532), and
+equal lengths at unequal rates would give layers of unequal duration.
 
 `[C]` **The R-8's own variation mechanism is not pitch at all**, at least on these cards.
 Instruments that differ only in name share their sample bytes exactly and carry the *same*

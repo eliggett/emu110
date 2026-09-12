@@ -138,14 +138,24 @@ def r8_blocks(card, min_layer_bytes, stub_repeats):
 
       * OVERLAP.  Real samples tile -- a tone's B block starts exactly where its A block
         ends.  A block claiming bytes some other block already owns is not a sample.
-      * REPEATED LENGTH.  The placeholders are identical stubs reused across tones: 688
-        bytes eight times on SN-R8-10, 152 bytes three times on SN-R8-11.  A length that
-        recurs that often is a stub signature; a length that occurs once is a sample.
+      * ENVELOPE WORDS.  A real layer carries level and envelope data in w6..w8; the
+        placeholders carry zeros there.  Checked on both kinds: SN-R8-04's 808_T B block
+        reads w6..w8 = 0x462A 0x041C 0x0017 and is the tom's body, while SN-R8-10's 688-byte
+        stubs read 0x0000 0x0000 0x0000.
 
     The second test replaced a plain minimum length, which was wrong: 909_K's B block is
     852 bytes and is the kick drum's entire low end, so any floor high enough to catch the
     688-byte stubs also threw away real audio.  `min_layer_bytes` survives only as a floor
     against degenerate spans.
+
+    It in turn replaced a REPEATED-LENGTH test, which was wrong in the other direction.  The
+    stubs on SN-R8-10 happen to share a length, so "a length several tones share is a stub"
+    caught them -- but SN-R8-04 and SN-R8-09 store their samples 2048-byte aligned, so
+    lengths repeat there for an innocent reason.  It threw away 808_T's entire body, a
+    6656-byte block at 298 Hz, and left the tom as its own 204-byte attack click.  The
+    envelope-word test above is a property of the record rather than a statistic about its
+    neighbours, and it separates the two cases exactly: every real layer checked carries
+    nonzero w6..w8, every stub carries zeros.
     """
     taken = []
     exact = set()          # spans already accepted, so a REPEAT is sharing, not overlapping
@@ -160,11 +170,6 @@ def r8_blocks(card, min_layer_bytes, stub_repeats):
             taken.append((A['start'], A['end']))
             exact.add((A['start'], A['end']))
 
-    lengths = {}
-    for t in card['tones']:
-        n = t['blocks'][1]['end'] - t['blocks'][1]['start']
-        lengths[n] = lengths.get(n, 0) + 1
-
     out = []
     for t in card['tones']:
         A, B = t['blocks']
@@ -176,8 +181,7 @@ def r8_blocks(card, min_layer_bytes, stub_repeats):
         if not (0 < n <= rc.BANK_SIZE):        why = 'B address out of range'
         elif n < min_layer_bytes:              why = 'B is only %d bytes' % n
         elif overlaps(B['start'], B['end']):   why = 'B overlaps another sample'
-        elif lengths[n] >= stub_repeats:
-            why = 'B is %d bytes, a length reused by %d tones -- a stub' % (n, lengths[n])
+        elif not any(B['words'][6:9]):         why = 'B carries no envelope data -- a stub'
         keep = None
         if why is None:
             keep = B
@@ -784,7 +788,8 @@ def main():
     ap.add_argument('--min-layer-bytes', type=int, default=64,
                     help='floor against degenerate block-B spans; the stub test is the real one')
     ap.add_argument('--stub-repeats', type=int, default=3,
-                    help='a block-B length shared by this many tones is a placeholder')
+                    help=argparse.SUPPRESS)   # retired: see r8_blocks(), kept so old
+                                              # command lines do not break
     ap.add_argument('--loopmode', type=int, default=1, help='1 = off, which is every R-8 sample')
     ap.add_argument('--looplen', type=int, default=4)
     ap.add_argument('--fine', type=int, default=0x40,

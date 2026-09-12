@@ -117,7 +117,7 @@ play it — which is why the field meanings can be read straight off our own chi
 | `w2` | 08/09 | start fraction — `0x4000` on every block on every card |
 | `w3` | 0C/0D | **end** address, in 4-byte units |
 | `w4` | 0E/0F | loop address — sits *past* the end on every block, so **nothing loops** |
-| `w5` | 04/05 | playback step |
+| `w5` | — | **unknown** — the "playback step" reading is refuted, see `R8-DRUM-TONES.md` §4 |
 | `w6..w8` | — | level / envelope; all zero on blocks the card leaves unused |
 
 Bit 10 of `w0` being address bit 18 is not a guess: on the Dance card tone 13's A block
@@ -558,8 +558,9 @@ the output name cannot be parsed.
   directory-free shortcut fails, in **[`R8-MKII-INTERNAL.md`](R8-MKII-INTERNAL.md)**.
 
 - **§2.3**, which B blocks are live, is still geometry rather than a decoded flag.
-- **`w5`'s scale** (`R8-DRUM-TONES.md` §4), and with it whether the two layers of a mixed
-  sound share a playback rate.
+- **What `w5` is.** Not the playback step: `R8-DRUM-TONES.md` §4. The doubt this used to
+  cast over the pre-mix is lifted — there is no longer any evidence that a sound's two layers
+  play at different rates.
 
 ---
 
