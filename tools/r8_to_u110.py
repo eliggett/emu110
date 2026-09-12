@@ -15,7 +15,14 @@ bytes are carried across and only the tables around them are authored.
 A kit entry is `[card:]name[+n|-n]` -- `909_K`, `10:909_S`, `09:ATAK_T1+5`.  Listing the
 same instrument more than once at different offsets builds a tuned set out of one drum,
 which is how the factory cards make their toms, and the sample is stored only once however
-many keys it lands on.  A kit file holds one entry per line with `#` for comments.
+many keys it lands on.  A kit file holds entries separated by commas or whitespace, with `#`
+for comments.
+
+A line reading `TONEPART [name]` starts a new U-110 tone there, named if you name it.  Keys
+carry on from where the previous tone stopped, so the groups tile one continuous map.  Since
+a PART plays one tone, that is how you get kicks, snares and hats onto separate parts and
+level, pan and tune each of them from the panel -- see tools/r8_kit_parts_example.txt.  Up
+to 8 tones fit on a card (the drum map is picked by three bits of the tone type).
 
 Each R-8 tone carries TWO sample blocks that the machine sounds together -- a kick's click
 and its boom, a snare's noise and its shell tone -- and both are summed onto the key
@@ -247,6 +254,23 @@ def premix(insts, fade_ms):
     return [m * scale for m in waves], scale
 
 
+def partition(insts, per_tone):
+    """Split the kit into tones: one per TONEPART, and a new one whenever 22 keys are full.
+
+    Returns lists of (index in `insts`, instrument), because the pre-mixed waveforms are held
+    in kit order and have to be looked up by it.
+    """
+    groups, cur = [], []
+    for gi, item in enumerate(insts):
+        if cur and (len(cur) >= per_tone or item[0].get('tonebreak')):
+            groups.append(cur)
+            cur = []
+        cur.append((gi, item))
+    if cur:
+        groups.append(cur)
+    return groups
+
+
 def build(insts_in, args):
     """Author the logical image, then scramble it and drop the plain header on top.
 
@@ -286,7 +310,7 @@ def build(insts_in, args):
     dropped_for_room = []
     while insts:
         per_partial_ = min(args.keys_per_partial, MAX_KEYS)
-        ntone = (len(insts) + 2 * per_partial_ - 1) // (2 * per_partial_)
+        ntone = len(partition(insts, 2 * per_partial_))
         uniq = {}
         for k, (t, A, B, _w) in enumerate(insts):
             uniq[(id(t['img']), A['start'], A['end'],
@@ -343,26 +367,27 @@ def build(insts_in, args):
     samples = []            # dicts: data / src, reference note, length
     group_ref = {}          # payload -> the reference note its first key set
     tones = []
-    ntones = (len(insts) + per_tone - 1) // per_tone
-    if ntones > MAX_DRUM_MAPS:
-        print("  only %d drum maps exist (tone type bits 4-6); keeping the first %d tones"
-              % (MAX_DRUM_MAPS, MAX_DRUM_MAPS), file=sys.stderr)
-        ntones = MAX_DRUM_MAPS
-        insts = insts[:ntones * per_tone]
+    groups = partition(insts, per_tone)
+    if len(groups) > MAX_DRUM_MAPS:
+        print("  only %d drum maps exist (tone type bits 4-6), so the last %d tone(s) are "
+              "dropped; merge some TONEPART groups" % (MAX_DRUM_MAPS, len(groups) - MAX_DRUM_MAPS),
+              file=sys.stderr)
+        groups = groups[:MAX_DRUM_MAPS]
+    ntones = len(groups)
     # Keys run on from one tone to the next, so a kit that spills into SET2 continues where
     # SET1 stopped rather than restarting under it.  The MAPPED values do restart per tone,
     # and should: each tone carries its own splits and its own drum map, so keeping the
     # mapped run low keeps every reference note equal to it and every drum at its own rate.
     key_cursor = args.base_note
-    for ti in range(ntones):
-        group = insts[ti * per_tone:(ti + 1) * per_tone]
+    for ti, group in enumerate(groups):
         first = len(samples)
         key_lo = args.base_note if args.keys_restart else key_cursor
+        gname = group[0][1][0].get('tonename')
         lo, hi = group[:per_partial], group[per_partial:]
         keys = []
-        for n, (t, A, B, _w) in enumerate(lo):
+        for n, (gi, (t, A, B, _w)) in enumerate(lo):
             key = key_lo + n
-            data, length, gkey = _payload(ti * per_tone + n, t, A, B)
+            data, length, gkey = _payload(gi, t, A, B)
             mv = _mapped(n)
             # Reference note == mapped value, so a drum plays at its own stored rate -- the
             # convention the factory cards use.  A repeat of an earlier sample keeps THAT
@@ -376,9 +401,9 @@ def build(insts_in, args):
             samples.append(dict(src=None, data=None, ref=SILENCE_REF, length=SILENCE_BYTES))
         silence = len(samples)
         samples.append(dict(src=None, data=None, ref=SILENCE_REF, length=SILENCE_BYTES))
-        for n, (t, A, B, _w) in enumerate(hi):
+        for n, (gi, (t, A, B, _w)) in enumerate(hi):
             key = key_lo + per_partial + n
-            data, length, gkey = _payload(ti * per_tone + per_partial + n, t, A, B)
+            data, length, gkey = _payload(gi, t, A, B)
             mv = _mapped(per_partial + n)
             ref = (mv - t.get('pitch', 0)) if t.get('pitch') \
                   else group_ref.setdefault(gkey, mv)
@@ -406,7 +431,8 @@ def build(insts_in, args):
         mapidx = len(samples)
         samples.append(dict(src=None, data=np.frombuffer(bytes(kmap), dtype=np.uint8),
                             ref=MAP_REF, length=MAP_BYTES))
-        tones.append(dict(index=ti, first=first, silence=silence, keys=keys, map=mapidx))
+        tones.append(dict(index=ti, first=first, silence=silence, keys=keys,
+                          map=mapidx, name=gname))
 
     if len(samples) > SAMPLE_RECORDS:
         raise SystemExit("needs %d sample records, the table holds %d"
@@ -494,7 +520,8 @@ def build(insts_in, args):
                                                     for k in range(per_partial - 1)]
         idx1 = list(range(T['first'], T['first'] + per_partial)) + [T['silence']]
         idx2 = [T['silence']] + list(range(T['silence'] + 1, T['silence'] + 1 + per_partial))
-        name = args.tone_name % dict(part=args.part_for_name, n=T['index'] + 1)
+        name = T.get('name') or args.tone_name % dict(part=args.part_for_name,
+                                                      n=T['index'] + 1)
         rec = bytearray(0x50)
         rec[0:10] = ("%-10.10s" % name).encode('ascii', 'replace')
         # bit 7 marks a drum tone; bits 4-6 pick which of the eight drum maps it uses, so
@@ -638,7 +665,12 @@ def parse_pick(spec):
 def select(insts, picks):
     """Resolve kit entries against the loaded instruments, in the order asked for."""
     chosen, missing = [], []
+    pending_break, pending_name = False, None
     for spec in picks:
+        if spec.upper() == 'TONEPART' or spec.upper().startswith('TONEPART='):
+            pending_break = True
+            pending_name = spec.split('=', 1)[1].strip() if '=' in spec else ''
+            continue
         part, name, pitch = parse_pick(spec)
         hit = None
         for (t, A, B, why) in insts:
@@ -655,6 +687,10 @@ def select(insts, picks):
         # share one `pitch` field; the heavy sample data is shared by the payload cache.
         t = dict(hit[0])
         t['pitch'] = pitch
+        if pending_break:
+            t['tonebreak'] = True
+            t['tonename'] = pending_name or None
+            pending_break, pending_name = False, None
         chosen.append((t, hit[1], hit[2], hit[3]))
     if missing:
         raise SystemExit("no such instrument: " + ', '.join(missing)
@@ -683,12 +719,24 @@ def card_number_from_name(name):
 
 
 def read_kit(path):
-    """A kit file: one entry per line, `#` starts a comment, blank lines ignored."""
+    """A kit file: entries separated by commas or whitespace, `#` starts a comment.
+
+    A line whose first word is TONEPART starts a new U-110 tone at that point, and the rest
+    of the line, if any, names it.  Everything after it goes in the new tone, continuing from
+    the key the previous one stopped on -- so a kit can be split into logical groups (kicks,
+    snares, hats) and each group assigned to its own PART on the machine, where it gets its
+    own level, pan, tuning and output.
+    """
     out = []
     for line in open(path):
         line = line.split('#', 1)[0].strip()
-        if line:
-            out.extend(x for x in re.split(r'[,\s]+', line) if x)
+        if not line:
+            continue
+        head = re.split(r'[,\s]+', line, 1)
+        if head[0].upper() == 'TONEPART':
+            out.append('TONEPART=' + (head[1].strip() if len(head) > 1 else ''))
+            continue
+        out.extend(x for x in re.split(r'[,\s]+', line) if x)
     return out
 
 

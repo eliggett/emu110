@@ -55,3 +55,7 @@ All of these are rendered with the 6 ms tail fade described in R8-CONVERSION.md 
 5.6.  Without it a cymbal fades out and then clicks: the firmware shuts a finished one-shot
 with a 0.85 ms envelope slam and the de-emphasis turns the step into a thump.  R-8 samples
 do not reach silence by their last byte, so there is always something for it to cut.
+
+    parts_kicks.wav      the KICKS group of a TONEPART kit (tools/r8_kit_parts_example.txt)
+    parts_toms.wav       the TOMS group from the same card -- one ATAK_T1 sample on five
+                         keys at -7/-3/0/+4/+8 semitones

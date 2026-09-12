@@ -456,6 +456,28 @@ Keys are assigned in the order listed, so the kit file *is* the key map. With no
 `--kit` the first card's instruments are used in order, which is the whole-card conversion
 phases 1-3 already did — all six cards still convert and still speak on all 22 keys.
 
+**`TONEPART` splits a kit into groups.** A line reading `TONEPART [name]` in a kit file
+starts a new U-110 tone at that point:
+
+```
+TONEPART KICKS
+10:909_K   10:78_K   10:BOING_K   09:FACE_K   09:TEKNO_K
+TONEPART SNARES
+10:909_S   10:78_S   10:DANCE_S   09:REAL_S   09:SHARP_S   09:GATE_S
+TONEPART HATS
+11:CLSD_H2 11:OPEN_H2 11:PDAL_H2  11:CLSD_H3  11:OPEN_H3
+```
+
+gives `KICKS` on notes 36-40, `SNARES` on 41-46, `HATS` on 47-51 — one continuous map across
+six named tones, each with its own drum map (`0x80`, `0x90` … `0xD0`). **A part plays one
+tone**, so this is what lets a logical group go on its own part and get its own level, pan,
+tuning and output from the panel.
+
+Verified in the machine with two parts live on the same MIDI channel, part 1 on `KICKS` and
+part 2 on `SNARES`: notes 36 and 38 sound, 41 and 44 sound, and 48 is silent because no part
+holds the `HATS` tone. Up to 8 groups fit; past that the drum map runs out of selector bits
+and the converter says so.
+
 **Keys run on across tones.** A tone holds 22 keys (§3.2), so a 26-instrument card spills
 into a second one, and the second continues where the first stopped rather than restarting
 underneath it: SN-R8-10 lays `SET1` over notes 36-57 and `SET2` over 58-61. That keeps one

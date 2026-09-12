@@ -1,0 +1,20 @@
+# A kit split into logical groups.  Each TONEPART becomes its own U-110 tone, so each can
+# go on its own PART and be levelled, panned and tuned by itself from the panel.
+
+TONEPART KICKS
+10:909_K       10:78_K       10:BOING_K    09:FACE_K     09:TEKNO_K
+
+TONEPART SNARES
+10:909_S       10:78_S       10:DANCE_S    09:REAL_S     09:SHARP_S    09:GATE_S
+
+TONEPART HATS
+11:CLSD_H2     11:OPEN_H2    11:PDAL_H2    11:CLSD_H3    11:OPEN_H3
+
+TONEPART CYMBALS
+11:RIDE_C2     11:CRSH_C6    11:CRSH_C6+5  11:S_CHINA
+
+TONEPART TOMS
+09:ATAK_T1-7   09:ATAK_T1-3  09:ATAK_T1    09:ATAK_T1+4  09:ATAK_T1+8
+
+TONEPART PERC
+10:78_COW      10:78_TAMB    11:CHIME      10:303BASS
