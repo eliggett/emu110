@@ -34,8 +34,8 @@
 #include <cstdio>
 #include <cctype>
 #include <cstdlib>
+#include <chrono>
 #include <cstring>
-#include <ctime>
 #include <string>
 #include <vector>
 
@@ -43,6 +43,20 @@
 #include <sys/stat.h>
 
 START_NAMESPACE_DISTRHO
+
+/// A monotonic clock in seconds, for the things that are paced rather than event-driven:
+/// the caret blink, the card-reload queue, and the redraw cost counter.
+///
+/// std::chrono and not clock_gettime, and this is not a style preference.  mingw-w64
+/// DECLARES clock_gettime in <time.h> but keeps it in libwinpthread rather than the C
+/// runtime, so every Windows build linked against nothing but the system DLLs failed at
+/// the link step with five undefined references and no hint that the cause was a library
+/// and not a typo.  steady_clock needs no library anywhere.
+static inline double nowSeconds()
+{
+    using clock = std::chrono::steady_clock;
+    return std::chrono::duration<double>(clock::now().time_since_epoch()).count();
+}
 
 // Kept in step with the plugin by hand; there are only a few and they are checked by the
 // selftest, which fails loudly if the port layout moves.
@@ -488,9 +502,7 @@ protected:
 
         if (m_nameEdit || m_typing != Typing::None)
         {
-            struct timespec ts;
-            clock_gettime(CLOCK_MONOTONIC, &ts);
-            const double now = double(ts.tv_sec) + ts.tv_nsec * 1e-9;
+            const double now = nowSeconds();
             if (now - m_caretAt >= kCaretPeriod)
             {
                 m_caretAt = now;
@@ -541,9 +553,9 @@ protected:
         // VOLTAIRE_FPS reports both how often the panel redraws and what one redraw costs.
         // Both numbers matter: a redraw is the whole SVG plus 1280 LCD dots, so the rate it
         // is asked for at is the difference between idling and saturating a core.
-        struct timespec t0;
+        double t0 = 0.0;
         if (m_countFrames)
-            clock_gettime(CLOCK_MONOTONIC, &t0);
+            t0 = nowSeconds();
 
         const float s = panelScale();
         const float ox = (getWidth() - voltaire::panel::kDesignWidth * s) * 0.5f;
@@ -618,12 +630,10 @@ protected:
 
         if (m_countFrames)
         {
-            struct timespec t1;
-            clock_gettime(CLOCK_MONOTONIC, &t1);
             static double accum = 0.0, last = 0.0;
             static int frames = 0;
-            const double now = double(t1.tv_sec) + t1.tv_nsec * 1e-9;
-            accum += (now - (double(t0.tv_sec) + t0.tv_nsec * 1e-9)) * 1000.0;
+            const double now = nowSeconds();
+            accum += (now - t0) * 1000.0;
             frames ++;
             if (last == 0.0) last = now;
             if (now - last >= 2.0)
@@ -1587,9 +1597,7 @@ protected:
     /// Restart the blink, so the caret is solid under the character just typed.
     void showCaret()
     {
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        m_caretAt = double(ts.tv_sec) + ts.tv_nsec * 1e-9;
+        m_caretAt = nowSeconds();
         m_caretOn = true;
     }
 
@@ -3773,9 +3781,7 @@ private:
     {
         if (m_reloadQueue == 0)
             return;
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        const double now = double(ts.tv_sec) + ts.tv_nsec * 1e-9;
+        const double now = nowSeconds();
         if (now < m_reloadAt)
             return;
         for (int i = 0; i < 4; i ++)

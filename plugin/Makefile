@@ -136,6 +136,13 @@ core: generated
 CROSS_PREFIX ?= x86_64-w64-mingw32-
 WIN_BUILD    = $(CURDIR)/build-win
 WIN_BIN      = $(CURDIR)/bin-win
+WIN_TARGETS  = clap vst3
+
+# What the relink guard below has to watch, and what `file` reports at the end.  DPF names
+# the Windows VST3 binary .vst3 INSIDE a .vst3 bundle directory, which is the format's own
+# doing and not a mistake here.
+WIN_PRODUCTS = $(WIN_BIN)/$(NAME).clap \
+               $(WIN_BIN)/$(NAME).vst3/Contents/x86_64-win/$(NAME).vst3
 
 win:
 	@command -v $(CROSS_PREFIX)g++ > /dev/null \
@@ -143,18 +150,35 @@ win:
 	@$(MAKE) --no-print-directory patches generated
 	@U110_CORE_BUILD=$(WIN_BUILD) CXX=$(CROSS_PREFIX)g++ AR=$(CROSS_PREFIX)ar \
 		tools/build_core.sh
-	@if [ -e "$(WIN_BIN)/$(NAME).clap" ] \
-	   && [ "$(WIN_BUILD)/libu110core.a" -nt "$(WIN_BIN)/$(NAME).clap" ]; then \
-		echo "  core is newer than $(NAME).clap -- forcing a relink"; \
-		rm -f "$(WIN_BIN)/$(NAME).clap"; \
-	fi
-	@$(MAKE) --no-print-directory clap \
+	@for f in $(WIN_PRODUCTS); do \
+		if [ -e "$$f" ] && [ "$(WIN_BUILD)/libu110core.a" -nt "$$f" ]; then \
+			echo "  core is newer than $$(basename $$f) -- forcing a relink"; \
+			rm -f "$$f"; \
+		fi; \
+	done
+	@$(MAKE) --no-print-directory $(WIN_TARGETS) \
 		CC=$(CROSS_PREFIX)gcc CXX=$(CROSS_PREFIX)g++ AR=$(CROSS_PREFIX)ar \
 		BUILD_DIR_SUFFIX=-win \
 		DPF_BUILD_DIR=$(WIN_BUILD)/$(NAME) \
 		DPF_TARGET_DIR=$(WIN_BIN) \
 		CORE_LIB=build-win/libu110core.a
-	@file $(WIN_BIN)/$(NAME).clap
+	@file $(WIN_PRODUCTS)
+	@# A cross-built DLL that wants libstdc++-6.dll or libwinpthread-1.dll next to it is
+	@# not shippable: the user drops one file into their VST3 folder and the host reports
+	@# nothing more useful than "could not load".  mingw links those statically by
+	@# default, which is easy to lose to one stray flag, so it is checked rather than
+	@# assumed.  Only DLLs that ship WITH Windows may appear here.
+	@ok=yes; for f in $(WIN_PRODUCTS); do \
+		bad=$$($(CROSS_PREFIX)objdump -p "$$f" | sed -n 's/^\tDLL Name: //p' \
+		       | tr 'A-Z' 'a-z' | sort -u \
+		       | grep -v -x -e comdlg32.dll -e dwmapi.dll -e gdi32.dll -e kernel32.dll \
+		                    -e msvcrt.dll -e opengl32.dll -e shell32.dll -e user32.dll \
+		                    -e ole32.dll -e advapi32.dll || true); \
+		if [ -n "$$bad" ]; then \
+			echo "  WARNING: $$(basename $$f) needs non-system DLLs: $$bad"; ok=no; \
+		fi; \
+	done; \
+	[ "$$ok" = yes ] && echo "  Windows: $(WIN_TARGETS), no non-system DLLs needed" || true
 
 .PHONY: win
 
@@ -222,6 +246,8 @@ selftest: all
 	@$(MAKE) --no-print-directory presetcheck
 	@echo
 	@$(MAKE) --no-print-directory clapcheck
+	@echo
+	@$(MAKE) --no-print-directory vst3check
 
 # The DSP -> UI channel under CLAP, checked with a real CLAP host (tools/clap_selftest.c).
 # Its own target as well as part of selftest, because it is the one check that needs a
@@ -229,7 +255,14 @@ selftest: all
 clapcheck:
 	@tools/clap_check.sh bin/$(NAME).clap
 
-.PHONY: clapcheck
+# The same question under VST3, plus one VST3 only has: that the plugin is built ONCE per
+# instance.  DPF's separate edit controller constructs a second Plugin, and a Plugin here is
+# an emulated machine -- so the UI was reading its lists from a second U-110 that never
+# played a note.  tools/vst3_selftest.cpp is a real VST3 host and reports both.
+vst3check:
+	@tools/vst3_check.sh bin/$(NAME).vst3
+
+.PHONY: clapcheck vst3check
 
 # The preset file format, on its own: that a patch survives the round trip, and that
 # nothing which is not a patch is ever believed.  These files are hand-editable by design

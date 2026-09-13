@@ -1,0 +1,40 @@
+diff --git a/distrho/src/DistrhoPluginVST.hpp b/distrho/src/DistrhoPluginVST.hpp
+index 461a7ec..646fd88 100644
+--- a/distrho/src/DistrhoPluginVST.hpp
++++ b/distrho/src/DistrhoPluginVST.hpp
+@@ -27,11 +27,30 @@
+ # include "Base.hpp"
+ #endif
+ 
+-#if DISTRHO_PLUGIN_HAS_UI == 1 && DISTRHO_PLUGIN_WANT_DIRECT_ACCESS == 0
+-# define DPF_VST3_USES_SEPARATE_CONTROLLER 1
+-#else
+-# define DPF_VST3_USES_SEPARATE_CONTROLLER 0
+-#endif
++// ONE object for the component and the edit controller -- VST3's "single component
++// effect", which is what the SDK's own SingleComponentEffect produces and what most
++// plugins in the wild are.  DPF takes this route only when DISTRHO_PLUGIN_WANT_DIRECT_ACCESS
++// is set, and that macro is not usable as a way to ask for it: it also puts instance-access
++// into the LV2 manifest, where it would make the LV2 UI refuse to open in any host that
++// cannot hand the UI a pointer to the DSP.  So the choice is made here, for VST3 alone.
++//
++// Both reasons follow from the same fact: with a separate controller,
++// dpf_edit_controller::initialize() does `new PluginVst3(...)` and the plugin exists TWICE.
++// For most plugins that is a handful of floats.  Here a plugin instance is an emulated
++// machine -- two sets of ROM images in memory, two emulated CPUs each taking seconds to
++// boot, and only one of the two ever connected to the audio processor.
++//
++//  - Everything the UI is given when its window opens -- patch names, tone lists, which
++//    cards are in which slot -- is read from the instance the CONTROLLER owns.  That is
++//    the silent one, so the panel described a machine that had never played a note nor
++//    been handed a card.
++//  - updateStateValue() is called from run(), which is the component's instance, while the
++//    connection to the view lives on the controller's.  A DSP -> UI queue in the object
++//    that fills it cannot be drained by the object that can reach the view, and the host
++//    is entitled to put a thread boundary between the two.
++//
++// 0006-vst3-dsp-to-ui-state.patch is what this makes possible; it is not separable.
++#define DPF_VST3_USES_SEPARATE_CONTROLLER 0
+ 
+ // --------------------------------------------------------------------------------------------------------------------
+ 

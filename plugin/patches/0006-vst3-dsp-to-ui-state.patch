@@ -1,0 +1,117 @@
+diff --git a/distrho/src/DistrhoPluginVST3.cpp b/distrho/src/DistrhoPluginVST3.cpp
+index 7295c89..873a3d5 100644
+--- a/distrho/src/DistrhoPluginVST3.cpp
++++ b/distrho/src/DistrhoPluginVST3.cpp
+@@ -68,6 +68,9 @@ static constexpr const writeMidiFunc writeMidiCallback = nullptr;
+ #if ! DISTRHO_PLUGIN_WANT_PARAMETER_VALUE_CHANGE_REQUEST
+ static constexpr const requestParameterValueChangeFunc requestParameterValueChangeCallback = nullptr;
+ #endif
++#if ! DISTRHO_PLUGIN_WANT_STATE
++static constexpr const updateStateValueFunc updateStateValueCallback = nullptr;
++#endif
+ 
+ typedef std::map<const String, String> StringMap;
+ 
+@@ -583,7 +586,7 @@ class PluginVst3
+ 
+ public:
+     PluginVst3(v3_host_application** const host, const bool isComponent)
+-        : fPlugin(this, writeMidiCallback, requestParameterValueChangeCallback, nullptr),
++        : fPlugin(this, writeMidiCallback, requestParameterValueChangeCallback, updateStateValueCallback),
+           fComponentHandler(nullptr),
+         #if DISTRHO_PLUGIN_HAS_UI
+          #if DPF_VST3_USES_SEPARATE_CONTROLLER
+@@ -2267,6 +2270,21 @@ public:
+                                      fCachedParameterValues[kVst3InternalParameterBaseCount + i]);
+             }
+ 
++           #if DISTRHO_PLUGIN_WANT_STATE
++            // Whatever the DSP pushed since the last idle.  Drained HERE and nowhere else:
++            // this is the main thread, which is the only place a message may be made and
++            // sent.  fStateMap is updated alongside so that a UI which closes and reopens
++            // is given the current value and not the one the session started with.
++            while (fStateQueueRead != fStateQueueWrite)
++            {
++                const StateMessage& msg(fStateQueue[fStateQueueRead]);
++                if (fPlugin.wantStateKey(msg.key))
++                    fStateMap[String(msg.key)] = String(msg.value);
++                sendStateSetToUI(msg.key, msg.value);
++                fStateQueueRead = (fStateQueueRead + 1) % kStateQueueSize;
++            }
++           #endif
++
+             sendReadyToUI();
+             return V3_OK;
+         }
+@@ -2492,6 +2510,27 @@ private:
+    #endif
+    #if DISTRHO_PLUGIN_WANT_STATE
+     StringMap fStateMap;
++    #if DISTRHO_PLUGIN_HAS_UI
++    // DSP -> UI state, which this backend never had at all: the callback was passed as a
++    // nullptr, so updateStateValue() answered false to every push for the whole life of
++    // the plugin.  The UI was handed one snapshot of fStateMap when its window opened and
++    // then nothing, ever -- so a plugin that draws its own display from the DSP showed a
++    // dead panel under VST3 while working under LV2.
++    //
++    // sendStateSetToUI() cannot be called from run() and this is not a style rule: it asks
++    // the HOST to allocate a message object and then notifies across a connection point.
++    // So a fixed ring, written by the audio thread and drained on the "idle" message the
++    // view sends, which arrives on the main thread where allocating is allowed.  Same
++    // shape as the CLAP and JACK backends, for the same reason.
++    //
++    // The value is sized for a state that is a whole list rather than a scalar, because a
++    // truncated push is worse than a dropped one -- the UI cannot tell that it was short.
++    // Anything longer is refused outright and reported, which is a bug in the caller.
++    static constexpr uint32_t kStateQueueSize = 16;
++    struct StateMessage { char key[64]; char value[16384]; };
++    StateMessage fStateQueue[kStateQueueSize];
++    volatile uint32_t fStateQueueWrite = 0, fStateQueueRead = 0;
++    #endif
+    #endif
+    #if DISTRHO_PLUGIN_WANT_TIMEPOS
+     TimePosition fTimePosition;
+@@ -3047,6 +3086,43 @@ private:
+     // ----------------------------------------------------------------------------------------------------------------
+     // DPF callbacks
+ 
++   #if DISTRHO_PLUGIN_WANT_STATE
++    // Called from run(), so: no allocation, no locks, no blocking, and never a partial
++    // write.  One writer and one reader, so the indices need no atomics; they are volatile
++    // because the two threads are what makes them change.
++    bool updateStateValue(const char* const key, const char* const value)
++    {
++       #if DISTRHO_PLUGIN_HAS_UI
++        if (std::strlen(key) >= sizeof(fStateQueue[0].key)
++            || std::strlen(value) >= sizeof(fStateQueue[0].value))
++        {
++            d_stderr2("updateStateValue('%s'): %lu bytes is too long for the queue",
++                      key, (unsigned long)std::strlen(value));
++            return false;
++        }
++
++        const uint32_t next = (fStateQueueWrite + 1) % kStateQueueSize;
++        if (next == fStateQueueRead)
++            return false;                        // full: drop it rather than block
++
++        StateMessage& msg(fStateQueue[fStateQueueWrite]);
++        std::strcpy(msg.key, key);
++        std::strcpy(msg.value, value);
++        fStateQueueWrite = next;
++        return true;
++       #else
++        // Nothing to push to.
++        return false;
++        (void)key; (void)value;
++       #endif
++    }
++
++    static bool updateStateValueCallback(void* const ptr, const char* const key, const char* const value)
++    {
++        return static_cast<PluginVst3*>(ptr)->updateStateValue(key, value);
++    }
++   #endif
++
+    #if DISTRHO_PLUGIN_WANT_PARAMETER_VALUE_CHANGE_REQUEST
+     bool requestParameterValueChange(const uint32_t index, float)
+     {
