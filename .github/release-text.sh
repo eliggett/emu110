@@ -11,7 +11,8 @@
 # build system carries.
 #
 # usage: release-text.sh <section> [version]
-#   linux-lv2 | linux-clap | windows-clap   the one platform, for INSTALL.txt
+#   linux-lv2 | linux-clap | linux-vst3     the one platform, for INSTALL.txt
+#   windows-clap | windows-vst3
 #   notes                                   the whole release body, markdown
 set -euo pipefail
 
@@ -73,6 +74,30 @@ If the plugin does not boot, click the LCD screen for the self-check report.
 EOF
 }
 
+# A VST3 is a DIRECTORY, and that is the one thing worth being emphatic about: the file
+# inside it is not the plugin as far as a host is concerned, and someone who copies just
+# that file gets a plugin that never appears in any scan and no error to explain why.
+linux_vst3() {
+    cat <<'EOF'
+Linux, VST3
+===========
+
+Voltaire110.vst3 is a FOLDER, not a file.  Copy the whole folder:
+
+  mkdir -p ~/.vst3
+  unzip Voltaire110-Linux-VST3.zip
+  cp -r Voltaire110.vst3 ~/.vst3/
+
+Then put the ROMs in ~/.local/share/Voltaire110/roms/ :
+
+  mkdir -p ~/.local/share/Voltaire110/roms
+  cp U110v203.BIN roland_t110_u110_u220_waverom*.bin ~/.local/share/Voltaire110/roms/
+
+Now tell your DAW to rescan for plugins.
+If the plugin does not boot, click the LCD screen for the self-check report.
+EOF
+}
+
 windows_clap() {
     cat <<'EOF'
 Windows, CLAP
@@ -81,6 +106,30 @@ Windows, CLAP
 Copy Voltaire110.clap to:
 
   C:\Program Files\Common Files\CLAP\Voltaire110.clap
+
+Then put the ROMs in:
+
+  C:\Users\<your username>\AppData\Local\Voltaire110\roms\
+
+Now tell your DAW to rescan for plugins.
+If the plugin does not boot, click the LCD screen for the self-check report.
+EOF
+}
+
+windows_vst3() {
+    cat <<'EOF'
+Windows, VST3
+=============
+
+Voltaire110.vst3 is a FOLDER, not a file.  Copy the whole folder to:
+
+  C:\Program Files\Common Files\VST3\Voltaire110.vst3\
+
+so that the plugin itself ends up at
+
+  C:\Program Files\Common Files\VST3\Voltaire110.vst3\Contents\x86_64-win\Voltaire110.vst3
+
+Copying only the inner file does not work -- a host looks for the folder.
 
 Then put the ROMs in:
 
@@ -108,7 +157,9 @@ Version \`$version\`.  Linux and Windows, 64-bit.
 |---|---|---|
 | \`Voltaire110-Linux-LV2.zip\` | Linux x86-64 | LV2 |
 | \`Voltaire110-Linux-CLAP.zip\` | Linux x86-64 | CLAP |
+| \`Voltaire110-Linux-VST3.zip\` | Linux x86-64 | VST3 |
 | \`Voltaire110-Windows-CLAP.zip\` | Windows x86-64 | CLAP |
+| \`Voltaire110-Windows-VST3.zip\` | Windows x86-64 | VST3 |
 
 ## You supply the ROMs
 
@@ -136,7 +187,17 @@ unzip Voltaire110-Linux-CLAP.zip
 cp Voltaire110.clap ~/.clap/
 \`\`\`
 
-### ROMs, either format
+### \`Voltaire110-Linux-VST3.zip\`
+
+\`Voltaire110.vst3\` is a **folder**, not a file -- copy all of it.
+
+\`\`\`bash
+mkdir -p ~/.vst3
+unzip Voltaire110-Linux-VST3.zip
+cp -r Voltaire110.vst3 ~/.vst3/
+\`\`\`
+
+### ROMs, any format
 
 \`\`\`bash
 mkdir -p ~/.local/share/Voltaire110/roms
@@ -155,6 +216,18 @@ Copy the plugin to:
 \`\`\`
 C:\\Program Files\\Common Files\\CLAP\\Voltaire110.clap
 \`\`\`
+
+### \`Voltaire110-Windows-VST3.zip\`
+
+\`Voltaire110.vst3\` is a **folder**, not a file.  Copy all of it, so the plugin ends up at:
+
+\`\`\`
+C:\\Program Files\\Common Files\\VST3\\Voltaire110.vst3\\Contents\\x86_64-win\\Voltaire110.vst3
+\`\`\`
+
+Copying only the inner file does not work -- a host looks for the folder.
+
+### ROMs, either format
 
 Copy the ROM files (all of them) to:
 
@@ -175,8 +248,10 @@ EOF
 case "${1:-}" in
     linux-lv2)    linux_lv2 ;;
     linux-clap)   linux_clap ;;
+    linux-vst3)   linux_vst3 ;;
     windows-clap) windows_clap ;;
+    windows-vst3) windows_vst3 ;;
     roms)         roms_note ;;
     notes)        notes "${2:-}" ;;
-    *) echo "usage: $0 {linux-lv2|linux-clap|windows-clap|roms|notes [version]}" >&2; exit 2 ;;
+    *) echo "usage: $0 {linux-lv2|linux-clap|linux-vst3|windows-clap|windows-vst3|roms|notes [version]}" >&2; exit 2 ;;
 esac

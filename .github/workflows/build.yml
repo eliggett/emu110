@@ -3,10 +3,10 @@
 #
 # Build Voltaire 110 for Linux and Windows, and -- for a v* tag only -- publish a release.
 #
-# ONE runner builds both platforms.  The Windows CLAP is cross-compiled from Linux with
-# mingw-w64, which is how it is built by hand here too (CLONING.md, the Windows section),
-# so the workflow is not exercising a path nobody uses.  A second, Windows-hosted job
-# would be a second environment to keep working for no gain.
+# ONE runner builds both platforms.  The Windows CLAP and VST3 are cross-compiled from
+# Linux with mingw-w64, which is how they are built by hand here too (CLONING.md, the
+# Windows section), so the workflow is not exercising a path nobody uses.  A second,
+# Windows-hosted job would be a second environment to keep working for no gain.
 #
 # What triggers what:
 #
@@ -210,11 +210,15 @@ jobs:
 
       # The real gate.  tools/lv2_selftest.c loads the built LV2 bundle the way Ardour
       # would, plays a note and insists the result is not silence; the state, patch and
-      # tone passes check the save/restore round trip; clapcheck opens a UI under a real
-      # CLAP host and fails if no panel update crosses from the DSP.  The ROMs it needs are
-      # in the repository under roms/, which is what U110_DATA_DIR points at.
+      # tone passes check the save/restore round trip; the midiout pass insists every MIDI
+      # atom is one complete message; and clapcheck and vst3check open a UI under a real
+      # CLAP host and a real VST3 host and fail if no panel update crosses from the DSP.
+      # vst3check also fails if the factory offers a separate edit controller, which would
+      # mean every instance building a second emulated machine.  The ROMs they need are in
+      # the repository under roms/, which is what U110_DATA_DIR points at.
       #
-      # clap_check.sh starts its own Xvfb when there is no DISPLAY, so nothing here has to.
+      # Both check scripts start their own Xvfb when there is no DISPLAY, so nothing here
+      # has to -- that is what the xvfb package in the list above is for.
       - name: Self-test the Linux build
         run: |
           set -euo pipefail
@@ -223,7 +227,7 @@ jobs:
           make selftest
           echo "::endgroup::"
 
-      - name: Cross-compile the Windows CLAP
+      - name: Cross-compile for Windows (CLAP, VST3)
         run: |
           set -euo pipefail
           echo "::group::make win"
@@ -231,27 +235,38 @@ jobs:
           make -j"$(nproc)" win
           echo "::endgroup::"
           echo "::group::what was built"
-          ls -l bin-win
-          file bin-win/Voltaire110.clap
+          ls -lR bin-win
+          file bin-win/Voltaire110.clap \
+               bin-win/Voltaire110.vst3/Contents/x86_64-win/Voltaire110.vst3
           echo "::endgroup::"
 
-      # DPF links the Windows build with -static-libgcc -static-libstdc++, so the .clap
-      # should import nothing but system DLLs.  If a libstdc++-6.dll or libwinpthread-1.dll
-      # ever shows up here, every Windows user gets a plugin their DAW silently refuses to
-      # load -- and they get it from a release, not from a build they can debug.  Cheaper
-      # to fail here.
-      - name: Check the Windows DLL has no runtime dependencies to ship
+      # DPF links the Windows build with -static-libgcc -static-libstdc++, so neither DLL
+      # should import anything but system libraries.  If a libstdc++-6.dll,
+      # libwinpthread-1.dll or libgcc_s_seh-1.dll ever shows up here, every Windows user
+      # gets a plugin their DAW silently refuses to load -- and they get it from a release,
+      # not from a build they can debug.  Cheaper to fail here.
+      #
+      # `make win` prints its own warning about this; the point of repeating it is that a
+      # warning does not fail a release and this does.  Both binaries are checked, because
+      # they are linked by separate rules and only one of them being static is exactly the
+      # kind of thing a single check would miss.
+      - name: Check the Windows DLLs have no runtime dependencies to ship
         run: |
           set -euo pipefail
-          echo "::group::imports"
-          x86_64-w64-mingw32-objdump -p plugin/bin-win/Voltaire110.clap | grep -i "DLL Name"
-          echo "::endgroup::"
-          if x86_64-w64-mingw32-objdump -p plugin/bin-win/Voltaire110.clap \
-               | grep -iE "DLL Name:.*(libstdc\+\+|libgcc|libwinpthread)"; then
-            echo "::error title=Windows build::the CLAP imports a mingw runtime DLL that the zip does not contain"
-            exit 1
-          fi
-          echo "imports system DLLs only -- nothing extra to ship"
+          rc=0
+          for f in plugin/bin-win/Voltaire110.clap \
+                   plugin/bin-win/Voltaire110.vst3/Contents/x86_64-win/Voltaire110.vst3; do
+            echo "::group::imports -- $(basename "$f")"
+            x86_64-w64-mingw32-objdump -p "$f" | grep -i "DLL Name"
+            echo "::endgroup::"
+            if x86_64-w64-mingw32-objdump -p "$f" \
+                 | grep -iE "DLL Name:.*(libstdc\+\+|libgcc|libwinpthread)"; then
+              echo "::error title=Windows build::$(basename "$f") imports a mingw runtime DLL that the zip does not contain"
+              rc=1
+            fi
+          done
+          [ "$rc" = 0 ] || exit 1
+          echo "both import system DLLs only -- nothing extra to ship"
 
       - name: Compiler cache statistics
         if: always()
@@ -260,15 +275,25 @@ jobs:
       # --- packaging -----------------------------------------------------------------
       #
       # One zip per platform-and-format, named so that a file sitting in someone's
-      # Downloads folder a week later still says what it is.  The VST3 is built (it comes
-      # out of the same `make all`) and deliberately NOT packaged: it has no DSP -> UI path
-      # yet, so its panel never updates.  The Linux standalone is built and not packaged
-      # either -- it is the development loop, not a deliverable here.
+      # Downloads folder a week later still says what it is.  The Linux standalone is built
+      # and not packaged -- it is the development loop, not a deliverable here.
+      #
+      # The VST3s are BUNDLE DIRECTORIES, and `pack` copies with `cp -r` and zips with
+      # `zip -r`, so a directory travels whole.  What matters is that the directory itself
+      # is what lands at the top of the zip: a host scans for Voltaire110.vst3/ and the
+      # file inside it is not the plugin as far as anything is concerned.
       - name: Package the zips
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # rm -rf, not mkdir -p.  `zip` ADDS to an archive that already exists rather than
+          # replacing it, so a second run in the same tree produces zips holding both runs'
+          # contents -- and a file that should have vanished is still in there.  A CI
+          # checkout is always fresh so it never bit here, but this block is also the thing
+          # anyone reaches for to reproduce a release by hand, and it bit me doing exactly
+          # that.
+          rm -rf dist stage
           mkdir -p dist stage
           cd stage
 
@@ -295,7 +320,26 @@ jobs:
           echo "::group::packing"
           pack Voltaire110-Linux-LV2.zip    linux-lv2    ../plugin/bin/Voltaire110.lv2
           pack Voltaire110-Linux-CLAP.zip   linux-clap   ../plugin/bin/Voltaire110.clap
+          pack Voltaire110-Linux-VST3.zip   linux-vst3   ../plugin/bin/Voltaire110.vst3
           pack Voltaire110-Windows-CLAP.zip windows-clap ../plugin/bin-win/Voltaire110.clap
+          pack Voltaire110-Windows-VST3.zip windows-vst3 ../plugin/bin-win/Voltaire110.vst3
+          echo "::endgroup::"
+
+          # A VST3 bundle that lost its inner binary on the way into the zip would still
+          # look like a plausible download, and would fail to load with nothing to say why.
+          echo "::group::the VST3 bundles carry their binary"
+          for z in linux:x86_64-linux/Voltaire110.so \
+                   windows:x86_64-win/Voltaire110.vst3; do
+            plat="${z%%:*}"; inner="${z#*:}"
+            case "$plat" in linux) name=Linux ;; windows) name=Windows ;; esac
+            if unzip -l "../dist/Voltaire110-$name-VST3.zip" \
+                 | grep -q "Voltaire110.vst3/Contents/$inner"; then
+              echo "  $name: Contents/$inner is in the zip"
+            else
+              echo "::error title=Packaging::Voltaire110-$name-VST3.zip has no Contents/$inner"
+              exit 1
+            fi
+          done
           echo "::endgroup::"
 
           echo "::group::contents"
@@ -317,11 +361,25 @@ jobs:
           path: dist/Voltaire110-Linux-CLAP.zip
           if-no-files-found: error
 
+      - name: Upload Voltaire110-Linux-VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: Voltaire110-Linux-VST3
+          path: dist/Voltaire110-Linux-VST3.zip
+          if-no-files-found: error
+
       - name: Upload Voltaire110-Windows-CLAP
         uses: actions/upload-artifact@v4
         with:
           name: Voltaire110-Windows-CLAP
           path: dist/Voltaire110-Windows-CLAP.zip
+          if-no-files-found: error
+
+      - name: Upload Voltaire110-Windows-VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: Voltaire110-Windows-VST3
+          path: dist/Voltaire110-Windows-VST3.zip
           if-no-files-found: error
 
       # build_core.sh writes a .log per translation unit and says which one to look at;
