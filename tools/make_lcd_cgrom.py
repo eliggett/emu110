@@ -48,6 +48,14 @@ HAND = {
     '#': ('.#.#.', '.#.#.', '#####', '.#.#.', '#####', '.#.#.', '.#.#.', '.....'),
     '%': ('##..#', '##..#', '...#.', '..#..', '.#...', '#..##', '#..##', '.....'),
     '@': ('.###.', '#...#', '#.###', '#.#.#', '#.###', '#....', '.###.', '.....'),
+    # The underscore sits BELOW the baseline, which is the one place the descender fold
+    # cannot help: its single row is the only row it has, so clipping left the glyph
+    # entirely blank -- 0x5F came out identical to a space.  Nothing noticed for a long
+    # time because nothing in the machine's own text contains one; what it broke was the
+    # DIVE name editor's caret, which was an underscore and therefore invisible, and any
+    # card or tone name with a '_' in it -- which the R-8 conversions are full of.
+    # The bottom row, full width, is what the real HD44780 A00 table has here.
+    '_': ('.....', '.....', '.....', '.....', '.....', '.....', '.....', '#####'),
 }
 
 

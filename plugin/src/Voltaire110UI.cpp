@@ -144,6 +144,33 @@ public:
             { cartListDir("."); m_menu = Menu::CartFile; }
         }
 
+        // And a field with the keyboard, because the caret blinks on a TIMER and a page
+        // that can only be reached by clicking is a page whose timer nobody ever watched.
+        // There are two carets and they are drawn by different code:
+        //   VOLTAIRE_CARET=bank  the new-bank row, the one text field that is always there
+        //   VOLTAIRE_CARET=name  DIVE -> Common -> Patch Name, edited in place
+        if (const char *k = std::getenv("VOLTAIRE_CARET"))
+        {
+            if (sameName(k, "name"))
+            {
+                m_diveOpen = true;
+                m_diveTab1 = voltaire::panel::TAB_COMMON;
+                m_diveNeedRead = true;
+                m_nameEdit = true;
+                std::snprintf(m_nameBuf, sizeof(m_nameBuf), "%s", "Caret");
+                m_nameCaret = int(std::strlen(m_nameBuf));
+                setSize(DISTRHO_UI_DEFAULT_WIDTH,
+                        uint(DISTRHO_UI_DEFAULT_WIDTH * designHeight()
+                             / voltaire::panel::kDesignWidth));
+            }
+            else
+            {
+                m_menu = Menu::BankPick;
+                m_typing = Typing::NewBank;
+                m_typeBuf[0] = '\0';
+            }
+        }
+
         // The credits are one string with newlines in it, because that is what a text
         // file is; split once here rather than on every frame.
         for (const char *p = voltaire::kAboutText; *p != '\0'; )

@@ -528,6 +528,7 @@ at the 16-bit output so the two ends can be compared sample for sample.
 
 ```sh
 cd plugin && make            # core + standalone, LV2, CLAP, VST3
+make win                     # cross-build the Windows CLAP and VST3 (mingw-w64)
 make selftest                # load the built LV2 and prove it makes sound
 ```
 
@@ -800,7 +801,7 @@ on account of it, and is left that way on purpose — an audit tuned until it pa
 being an audit. Not zero, and worth knowing. Continuous data must not go this way -- a VU meter at 30 Hz
 would be 60 allocations a second, forever, which is why meters stay on control ports.
 
-### `[!]` Two patches to DPF, for one hole in two backends
+### `[!]` Patches to DPF, for one hole in three backends
 
 `updateStateValue()` -- the DSP->UI channel -- is implemented for LV2, AU and Carla, and
 **not for the JACK standalone or VST3**, which pass `nullptr` for the callback.
@@ -823,13 +824,47 @@ gives CLAP the same ring, and `make selftest` now ends by running a real CLAP ho
 (`tools/clap_selftest.c`) against the built plugin and failing if the UI decodes no panel
 updates. With the patch reversed it reports zero; with it in, 32.
 
-**VST3 still has no path**, so its panel will not update. That target is already documented
-as built-but-untested.
+**VST3 had no path either, and one more problem underneath it.** `DistrhoPluginVST3.cpp`
+passed a plain `nullptr` for the callback, so every push answered false for the life of the
+plugin: blank LCD, and the PATCH, TONE and CART lists frozen at whatever they held when the
+window opened. `0006-vst3-dsp-to-ui-state.patch` gives it the same ring, drained on the
+`"idle"` message the view sends -- `sendStateSetToUI()` asks the HOST to allocate a message
+object, so it can no more be called from `run()` than `malloc` can.
 
-The patch lives in `plugin/patches/` and `make` applies it to the submodule, idempotently,
-before building. DPF is not forked -- a fresh clone gets upstream DPF and the patch on top,
-and if upstream ever moves under it the build says so rather than silently producing a
-plugin whose panel does not update.
+The ring alone would not have worked, because of something that only bites a plugin shaped
+like this one. DPF gives VST3 a **separate edit controller** unless
+`DISTRHO_PLUGIN_WANT_DIRECT_ACCESS` is set, and `dpf_edit_controller::initialize()` then does
+`new PluginVst3` of its own. For most plugins that is a few floats. Here a `Plugin` is an
+emulated machine: measured with `tools/vst3_selftest.cpp`, a session booted **three** U-110s
+where a single component boots two -- and one of those two is DPF's static metadata instance
+that every format pays for. So a VST3 instance was carrying a whole second machine, ROMs and
+all, that never made a sound.
+
+Worse than the waste: the second machine was the one the UI read from. `updateStateValue()`
+is called from `run()`, which is the component's instance, while the view connection lives on
+the controller's -- and the open-time snapshot of patch and tone lists came from the
+controller's. The lists described a U-110 that had never played a note or been handed a card.
+`0005-vst3-single-component.patch` settles it for VST3 alone, by making the component answer
+`IEditController` itself. `WANT_DIRECT_ACCESS` cannot be used to ask for this: it also puts
+`instance-access` into the LV2 manifest, where it would make the LV2 UI refuse to open in a
+host that cannot hand over a pointer.
+
+`make vst3check` runs `tools/vst3_selftest.cpp` -- a real VST3 host: host application (so
+messages can be created at all), run loop (the Linux view registers a timer through the frame
+and idles nowhere else), component handler, parameter queues, and a real X window to attach
+the editor into. It fails on a dead channel, a separate controller, or a leaked message. With
+`0006` reversed it reports 0 panel updates and the plugin logs 5 `REJECTED`; with both in, 34
+and none.
+
+One thing that host got wrong first, worth writing down: the controller-to-view link is **not
+the host's to make**. `create_view()` connects the two itself before it returns, and
+`dpf_ui_connection_point::connect()` asserts that it has no peer yet -- so a host that
+helpfully connects them again breaks the channel it was setting up.
+
+The patches live in `plugin/patches/` and `make` applies them to the submodule,
+idempotently, before building. DPF is not forked -- a fresh clone gets upstream DPF and the
+patches on top, and if upstream ever moves under them the build says so rather than silently
+producing a plugin whose panel does not update.
 
 ## The self check, and what the LCD says when there is no machine
 

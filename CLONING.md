@@ -212,11 +212,11 @@ will simply stay blank in whichever format lost its patch, which is a much more
 confusing symptom than a failed compile — so if you see the warning, stop and fix
 it.
 
-### The three patches
+### The five patches
 
-Two of them are the same bug in two places. `updateStateValue()` is DPF's DSP→UI
+Three of them are the same bug in three places. `updateStateValue()` is DPF's DSP→UI
 channel — how the emulated machine's display reaches the panel that draws it — and
-two of the four backends we build did not carry it.
+three of the four backends we build did not carry it.
 
 - **`0001-jack-dsp-to-ui-state.patch`** — `PluginJack`'s constructor passes
   `nullptr` where the callback belongs. Without this the standalone builds, runs
@@ -236,10 +236,28 @@ two of the four backends we build did not carry it.
   `d_stdout()` left in `DistrhoPluginInternal.hpp`. Cosmetic; it fires on every
   state update, which is often.
 
-`make selftest` now ends by running a real CLAP host against the built plugin
-(`plugin/tools/clap_selftest.c`) and failing if the UI decodes no panel updates,
-so this particular silence cannot come back unnoticed. **VST3 still has no path**
-and its panel will not update; that target is documented as built-but-untested.
+- **`0006-vst3-dsp-to-ui-state.patch`** — the third time, in VST3, where there was
+  no wiring at all: `DistrhoPluginVST3.cpp` passed a plain `nullptr`. Same ring,
+  drained on the `"idle"` message the view sends, because `sendStateSetToUI()` asks
+  the *host* to allocate a message object and so cannot be called from `run()`.
+- **`0005-vst3-single-component.patch`** — what had to be true first. DPF gives
+  VST3 a **separate edit controller** unless `DISTRHO_PLUGIN_WANT_DIRECT_ACCESS` is
+  set, and a separate controller constructs a `PluginVst3` of its own. For most
+  plugins that is a few floats; here a plugin instance is an emulated machine, so a
+  VST3 instance carried a second U-110 — ROMs, CPU, five-second boot — that never
+  made a sound. It was also the one the UI read its patch and tone lists from,
+  while `updateStateValue()` came from the component's instance, so no queue in one
+  could be drained by the other. This makes the component answer `IEditController`
+  itself, which is VST3's ordinary "single component effect".
+  `WANT_DIRECT_ACCESS` is not a way to ask for this: it also puts `instance-access`
+  into the LV2 manifest, where it would make the LV2 UI refuse to open in a host
+  that cannot hand over a pointer.
+
+`make selftest` now ends by running a real CLAP host and a real VST3 host against
+the built plugin (`plugin/tools/clap_selftest.c`, `plugin/tools/vst3_selftest.cpp`)
+and failing if the UI decodes no panel updates, so this particular silence cannot
+come back unnoticed. The VST3 one also fails if the factory offers a separate
+controller, or if a host message is leaked.
 
 ### Why `plugin/dpf` always shows as modified
 
@@ -296,6 +314,7 @@ That is the whole build. In order, it:
    `tools/build_core.sh`, which also runs MAME's own `mcs96make.py` opcode
    generator rather than checking generated files in;
 4. links the four targets — LV2, VST3, CLAP, and the JACK standalone;
+   (`make win` cross-builds the Windows CLAP and VST3 instead; see below)
 5. generates the LV2 manifest, which has to happen *after* the UI is linked or
    hosts report the plugin has no custom UI.
 
@@ -316,10 +335,10 @@ matched malloc/free counts. Both build first, so they are also a fine way to say
 
 ### Building for Windows
 
-The Windows deliverable is the **CLAP**, cross-compiled from Linux with
-mingw-w64. One extra package, and nothing else — DPF pulls in no third-party
-libraries on Windows: OpenGL is `opengl32`, the window is raw Win32 through
-PUGL, and the rest is the mingw runtime.
+The Windows deliverables are the **CLAP** and the **VST3**, cross-compiled from
+Linux with mingw-w64. One extra package, and nothing else — DPF pulls in no
+third-party libraries on Windows: OpenGL is `opengl32`, the window is raw Win32
+through PUGL, and the rest is the mingw runtime.
 
 ```sh
 sudo apt install g++-mingw-w64-x86-64
@@ -334,9 +353,21 @@ the core has to be built `-posix` too or libstdc++ ends up with two
 irreconcilable opinions about `std::mutex`. `tools/build_core.sh` passes it
 when it sees a mingw target.
 
-The product is `plugin/bin-win/Voltaire110.clap` — a single DLL with a `.clap`
-extension, statically linked against libgcc and libstdc++, so it carries no
-runtime dependency beyond Windows itself.
+The products are `plugin/bin-win/Voltaire110.clap` — a single DLL with a `.clap`
+extension — and `plugin/bin-win/Voltaire110.vst3/Contents/x86_64-win/Voltaire110.vst3`,
+which really is a DLL named `.vst3` inside a bundle directory also named `.vst3`;
+that is the format's own doing. Both are statically linked against libgcc and
+libstdc++, so they carry no runtime dependency beyond Windows itself, and `make
+win` now *checks* that with `objdump` rather than trusting it: a plugin that
+silently wants `libstdc++-6.dll` beside it gets "could not load" from the host and
+nothing more useful.
+
+**One thing was genuinely Windows-only, and it was not VST3's fault.**
+`clock_gettime` is declared in mingw-w64's `<time.h>` but lives in libwinpthread
+rather than the C runtime, so five call sites in the UI failed to link with no hint
+that the cause was a missing library and not a typo. It had broken the Windows CLAP
+too. `std::chrono::steady_clock` needs no library on any platform, which is what
+those call sites use now.
 
 Nothing about the plugin is conditional on the platform; the same sources build.
 What `make win` is really doing is keeping the two builds' intermediates apart —
@@ -347,7 +378,7 @@ wrong architecture without a word of complaint.
 
 There is no Windows standalone and no Windows LV2 here. Both are reachable —
 DPF has an RtAudio backend for the standalone — but neither was the ask, and
-`make win` builds `clap` only.
+`make win` builds `clap` and `vst3` only.
 
 ### Where it goes on Windows
 
@@ -361,6 +392,21 @@ CLAP hosts scan two directories, and either works:
 Drop `Voltaire110.clap` in one of them, no installer and no registration. FL
 Studio finds it on its next plugin scan; it also has its own extra-search-paths
 setting if you would rather keep it somewhere else.
+
+VST3 has one standard location, and what goes there is the whole **bundle
+directory**, not the DLL inside it:
+
+| | Path |
+|---|---|
+| Just you | `%LOCALAPPDATA%\Programs\Common\VST3\` |
+| Everyone on the machine | `C:\Program Files\Common Files\VST3\` |
+
+Copy `Voltaire110.vst3` — the directory, with its `Contents\x86_64-win\`
+inside — into one of those. Copying only the inner file out of the bundle does
+not work; a host looks for the directory.
+
+On Linux the same applies to `~/.vst3/`: copy or symlink the
+`plugin/bin/Voltaire110.vst3` directory there.
 
 ### Where the Windows build looks for ROMs
 

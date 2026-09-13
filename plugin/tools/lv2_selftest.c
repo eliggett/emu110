@@ -51,6 +51,24 @@ static const struct { int len; unsigned char b[16]; } kFxSetup[] = {
     { 11, { 0xf0, 0x41, 0x0f, 0x23, 0x12, 0x00, 0x01, 0x18, 0x14, 0x53, 0xf7 } },  /* output mode 21 */
 };
 
+/* Roland RQ1 reads, sent from the HOST rather than through the DIVE editor, so the answers
+ * go out of MIDI OUT instead of being swallowed as DIVE replies.  Enabled with a fifth
+ * argument of "midiout".
+ *
+ * This is the only way to make the machine talk: it sends nothing unprompted, so without a
+ * request there is no MIDI OUT to check and the reassembly added in sendMidiOut() would go
+ * untested.  Each answer is a DT1 -- one SysEx of eleven bytes -- and the point is that it
+ * arrives as ONE atom rather than eleven.
+ *
+ * F0 41 0F 23 11 <addr 3> <size 3> <sum> F7, the checksum over address and size summing to
+ * zero in seven bits.  Address 00 01 nn is the patch-common block. */
+static const struct { int len; unsigned char b[16]; } kRq1Reads[] = {
+    { 13, { 0xf0, 0x41, 0x0f, 0x23, 0x11, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x7e, 0xf7 } },
+    { 13, { 0xf0, 0x41, 0x0f, 0x23, 0x11, 0x00, 0x01, 0x18, 0x00, 0x00, 0x01, 0x66, 0xf7 } },
+    { 13, { 0xf0, 0x41, 0x0f, 0x23, 0x11, 0x00, 0x01, 0x19, 0x00, 0x00, 0x01, 0x65, 0xf7 } },
+    { 13, { 0xf0, 0x41, 0x0f, 0x23, 0x11, 0x00, 0x01, 0x1a, 0x00, 0x00, 0x01, 0x64, 0xf7 } },
+};
+
 /* The panel, as the UI receives it: the plugin's PanelBlob, hex, inside a key/value
  * atom.  Decoding it here rather than scanning for a run of hex characters means the
  * test breaks LOUDLY if the struct grows, instead of quietly reading the wrong field. */
@@ -128,6 +146,45 @@ static void put_keyvalue(LV2_Atom_Sequence *seq, uint32_t urid_kv,
 /* Read whatever the plugin put on its events-out port: MIDI for the host, key/value
  * messages for the UI.  Every one of those is "key\0value\0", so read it as one rather
  * than hunting through the payload for something that looks right. */
+/* Total length of a MIDI message with this status byte, or 0 for SysEx and the undefined
+ * statuses.  A copy of the plugin's own table on purpose: a check that shares the table
+ * with the thing it checks only proves the two agree. */
+static long midi_expected_len(unsigned char status)
+{
+    switch (status & 0xf0) {
+    case 0x80: case 0x90: case 0xa0: case 0xb0: case 0xe0: return 3;
+    case 0xc0: case 0xd0:                                  return 2;
+    default: break;
+    }
+    switch (status) {
+    case 0xf1: case 0xf3: return 2;
+    case 0xf2:            return 3;
+    case 0xf6:            return 1;
+    default:              return status >= 0xf8 ? 1 : 0;
+    }
+}
+
+long g_midi_out_malformed = 0;
+
+/* One atom must be one COMPLETE MIDI message.  The machine sends a byte at a time -- that
+ * is what the UART does -- so for a long time each byte went out as its own atom: a lone
+ * 0xF0 is not a message, and a host parsing it has no way to know that. */
+static void check_midi_message(const unsigned char *d, uint32_t size)
+{
+    long want;
+    if (size == 0 || d[0] < 0x80) { g_midi_out_malformed++; return; }
+    if (d[0] == 0xf0) {
+        /* SysEx: any length, but it has to be terminated, and F7 may not appear early. */
+        uint32_t i;
+        if (size < 2 || d[size - 1] != 0xf7) { g_midi_out_malformed++; return; }
+        for (i = 1; i + 1 < size; i++)
+            if (d[i] >= 0x80) { g_midi_out_malformed++; return; }
+        return;
+    }
+    want = midi_expected_len(d[0]);
+    if (want == 0 || (uint32_t)want != size) g_midi_out_malformed++;
+}
+
 static void absorb_events_out(void *ev_out, uint32_t urid_midi,
                               long *n_state, long *n_midi)
 {
@@ -135,7 +192,12 @@ static void absorb_events_out(void *ev_out, uint32_t urid_midi,
     LV2_ATOM_SEQUENCE_FOREACH(os, e)
     {
         const char *key, *val;
-        if (e->body.type == urid_midi) { if (n_midi) (*n_midi)++; continue; }
+        if (e->body.type == urid_midi) {
+            check_midi_message((const unsigned char *)LV2_ATOM_BODY_CONST(&e->body),
+                               e->body.size);
+            if (n_midi) (*n_midi)++;
+            continue;
+        }
         if (n_state) (*n_state)++;
         key = (const char *)LV2_ATOM_BODY_CONST(&e->body);
         val = key + strlen(key) + 1;
@@ -398,6 +460,7 @@ int main(int argc, char **argv)
     const int want_load_test  = (argc > 5) && strcmp(argv[5], "load") == 0;
     const int want_meter_test = (argc > 5) && strcmp(argv[5], "meter") == 0;
     const int want_card_test  = (argc > 5) && strcmp(argv[5], "cards") == 0;
+    const int want_midiout    = (argc > 5) && strcmp(argv[5], "midiout") == 0;
     int patch_checks = 0, patch_pass = 0;
 
     /* The stereo meter and its peak-hold marker, as OUTPUT control ports.  A host reads
@@ -466,7 +529,7 @@ int main(int argc, char **argv)
          * machine's own menus, and this proves the whole loop from a host control port
          * through to the LCD. */
         btn[1] = (!want_fx && !want_patch_test && !want_tone_test && !want_write_test
-                  && !want_load_test && !want_meter_test && !want_card_test
+                  && !want_load_test && !want_meter_test && !want_card_test && !want_midiout
                   && done >= (long)(7.0 * RATE) && done < (long)(8.0 * RATE)) ? 1.0f : 0.0f;
 
         if (want_fx) {
@@ -481,6 +544,23 @@ int main(int argc, char **argv)
                 memcpy(LV2_ATOM_BODY(&e->body), kFxSetup[step].b, kFxSetup[step].len);
                 seq->atom.size += (uint32_t)lv2_atom_pad_size(
                         sizeof(LV2_Atom_Event) + kFxSetup[step].len);
+            }
+        }
+        if (want_midiout) {
+            /* One read per block from 10 s.  Spread out rather than sent together, because
+             * a reply that straddles two blocks is exactly the case the byte-at-a-time
+             * assembler has to get right, and back-to-back requests are how that happens. */
+            const long step = (done - (long)(10.0 * RATE)) / BLOCK;
+            if (step >= 0 && step < (long)(sizeof(kRq1Reads)/sizeof(kRq1Reads[0])) &&
+                ((done - (long)(10.0 * RATE)) % BLOCK) == 0) {
+                LV2_Atom_Event *e = (LV2_Atom_Event *)((char *)
+                        LV2_ATOM_CONTENTS(LV2_Atom_Sequence, seq));
+                e->time.frames = 0;
+                e->body.type = urid_midi;
+                e->body.size = (uint32_t)kRq1Reads[step].len;
+                memcpy(LV2_ATOM_BODY(&e->body), kRq1Reads[step].b, kRq1Reads[step].len);
+                seq->atom.size += (uint32_t)lv2_atom_pad_size(
+                        sizeof(LV2_Atom_Event) + kRq1Reads[step].len);
             }
         }
         if (want_stream) {
@@ -1226,6 +1306,14 @@ int main(int argc, char **argv)
              100.0 * (double)slow_midi_lit / (double)(slow_total ? slow_total : 1), slow_total); }
     printf("events-out: %ld state blobs to the UI, %ld MIDI atoms to the host\n",
            state_atoms, midi_out_atoms);
+    if (g_midi_out_malformed != 0)
+        printf("events-out: FAILED -- %ld of those were not a complete MIDI message\n",
+               g_midi_out_malformed);
+    else if (midi_out_atoms != 0)
+        printf("events-out: every MIDI atom was one complete message\n");
+    if (want_midiout && midi_out_atoms == 0)
+        printf("events-out: FAILED -- asked the machine to read %d addresses and it "
+               "answered nothing\n", (int)(sizeof(kRq1Reads)/sizeof(kRq1Reads[0])));
 
     if (want_tone_test)
     {
@@ -1488,5 +1576,6 @@ int main(int argc, char **argv)
         printf("wrote %s\n", wav);
     }
     free(pcm);
-    return peak > 0 ? 0 : 1;
+    return (peak > 0 && g_midi_out_malformed == 0
+            && !(want_midiout && midi_out_atoms == 0)) ? 0 : 1;
 }

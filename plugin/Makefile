@@ -228,6 +228,15 @@ selftest: all
 		"https://github.com/eliggett/emu110/voltaire110" build/lv2_meter.wav 0 meter \
 		2>&1 | grep -E "^meter:"
 	@echo
+	@# MIDI OUT, which needs provoking: the machine says nothing unprompted, so this mode
+	@# sends RQ1 reads from the host and checks that each answer arrives as ONE complete
+	@# SysEx.  It used to arrive as eleven atoms of one byte each, none of them a valid
+	@# message -- 33 for three replies, and every format was expected to make sense of it.
+	@U110_DATA_DIR=$${U110_DATA_DIR:-$(CURDIR)/..} build/lv2_selftest \
+		bin/$(NAME).lv2/$(NAME)_dsp.so \
+		"https://github.com/eliggett/emu110/voltaire110" build/lv2_midiout.wav 0 midiout \
+		2>&1 | grep -E "^events-out:"
+	@echo
 	@U110_DATA_DIR=$${U110_DATA_DIR:-$(CURDIR)/..} build/lv2_selftest \
 		bin/$(NAME).lv2/$(NAME)_dsp.so \
 		"https://github.com/eliggett/emu110/voltaire110" build/lv2_cards.wav 0 cards \

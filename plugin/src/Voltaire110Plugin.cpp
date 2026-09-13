@@ -2338,6 +2338,12 @@ private:
     {
         // The U-110 sends nothing unprompted -- no active sensing, no keyboard -- so this
         // is empty except after a SysEx request or a bulk dump.
+        //
+        // The arena is reset here and not in emitMidiMessage() because a long message's
+        // bytes have to stay put until run() returns; see the note on it below.  run()
+        // calls this once, at the end, which is what makes one reset per call correct.
+        m_midiArenaUsed = 0;
+
         uint8_t buf[256];
         uint32_t offs[256];
         const size_t n = m_core.midiOut(buf, sizeof(buf), offs);
@@ -2347,18 +2353,175 @@ private:
             // machine says nothing unprompted, and a read lasts a few milliseconds per
             // value, so swallowing the stream for that long costs the host nothing it
             // would otherwise have received.
+            //
+            // Anything half-assembled is abandoned rather than carried across the
+            // boundary: the bytes on the far side belong to the reply, and joining the two
+            // halves would hand the host one message made of two.
             if (m_diveBusy)
             {
+                m_midiMsgLen = 0;
+                m_midiSysex = false;
                 diveReplyByte(buf[i]);
                 continue;
             }
-            MidiEvent ev;
-            ev.frame = 0;
-            ev.size = 1;
-            ev.data[0] = buf[i];
+            midiOutByte(buf[i]);
+        }
+    }
+
+    // ---- MIDI OUT, reassembled into whole messages -----------------------------------
+    //
+    // The core hands over BYTES, because a byte at a time is what the firmware writes to
+    // the UART.  What leaves the plugin has to be MESSAGES: all three APIs define one event
+    // as one complete MIDI message and none of them has anywhere to put half of one.
+    //
+    // Sending a byte per event was wrong in every format and differently wrong in each: an
+    // LV2 midi:MidiEvent atom holding a lone 0xF0 is not a valid message, and DPF's VST3
+    // writeMidi() switches on the status nibble and then reads data[1] and data[2] whether
+    // or not anything ever wrote them -- so a one-byte event left as a note-on carrying
+    // whatever happened to be beside it in the struct.
+    //
+    // It matters more on this machine than it would on most.  The U-110 says nothing
+    // unprompted, so everything that comes out of here is a SysEx reply or a bulk dump --
+    // long messages, which is exactly the case a per-byte event destroys.
+
+    /// Total length of a message with this status byte, or 0 if it has no fixed length
+    /// (SysEx) or no meaning.
+    static size_t midiMessageLength(const uint8_t status)
+    {
+        switch (status & 0xf0)
+        {
+        case 0x80: case 0x90: case 0xa0: case 0xb0: case 0xe0: return 3;
+        case 0xc0: case 0xd0:                                  return 2;
+        default: break;                                        // 0xf0: below
+        }
+        switch (status)
+        {
+        case 0xf1: case 0xf3: return 2;     // MTC quarter frame, song select
+        case 0xf2:            return 3;     // song position
+        case 0xf6:            return 1;     // tune request
+        default:              return 0;     // 0xf0 SysEx, and the undefined 0xf4/0xf5
+        }
+    }
+
+    void midiOutByte(const uint8_t b)
+    {
+        // System real-time is allowed to arrive in the middle of anything, including a
+        // SysEx, and does not disturb it.
+        if (b >= 0xf8)
+        {
+            const uint8_t one = b;
+            emitMidiMessage(&one, 1);
+            return;
+        }
+
+        if (b == 0xf7)                      // end of SysEx
+        {
+            if (m_midiSysex && m_midiMsgLen < sizeof(m_midiMsg))
+            {
+                m_midiMsg[m_midiMsgLen ++] = b;
+                emitMidiMessage(m_midiMsg, m_midiMsgLen);
+            }
+            m_midiMsgLen = 0;
+            m_midiSysex = false;
+            return;
+        }
+
+        if (b >= 0x80)                      // any other status starts a new message
+        {
+            m_midiSysex = b == 0xf0;
+            m_midiMsg[0] = b;
+            m_midiMsgLen = 1;
+            // Running status survives a channel message and is cancelled by a system one,
+            // which is what the spec says and what every other parser on the wire assumes.
+            m_midiStatus = b < 0xf0 ? b : 0;
+            m_midiWant = m_midiSysex ? 0 : midiMessageLength(b);
+            if (m_midiWant == 1)
+            {
+                emitMidiMessage(m_midiMsg, 1);
+                m_midiMsgLen = 0;
+            }
+            return;
+        }
+
+        // A data byte.  With nothing in progress it belongs to the last status seen --
+        // running status, which this machine is not known to use but which costs three
+        // lines to honour and silently loses notes if it is not.
+        if (m_midiMsgLen == 0)
+        {
+            if (m_midiStatus == 0)
+                return;                     // orphan: no status has been seen yet
+            m_midiMsg[0] = m_midiStatus;
+            m_midiMsgLen = 1;
+            m_midiWant = midiMessageLength(m_midiStatus);
+        }
+
+        if (m_midiMsgLen >= sizeof(m_midiMsg))
+        {
+            // A SysEx longer than the buffer.  Dropped whole rather than truncated: a
+            // short dump that claims to be complete is worse for whoever receives it than
+            // no dump at all.
+            noteMidiOutDropped();
+            m_midiMsgLen = 0;
+            m_midiSysex = false;
+            return;
+        }
+        m_midiMsg[m_midiMsgLen ++] = b;
+
+        if (!m_midiSysex && m_midiWant != 0 && m_midiMsgLen >= m_midiWant)
+        {
+            emitMidiMessage(m_midiMsg, m_midiMsgLen);
+            m_midiMsgLen = 0;               // m_midiStatus stays: that is running status
+        }
+    }
+
+    void emitMidiMessage(const uint8_t *const data, const size_t n)
+    {
+        MidiEvent ev;
+        // Frame 0, deliberately.  The core reports an offset per byte, but in CORE samples,
+        // and what the host wants is host frames after a resampler with its own latency.
+        // For SysEx -- which is all this machine sends -- the offset carries no musical
+        // meaning anyway, so a wrong number would be worse than an honest zero.
+        ev.frame = 0;
+        ev.size = uint32_t(n);
+
+        if (n <= MidiEvent::kDataSize)
+        {
+            std::memset(ev.data, 0, sizeof(ev.data));
+            std::memcpy(ev.data, data, n);
             ev.dataExt = nullptr;
             writeMidiEvent(ev);
+            return;
         }
+
+        // DPF only promises to keep a dataExt pointer valid "during the entirety of the run
+        // function", which means the host may not have copied it yet when this returns --
+        // so a single scratch buffer cannot be reused for a second long message in the same
+        // block.  Hence an arena with a cursor, reset once per run().  It is sized for one
+        // maximum message plus a core buffer's worth, which is the most that can complete
+        // in one call.
+        if (m_midiArenaUsed + n > sizeof(m_midiArena))
+        {
+            noteMidiOutDropped();
+            return;
+        }
+        uint8_t *const at = m_midiArena + m_midiArenaUsed;
+        std::memcpy(at, data, n);
+        m_midiArenaUsed += n;
+
+        std::memcpy(ev.data, data, MidiEvent::kDataSize);
+        ev.dataExt = at;
+        writeMidiEvent(ev);
+    }
+
+    /// Said once, from the audio thread, about something that should not be reachable: a
+    /// message longer than the buffer built for the largest dump the machine can produce.
+    /// One fprintf on a path that never runs is worth more than silence would be.
+    void noteMidiOutDropped()
+    {
+        if (m_midiDropped ++ == 0)
+            std::fprintf(stderr,
+                    "Voltaire 110: a MIDI OUT message was too long to send and was "
+                    "dropped (limit %zu bytes)\n", sizeof(m_midiMsg));
     }
 
     // ---- cards, and the rest of what a session has to remember ---------------------
@@ -3119,6 +3282,22 @@ private:
 
     PanelBlob m_lastBlob = {};
     char m_blobHex[sizeof(PanelBlob) * 2 + 1] = { 0 };
+
+    // ---- MIDI OUT reassembly.  See sendMidiOut() for what this is for.
+    //
+    // 16 KB is far more than any single Roland dump message: the U-110's bulk dumps are
+    // chunked into messages of a few hundred bytes, and one patch record is 0x74.  The
+    // arena holds one maximum message plus a core buffer's worth, which bounds what can
+    // complete inside one run().
+    static constexpr size_t kMidiMsgMax = 16384;
+    uint8_t  m_midiMsg[kMidiMsgMax] = { 0 };
+    size_t   m_midiMsgLen = 0;          ///< bytes of m_midiMsg assembled so far
+    size_t   m_midiWant = 0;            ///< total length expected, 0 while in a SysEx
+    uint8_t  m_midiStatus = 0;          ///< last channel status, for running status
+    bool     m_midiSysex = false;
+    uint8_t  m_midiArena[kMidiMsgMax + 256] = { 0 };
+    size_t   m_midiArenaUsed = 0;
+    unsigned m_midiDropped = 0;
     uint32_t m_publishAccum = 0;
     uint32_t m_publishPeriod = 2400;
 

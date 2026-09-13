@@ -977,6 +977,23 @@ splash reaches `LCD cmd 0x80` (set cursor to position 0) and stops. Note the int
 enabled through `INT_MASK` bit 4 while `IOC1` bit 1 stays **clear**, so `EXTINT` remains
 available to IC15 at the same time; the two are independent sources and both are in use.
 
+#### The firmware never uses the controller's cursor `[C]`
+
+The display on/off command (`0000 1DCB`) is the controller's own cursor and blink control,
+and the firmware writes exactly two values to it, ever: `0x08` once — display off, during
+init — and `0x0C` thereafter, which is **display on, cursor off, blink off**. Measured over
+boot, a deliberate walk of the PATCH menus, and 600 random button presses covering most of
+the tree: 1968 LCD commands, of which 200 were `0x0C`, one `0x08`, and one `0x0E`.
+
+So the blinking selected item of §5.3.4 is not a hardware cursor. The firmware does it by
+**rewriting DDRAM** — which is why an emulator that mirrors DDRAM reproduces the blink for
+free, and why it is visible in a text snapshot only half the time.
+
+The practical consequence is for anything downstream: `voltaire::PanelState` carries
+`cursor_pos` and `cursor_flags`, and no emulated cursor will ever move them, because the
+hardware's cursor is switched off for the whole life of the machine. They are a stub, and
+the plugin's own name-edit caret is drawn by the plugin rather than taken from them.
+
 ---
 
 MIDI baud comes from the CPU's own serial port: `BAUD_RATE` is loaded with `0x8005`,
@@ -993,4 +1010,4 @@ divisor 6, giving `12 MHz / (64 x 6)` = **31250 baud** exactly.
 | 3 | Exact `/CS1`, `/CS2`, `/CS4`, `/CS5` assignments | The firmware never touches them; harmless, but the map is incomplete. `/CS6` is resolved: it covers `0x1F00-0x1FFF`, the output control chip |
 | 4 | ~~What `PORT1` bit 4 drives~~ | **SOLVED** `[C]` — nothing. It is a **tone-generator busy flag** the firmware keeps in the port register: cleared entering the start-a-note routine (`0xC0EC`), set once the voice queues drain (`0x6AFE`) and after the LSI init spin (`0xB759`), read back with `jbs port1,4` at `0x6AF1`. `ROM-ANALYSIS.md` §6.9. Not harmless while it was open: all three writes are read-modify-write instructions on the port carrying the card-presence pins, which is how a defect in the emulated CPU's port model hid there |
 | 5 | ~~Field meaning of the eight output-routing bytes~~ | **SOLVED** `[C]` — each byte is a 6-bit output mask (bit k → output k+1); all eight are block-copied from the 50-entry preset table at `0xA8B6` by the routine at `0xB721`, indexed by patch header byte `+0x0E`. See §5.1 |
-| 6 | Which LCD controller the panel actually uses | Unidentified, and no CGROM dump exists. The emulator substitutes a synthesised font purely for legibility |
+| 6 | Which LCD controller the panel actually uses | Unidentified, and no CGROM dump exists. The emulator substitutes a synthesised font purely for legibility. `[C]` One glyph in that substitute was wrong for a long time and it is worth knowing why: MatrixSans puts the **underscore below the baseline**, and the nine-rows-to-eight fold clips descenders — for `_` the clipped row was the only row it had, so `0x5F` came out byte-identical to a space. Nothing in the machine's own text contains one, so it surfaced only through card tone names (the R-8 conversions are full of them: `CLSD_H2`, `808_T`) and through the plugin's name-edit caret, which was an underscore and therefore invisible. Now hand-corrected to the bottom row, which is what the real HD44780 A00 table has there |

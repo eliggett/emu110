@@ -89,7 +89,7 @@ product name and describe the lineage in prose.
 | **LV2** | Ardour on Linux — the primary development host | ship |
 | **CLAP** | FL Studio; the best-designed of the three | ship |
 | **Standalone** | daily dev loop, and a first-class deliverable (§2.1) | ship |
-| **VST3** | free from the same DPF build; covers Ardour and older FL | ship, labelled untested |
+| **VST3** | free from the same DPF build; covers Ardour and older FL | ship (Linux and Windows) |
 | **AU / macOS** | deferred until a macOS volunteer appears | later |
 | **VST2** | SDK withdrawn 2018, no legitimate distribution path | never |
 | **AAX** | requires a paid Avid agreement and their signing | never |
