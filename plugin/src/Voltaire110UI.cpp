@@ -484,6 +484,8 @@ protected:
 
     void uiIdle() override
     {
+        pumpCardReload();
+
         if (m_nameEdit || m_typing != Typing::None)
         {
             struct timespec ts;
@@ -647,6 +649,15 @@ protected:
         {
             closeCurrentMenu();
             m_hoverClose = false;
+            m_hoverCartReload = false;
+            repaint();
+            return true;
+        }
+
+        if (m_menu == Menu::Cart && ev.press
+                && cartReloadHit(float(ev.pos.getX()), float(ev.pos.getY())))
+        {
+            cartReloadSlots();
             repaint();
             return true;
         }
@@ -1252,6 +1263,9 @@ protected:
             const bool over = closeButtonHit(float(ev.pos.getX()), float(ev.pos.getY()));
             if (over != m_hoverClose)
             { m_hoverClose = over; repaint(); }
+            const bool onReload = cartReloadHit(float(ev.pos.getX()), float(ev.pos.getY()));
+            if (onReload != m_hoverCartReload)
+            { m_hoverCartReload = onReload; repaint(); }
         }
         else if (m_hoverClose)
             m_hoverClose = false;
@@ -2341,6 +2355,7 @@ private:
     {
         const CartLayout L = cartLayout(4, kCartSlotRows);
         drawCartOverlayFrame(L, "CARTRIDGE SLOTS");
+        drawCartReload(L);
 
         for (int i = 0; i < 4; i ++)
         {
@@ -3660,6 +3675,125 @@ private:
         return m_closeFor == m_menu && m_closeRect.w > 0.0f
                 && inRect(m_closeRect, px, py);
     }
+
+    /// RELOAD, on the cartridge slots page only, immediately left of the X.
+    ///
+    /// It re-sends the path each occupied slot already holds, which makes the DSP read the
+    /// file off disk again and take it through the full eject-and-remount (queueCardSet and
+    /// tickCards).  That is the whole job of reloading an image you have just rebuilt: the
+    /// eject is what makes the firmware re-resolve the parts using that slot, so a part
+    /// picks up the new bytes without the patch being touched.
+    HeaderRect cartReloadRect(const CartLayout &L) const
+    {
+        HeaderRect r;
+        r.h = L.rowH * kCloseSize;
+        r.w = r.h;
+        r.x = L.x + L.w - L.rowH * (0.35f + kCloseSize + 0.35f) - r.w;
+        r.y = L.y + L.rowH * 0.28f;
+        return r;
+    }
+
+    bool cartReloadHit(float px, float py) const
+    {
+        return m_menu == Menu::Cart && m_cartReloadRect.w > 0.0f
+                && inRect(m_cartReloadRect, px, py);
+    }
+
+    /// Is there anything to reload?  An all-empty rack has nothing to say yes to, and a
+    /// button that looks pressable and does nothing is worse than one that is plainly off.
+    bool anyCardPresent() const
+    {
+        for (int i = 0; i < 4; i ++)
+            if (m_cardSlots[i].present)
+                return true;
+        return false;
+    }
+
+    void drawCartReload(const CartLayout &L)
+    {
+        const HeaderRect r = cartReloadRect(L);
+        m_cartReloadRect = r;
+
+        const bool live = anyCardPresent();
+        const bool hot  = m_hoverCartReload && live;
+        beginPath();
+        roundedRect(r.x, r.y, r.w, r.h, r.h * 0.3f);
+        fillColor(hot ? Color(54, 104, 74) : Color(44, 46, 52));
+        fill();
+        strokeColor(hot ? Color(150, 226, 170)
+                        : (live ? Color(96, 102, 112) : Color(64, 68, 76)));
+        strokeWidth(1.0f);
+        stroke();
+
+        // A circular arrow, drawn rather than set: the panel font has no glyph for one.
+        // The head is placed on the tangent at the end of the sweep, so it points the way
+        // the arc travels instead of sitting beside it looking like a serif.
+        const float cx = r.x + r.w * 0.5f, cy = r.y + r.h * 0.5f;
+        const float rad = r.h * 0.26f;
+        const Color ink = hot ? Color(225, 255, 235)
+                              : (live ? Color(190, 195, 205) : Color(110, 115, 124));
+        const float a0 = 2.15f, a1 = a0 + 5.0f;     // most of a turn, gap at the top right
+        strokeColor(ink);
+        strokeWidth(std::max(1.5f, r.h * 0.13f));
+        beginPath();
+        arc(cx, cy, rad, a0, a1, Winding::CW);
+        stroke();
+
+        const float ca = std::cos(a1), sa = std::sin(a1);
+        const float px = cx + rad * ca, py = cy + rad * sa;   // tip sits on the arc
+        const float tx = -sa, ty = ca;                        // direction of travel
+        const float hl = r.h * 0.26f, hw = r.h * 0.17f;       // head length and half-width
+        beginPath();
+        moveTo(px + tx * hl, py + ty * hl);
+        lineTo(px - tx * hl * 0.15f + ca * hw, py - ty * hl * 0.15f + sa * hw);
+        lineTo(px - tx * hl * 0.15f - ca * hw, py - ty * hl * 0.15f - sa * hw);
+        closePath();
+        fillColor(ink);
+        fill();
+    }
+
+    /// Queue a reload of every occupied slot.
+    ///
+    /// The DSP takes ONE card change at a time and drops any that arrive while the first
+    /// is still in the machine (queueCardSet), and a change costs about 600 ms of eject,
+    /// wait, install, wait.  So this cannot simply fire four setState calls: it queues the
+    /// slots and uiIdle() sends them spaced out.  One card in one slot -- the normal case
+    /// -- goes immediately and the queue is empty before the next frame.
+    void cartReloadSlots()
+    {
+        m_reloadQueue = 0;
+        for (int i = 0; i < 4; i ++)
+            if (m_cardSlots[i].present && !m_cardSlots[i].path.empty())
+                m_reloadQueue |= 1u << i;
+        m_reloadAt = 0.0;                  // the first one goes on the next idle
+    }
+
+    /// Send the next queued reload once enough time has passed for the last to land.
+    void pumpCardReload()
+    {
+        if (m_reloadQueue == 0)
+            return;
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        const double now = double(ts.tv_sec) + ts.tv_nsec * 1e-9;
+        if (now < m_reloadAt)
+            return;
+        for (int i = 0; i < 4; i ++)
+            if (m_reloadQueue & (1u << i))
+            {
+                m_reloadQueue &= ~(1u << i);
+                if (m_cardSlots[i].present && !m_cardSlots[i].path.empty())
+                    cartSet(i, m_cardSlots[i].path);
+                m_reloadAt = now + kReloadGap;
+                m_dirty = true;
+                return;
+            }
+    }
+
+    /// Long enough for one card change to finish before the next is offered: tickCards()
+    /// measures the eject-and-remount at about 600 ms, and a dropped request would leave a
+    /// slot silently not reloaded.
+    static constexpr double kReloadGap = 0.85;
 
     /// What Escape does, so the X does the same thing rather than a second version of it.
     void closeCurrentMenu()
@@ -5915,6 +6049,10 @@ private:
     bool m_hoverBankZone = false;   ///< the pointer is over a row's bank, not its name
     bool m_hoverFieldOk = false;    ///< the pointer is over a field's OK button
     bool m_hoverClose = false;      ///< the pointer is over the palette's X
+    bool m_hoverCartReload = false; ///< ...or over RELOAD on the cartridge slots page
+    HeaderRect m_cartReloadRect {}; ///< set when that page draws, so the click can find it
+    unsigned m_reloadQueue = 0;     ///< slots RELOAD still has to re-send, one bit each
+    double   m_reloadAt = 0.0;      ///< not before this, so the DSP is not overrun
 
     /// Where the X was last drawn, and for which palette.
     HeaderRect m_closeRect { 0.0f, 0.0f, 0.0f, 0.0f };
